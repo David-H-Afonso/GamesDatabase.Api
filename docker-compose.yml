@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  games-api:
+    build: .
+    ports:
+      - "5000:80"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - DatabaseSettings__DatabasePath=/app/data/gamesdatabase.db
+      - CorsSettings__AllowedOrigins__0=http://localhost:3000
+      - CorsSettings__AllowedOrigins__1=http://localhost:4200
+      - CorsSettings__AllowedOrigins__2=http://192.168.0.32:3000
+      - CorsSettings__AllowedOrigins__3=http://192.168.0.32:4200
+    restart: unless-stopped
