@@ -4,3 +4,23 @@ GET {{GamesDatabase.Api_HostAddress}}/weatherforecast/
 Accept: application/json
 
 ###
+
+# Data Export - Exportar juegos como CSV
+GET {{GamesDatabase.Api_HostAddress}}/api/DataExport/games/csv
+Accept: text/csv
+
+###
+
+# Data Export - Importar juegos desde CSV
+POST {{GamesDatabase.Api_HostAddress}}/api/DataExport/games/csv
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="csvFile"; filename="games.csv"
+Content-Type: text/csv
+
+Name,Status,Platform,PlayWith,PlayedStatus,Released,Started,Finished,Score,Critic,Grade,Completion,Story,Comment
+"Test Game","En progreso","PC","Solo","Jugando","2024-01-01","2024-01-15","","","85","90","50","80","Un juego de prueba"
+--boundary--
+
+###
