@@ -26,6 +26,8 @@ public static class MappingExtensions
             PlayedStatusId = game.PlayedStatusId,
             Logo = game.Logo,
             Cover = game.Cover,
+            CreatedAt = game.CreatedAt,
+            UpdatedAt = game.UpdatedAt,
             StatusName = game.Status?.Name,
             PlatformName = game.Platform?.Name,
             PlayWithName = game.PlayWith?.Name,

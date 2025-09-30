@@ -12,6 +12,38 @@ public class GamesDbContext : DbContext
         ChangeTracker.LazyLoadingEnabled = false;
     }
 
+    public override int SaveChanges()
+    {
+        UpdateTimestamps();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        UpdateTimestamps();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void UpdateTimestamps()
+    {
+        var entries = ChangeTracker.Entries<Game>();
+
+        foreach (var entry in entries)
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.CreatedAt = DateTime.UtcNow;
+                entry.Entity.UpdatedAt = DateTime.UtcNow;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.UpdatedAt = DateTime.UtcNow;
+                // Prevent updating CreatedAt
+                entry.Property(e => e.CreatedAt).IsModified = false;
+            }
+        }
+    }
+
     public DbSet<Game> Games { get; set; }
     public DbSet<GamePlatform> GamePlatforms { get; set; }
     public DbSet<GamePlayWith> GamePlayWiths { get; set; }
@@ -50,6 +82,8 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.PlayedStatusId).HasColumnName("played_status_id");
             entity.Property(e => e.Logo).HasColumnName("logo");
             entity.Property(e => e.Cover).HasColumnName("cover");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 
             // Configure relationships
             entity.HasOne(e => e.Status)

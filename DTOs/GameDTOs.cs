@@ -20,6 +20,10 @@ public class GameDto
     public string? Logo { get; set; }
     public string? Cover { get; set; }
 
+    // Audit fields
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
     // Navigation properties simplificadas (solo datos básicos)
     public string? StatusName { get; set; }
     public string? PlatformName { get; set; }

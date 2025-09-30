@@ -42,6 +42,11 @@ public class GamesController : ControllerBase
             query = query.Where(g => g.StatusId == parameters.StatusId.Value);
         }
 
+        if (parameters.ExcludeStatusIds?.Length > 0)
+        {
+            query = query.Where(g => !parameters.ExcludeStatusIds.Contains(g.StatusId));
+        }
+
         if (parameters.PlatformId.HasValue)
         {
             query = query.Where(g => g.PlatformId == parameters.PlatformId.Value);
@@ -99,6 +104,8 @@ public class GamesController : ControllerBase
                 "released" => parameters.SortDescending ? query.OrderByDescending(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "started" => parameters.SortDescending ? query.OrderByDescending(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "finished" => parameters.SortDescending ? query.OrderByDescending(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
+                "createdat" or "created" => parameters.SortDescending ? query.OrderByDescending(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
+                "updatedat" or "updated" or "lastedited" => parameters.SortDescending ? query.OrderByDescending(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(g => g.Id) : query.OrderBy(g => g.Id),
                 _ => query.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")) // Default: orden alfabético case-insensitive
             };

@@ -16,6 +16,7 @@ public class QueryParameters
 public class GameQueryParameters : QueryParameters
 {
     public int? StatusId { get; set; }
+    public int[]? ExcludeStatusIds { get; set; }
     public int? PlatformId { get; set; }
     public int? PlayWithId { get; set; }
     public int? PlayedStatusId { get; set; }
