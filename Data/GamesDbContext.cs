@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using GamesDatabase.Api.Models;
+using static GamesDatabase.Api.Models.SpecialStatusType;
 
 namespace GamesDatabase.Api.Data;
 
@@ -80,6 +81,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Name).HasColumnName("name").IsRequired();
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
 
             entity.HasIndex(e => e.Name).IsUnique();
         });
@@ -92,6 +94,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Name).HasColumnName("name").IsRequired();
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
 
             entity.HasIndex(e => e.Name).IsUnique();
         });
@@ -104,6 +107,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Name).HasColumnName("name").IsRequired();
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
 
             entity.HasIndex(e => e.Name).IsUnique();
         });
@@ -116,8 +120,18 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Name).HasColumnName("name").IsRequired();
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
+            entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false);
+            entity.Property(e => e.StatusType)
+                .HasColumnName("status_type")
+                .HasConversion<int>();
 
             entity.HasIndex(e => e.Name).IsUnique();
+
+            // Ensure only one default status per status type
+            entity.HasIndex(e => new { e.StatusType, e.IsDefault })
+                .HasFilter("is_default = 1")
+                .IsUnique();
         });
     }
 }

@@ -30,8 +30,12 @@ public class GameStatusDto
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
     public bool IsActive { get; set; }
     public string Color { get; set; } = "#ffffff";
+    public bool IsDefault { get; set; }
+    public string StatusType { get; set; } = "None";
+    public bool IsSpecialStatus { get; set; }
 }
 
 public class GameStatusCreateDto
@@ -39,6 +43,8 @@ public class GameStatusCreateDto
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public string Color { get; set; } = "#ffffff";
+    // Optional initial sort order. If omitted, new status will be appended to the end.
+    public int? SortOrder { get; set; }
 }
 
 public class GameStatusUpdateDto
@@ -46,6 +52,29 @@ public class GameStatusUpdateDto
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; }
     public string Color { get; set; } = "#ffffff";
+    public bool? IsDefault { get; set; } // Optional for reassignment operations
+    public int? SortOrder { get; set; }
+}
+
+public class SpecialStatusDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string StatusType { get; set; } = string.Empty;
+    public bool IsDefault { get; set; }
+    public string Color { get; set; } = "#ffffff";
+}
+
+public class ReassignDefaultStatusDto
+{
+    public int NewDefaultStatusId { get; set; }
+    public string StatusType { get; set; } = "NotFulfilled";
+}
+
+public class ReorderStatusesDto
+{
+    // Ordered list of status IDs in the desired order (first = lowest SortOrder)
+    public List<int> OrderedIds { get; set; } = new List<int>();
 }
 
 public class GamePlayWithDto

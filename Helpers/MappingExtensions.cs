@@ -99,7 +99,23 @@ public static class MappingExtensions
         {
             Id = status.Id,
             Name = status.Name,
+            SortOrder = status.SortOrder,
             IsActive = status.IsActive,
+            Color = status.Color,
+            IsDefault = status.IsDefault,
+            StatusType = status.StatusType.ToString(),
+            IsSpecialStatus = status.IsSpecialStatus
+        };
+    }
+
+    public static SpecialStatusDto ToSpecialStatusDto(this GameStatus status)
+    {
+        return new SpecialStatusDto
+        {
+            Id = status.Id,
+            Name = status.Name,
+            StatusType = status.StatusType.ToString(),
+            IsDefault = status.IsDefault,
             Color = status.Color
         };
     }
