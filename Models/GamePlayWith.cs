@@ -10,7 +10,7 @@ public class GamePlayWith
     public bool IsActive { get; set; } = true;
     public string Color { get; set; } = "#ffffff";
 
-    // Navigation property - ignorada en JSON
+    // Relación muchos-a-muchos con Game
     [JsonIgnore]
-    public virtual ICollection<Game> Games { get; set; } = new List<Game>();
+    public virtual ICollection<GamePlayWithMapping> GamePlayWiths { get; set; } = new List<GamePlayWithMapping>();
 }

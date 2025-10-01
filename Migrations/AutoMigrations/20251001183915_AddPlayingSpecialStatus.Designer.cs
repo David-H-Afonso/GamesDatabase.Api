@@ -3,16 +3,19 @@ using System;
 using GamesDatabase.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace GamesDatabase.Api.Migrations
+namespace GamesDatabase.Api.Migrations.AutoMigrations
 {
     [DbContext(typeof(GamesDbContext))]
-    partial class GamesDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251001183915_AddPlayingSpecialStatus")]
+    partial class AddPlayingSpecialStatus
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -65,6 +68,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("platform_id");
 
+                    b.Property<int?>("PlayWithId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("play_with_id");
+
                     b.Property<int?>("PlayedStatusId")
                         .HasColumnType("INTEGER")
                         .HasColumnName("played_status_id");
@@ -96,6 +103,8 @@ namespace GamesDatabase.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("PlatformId");
+
+                    b.HasIndex("PlayWithId");
 
                     b.HasIndex("PlayedStatusId");
 
@@ -180,23 +189,6 @@ namespace GamesDatabase.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("game_play_with", (string)null);
-                });
-
-            modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayWithMapping", b =>
-                {
-                    b.Property<int>("GameId")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("game_id");
-
-                    b.Property<int>("PlayWithId")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("play_with_id");
-
-                    b.HasKey("GameId", "PlayWithId");
-
-                    b.HasIndex("PlayWithId");
-
-                    b.ToTable("game_play_with_mapping", (string)null);
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayedStatus", b =>
@@ -352,6 +344,11 @@ namespace GamesDatabase.Api.Migrations
                         .HasForeignKey("PlatformId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("GamesDatabase.Api.Models.GamePlayWith", "PlayWith")
+                        .WithMany("Games")
+                        .HasForeignKey("PlayWithId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("GamesDatabase.Api.Models.GamePlayedStatus", "PlayedStatus")
                         .WithMany("Games")
                         .HasForeignKey("PlayedStatusId")
@@ -365,33 +362,11 @@ namespace GamesDatabase.Api.Migrations
 
                     b.Navigation("Platform");
 
+                    b.Navigation("PlayWith");
+
                     b.Navigation("PlayedStatus");
 
                     b.Navigation("Status");
-                });
-
-            modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayWithMapping", b =>
-                {
-                    b.HasOne("GamesDatabase.Api.Models.Game", "Game")
-                        .WithMany("GamePlayWiths")
-                        .HasForeignKey("GameId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("GamesDatabase.Api.Models.GamePlayWith", "PlayWith")
-                        .WithMany("GamePlayWiths")
-                        .HasForeignKey("PlayWithId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Game");
-
-                    b.Navigation("PlayWith");
-                });
-
-            modelBuilder.Entity("GamesDatabase.Api.Models.Game", b =>
-                {
-                    b.Navigation("GamePlayWiths");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.GamePlatform", b =>
@@ -401,7 +376,7 @@ namespace GamesDatabase.Api.Migrations
 
             modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayWith", b =>
                 {
-                    b.Navigation("GamePlayWiths");
+                    b.Navigation("Games");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayedStatus", b =>

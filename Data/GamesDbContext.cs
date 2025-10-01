@@ -65,6 +65,7 @@ public class GamesDbContext : DbContext
     public DbSet<GamePlayedStatus> GamePlayedStatuses { get; set; }
     public DbSet<GameStatus> GameStatuses { get; set; }
     public DbSet<GameView> GameViews { get; set; }
+    public DbSet<GamePlayWithMapping> GamePlayWithMappings { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -77,6 +78,7 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<GamePlayedStatus>().ToTable("game_played_status");
         modelBuilder.Entity<GameStatus>().ToTable("game_status");
         modelBuilder.Entity<GameView>().ToTable("game_view");
+        modelBuilder.Entity<GamePlayWithMapping>().ToTable("game_play_with_mapping");
 
         // Configure Game entity
         modelBuilder.Entity<Game>(entity =>
@@ -95,7 +97,6 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Started).HasColumnName("started");
             entity.Property(e => e.Finished).HasColumnName("finished");
             entity.Property(e => e.Comment).HasColumnName("comment");
-            entity.Property(e => e.PlayWithId).HasColumnName("play_with_id");
             entity.Property(e => e.PlayedStatusId).HasColumnName("played_status_id");
             entity.Property(e => e.Logo).HasColumnName("logo");
             entity.Property(e => e.Cover).HasColumnName("cover");
@@ -111,11 +112,6 @@ public class GamesDbContext : DbContext
             entity.HasOne(e => e.Platform)
                 .WithMany(p => p.Games)
                 .HasForeignKey(e => e.PlatformId)
-                .OnDelete(DeleteBehavior.SetNull);
-
-            entity.HasOne(e => e.PlayWith)
-                .WithMany(pw => pw.Games)
-                .HasForeignKey(e => e.PlayWithId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasOne(e => e.PlayedStatus)
@@ -183,6 +179,24 @@ public class GamesDbContext : DbContext
             entity.HasIndex(e => new { e.StatusType, e.IsDefault })
                 .HasFilter("is_default = 1")
                 .IsUnique();
+        });
+
+        // Configure GamePlayWithMapping entity (many-to-many)
+        modelBuilder.Entity<GamePlayWithMapping>(entity =>
+        {
+            entity.HasKey(e => new { e.GameId, e.PlayWithId });
+            entity.Property(e => e.GameId).HasColumnName("game_id");
+            entity.Property(e => e.PlayWithId).HasColumnName("play_with_id");
+
+            entity.HasOne(e => e.Game)
+                .WithMany(g => g.GamePlayWiths)
+                .HasForeignKey(e => e.GameId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.PlayWith)
+                .WithMany(pw => pw.GamePlayWiths)
+                .HasForeignKey(e => e.PlayWithId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configure GameView entity

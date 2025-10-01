@@ -5,7 +5,8 @@ namespace GamesDatabase.Api.Models;
 public enum SpecialStatusType
 {
     None = 0,
-    NotFulfilled = 1
+    NotFulfilled = 1,
+    Playing = 2
     // Future special statuses can be added here
 }
 

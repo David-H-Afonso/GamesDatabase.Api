@@ -55,10 +55,20 @@ public class DataExportController : ControllerBase
             {
                 allRecords.Add(new FullExportModel { Type = "PlayedStatus", Name = p.Name, Color = p.Color, IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
             }
-            var games = await _context.Games.Include(g => g.Status).Include(g => g.Platform).Include(g => g.PlayWith).Include(g => g.PlayedStatus).OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")).ToListAsync();
+            var games = await _context.Games
+                .Include(g => g.Status)
+                .Include(g => g.Platform)
+                .Include(g => g.GamePlayWiths)
+                    .ThenInclude(gpw => gpw.PlayWith)
+                .Include(g => g.PlayedStatus)
+                .OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+                .ToListAsync();
             foreach (var g in games)
             {
-                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = g.PlayWith?.Name ?? "", PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "" });
+                var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
+                    ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
+                    : "";
+                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "" });
             }
             using var memoryStream = new MemoryStream();
             using var writer = new StreamWriter(memoryStream, Encoding.UTF8);
@@ -131,11 +141,71 @@ public class DataExportController : ControllerBase
                     if (string.IsNullOrWhiteSpace(record.Name)) { results.errors.Add("Juego sin nombre encontrado"); continue; }
                     var status = string.IsNullOrWhiteSpace(record.Status) ? null : await _context.GameStatuses.FirstOrDefaultAsync(s => s.Name.ToLower() == record.Status.ToLower());
                     var platform = string.IsNullOrWhiteSpace(record.Platform) ? null : await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Platform.ToLower());
-                    var playWith = string.IsNullOrWhiteSpace(record.PlayWith) ? null : await _context.GamePlayWiths.FirstOrDefaultAsync(p => p.Name.ToLower() == record.PlayWith.ToLower());
+
+                    // Parse multiple PlayWith values separated by comma
+                    var playWithIds = new List<int>();
+                    if (!string.IsNullOrWhiteSpace(record.PlayWith))
+                    {
+                        var playWithNames = record.PlayWith.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        foreach (var pwName in playWithNames)
+                        {
+                            var pw = await _context.GamePlayWiths.FirstOrDefaultAsync(p => p.Name.ToLower() == pwName.ToLower());
+                            if (pw != null) playWithIds.Add(pw.Id);
+                        }
+                    }
+
                     var playedStatus = string.IsNullOrWhiteSpace(record.PlayedStatus) ? null : await _context.GamePlayedStatuses.FirstOrDefaultAsync(p => p.Name.ToLower() == record.PlayedStatus.ToLower());
-                    var existing = await _context.Games.FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower());
-                    if (existing != null) { if (status != null) existing.Status = status; existing.Platform = platform; existing.PlayWith = playWith; existing.PlayedStatus = playedStatus; existing.Released = record.Released; existing.Started = record.Started; existing.Finished = record.Finished; existing.Critic = ParseNullableInt(record.Critic); existing.Grade = ParseNullableInt(record.Grade); existing.Completion = ParseNullableInt(record.Completion); existing.Story = ParseNullableInt(record.Story); existing.Comment = record.Comment; existing.Logo = record.Logo; existing.Cover = record.Cover; existing.CalculateScore(); results = results with { gamesUpdated = results.gamesUpdated + 1 }; }
-                    else { if (status == null) { results.errors.Add($"No se puede crear '{record.Name}' sin un status válido"); continue; } var newGame = new Game { Name = record.Name, Status = status, Platform = platform, PlayWith = playWith, PlayedStatus = playedStatus, Released = record.Released, Started = record.Started, Finished = record.Finished, Critic = ParseNullableInt(record.Critic), Grade = ParseNullableInt(record.Grade), Completion = ParseNullableInt(record.Completion), Story = ParseNullableInt(record.Story), Comment = record.Comment, Logo = record.Logo, Cover = record.Cover }; newGame.CalculateScore(); _context.Games.Add(newGame); results = results with { gamesImported = results.gamesImported + 1 }; }
+                    var existing = await _context.Games.Include(g => g.GamePlayWiths).FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower());
+
+                    if (existing != null)
+                    {
+                        if (status != null) existing.Status = status;
+                        existing.Platform = platform;
+                        existing.PlayedStatus = playedStatus;
+                        existing.Released = record.Released;
+                        existing.Started = record.Started;
+                        existing.Finished = record.Finished;
+                        existing.Critic = ParseNullableInt(record.Critic);
+                        existing.Grade = ParseNullableInt(record.Grade);
+                        existing.Completion = ParseNullableInt(record.Completion);
+                        existing.Story = ParseNullableInt(record.Story);
+                        existing.Comment = record.Comment;
+                        existing.Logo = record.Logo;
+                        existing.Cover = record.Cover;
+                        existing.CalculateScore();
+
+                        // Update PlayWith relationships
+                        var existingMappings = existing.GamePlayWiths.ToList();
+                        foreach (var mapping in existingMappings)
+                        {
+                            _context.GamePlayWithMappings.Remove(mapping);
+                        }
+                        foreach (var pwId in playWithIds)
+                        {
+                            _context.GamePlayWithMappings.Add(new GamePlayWithMapping { GameId = existing.Id, PlayWithId = pwId });
+                        }
+
+                        // Marcar el juego como modificado para actualizar UpdatedAt
+                        _context.Entry(existing).State = EntityState.Modified;
+
+                        results = results with { gamesUpdated = results.gamesUpdated + 1 };
+                    }
+                    else
+                    {
+                        if (status == null) { results.errors.Add($"No se puede crear '{record.Name}' sin un status válido"); continue; }
+                        var newGame = new Game { Name = record.Name, Status = status, Platform = platform, PlayedStatus = playedStatus, Released = record.Released, Started = record.Started, Finished = record.Finished, Critic = ParseNullableInt(record.Critic), Grade = ParseNullableInt(record.Grade), Completion = ParseNullableInt(record.Completion), Story = ParseNullableInt(record.Story), Comment = record.Comment, Logo = record.Logo, Cover = record.Cover };
+                        newGame.CalculateScore();
+                        _context.Games.Add(newGame);
+                        await _context.SaveChangesAsync(); // Save to get the ID
+
+                        // Add PlayWith relationships
+                        foreach (var pwId in playWithIds)
+                        {
+                            _context.GamePlayWithMappings.Add(new GamePlayWithMapping { GameId = newGame.Id, PlayWithId = pwId });
+                        }
+
+                        results = results with { gamesImported = results.gamesImported + 1 };
+                    }
                 }
                 catch (Exception ex) { results.errors.Add($"Error procesando '{record.Name}': {ex.Message}"); }
             }

@@ -31,7 +31,8 @@ public class GamesController : ControllerBase
         var query = _context.Games
             .Include(g => g.Status)
             .Include(g => g.Platform)
-            .Include(g => g.PlayWith)
+            .Include(g => g.GamePlayWiths)
+                .ThenInclude(gpw => gpw.PlayWith)
             .Include(g => g.PlayedStatus)
             .AsQueryable();
 
@@ -172,7 +173,7 @@ public class GamesController : ControllerBase
 
         if (parameters.PlayWithId.HasValue)
         {
-            query = query.Where(g => g.PlayWithId == parameters.PlayWithId.Value);
+            query = query.Where(g => g.GamePlayWiths.Any(gpw => gpw.PlayWithId == parameters.PlayWithId.Value));
         }
 
         if (parameters.PlayedStatusId.HasValue)
@@ -253,7 +254,8 @@ public class GamesController : ControllerBase
         var game = await _context.Games
             .Include(g => g.Status)
             .Include(g => g.Platform)
-            .Include(g => g.PlayWith)
+            .Include(g => g.GamePlayWiths)
+                .ThenInclude(gpw => gpw.PlayWith)
             .Include(g => g.PlayedStatus)
             .FirstOrDefaultAsync(g => g.Id == id);
 
@@ -334,9 +336,33 @@ public class GamesController : ControllerBase
             game.Comment = commentElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : commentElement.GetString();
         }
 
-        if (gameDto.TryGetProperty("playWithId", out var playWithIdElement))
+        if (gameDto.TryGetProperty("playWithIds", out var playWithIdsElement))
         {
-            game.PlayWithId = playWithIdElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : playWithIdElement.GetInt32();
+            // Eliminar las relaciones existentes
+            var existingMappings = await _context.GamePlayWithMappings
+                .Where(gpw => gpw.GameId == id)
+                .ToListAsync();
+            _context.GamePlayWithMappings.RemoveRange(existingMappings);
+
+            // Agregar las nuevas relaciones
+            if (playWithIdsElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                var playWithIds = playWithIdsElement.EnumerateArray()
+                    .Select(e => e.GetInt32())
+                    .ToList();
+
+                foreach (var playWithId in playWithIds)
+                {
+                    _context.GamePlayWithMappings.Add(new Models.GamePlayWithMapping
+                    {
+                        GameId = id,
+                        PlayWithId = playWithId
+                    });
+                }
+            }
+
+            // Marcar el juego como modificado para actualizar UpdatedAt
+            _context.Entry(game).State = EntityState.Modified;
         }
 
         if (gameDto.TryGetProperty("playedStatusId", out var playedStatusIdElement))
@@ -386,6 +412,20 @@ public class GamesController : ControllerBase
         _context.Games.Add(game);
         await _context.SaveChangesAsync();
 
+        // Agregar las relaciones PlayWith
+        if (gameDto.PlayWithIds != null && gameDto.PlayWithIds.Any())
+        {
+            foreach (var playWithId in gameDto.PlayWithIds)
+            {
+                _context.GamePlayWithMappings.Add(new Models.GamePlayWithMapping
+                {
+                    GameId = game.Id,
+                    PlayWithId = playWithId
+                });
+            }
+            await _context.SaveChangesAsync();
+        }
+
         // Cargar las relaciones para el DTO de respuesta
         await _context.Entry(game)
             .Reference(g => g.Status)
@@ -394,11 +434,19 @@ public class GamesController : ControllerBase
             .Reference(g => g.Platform)
             .LoadAsync();
         await _context.Entry(game)
-            .Reference(g => g.PlayWith)
+            .Collection(g => g.GamePlayWiths)
             .LoadAsync();
         await _context.Entry(game)
             .Reference(g => g.PlayedStatus)
             .LoadAsync();
+
+        // Cargar los PlayWith relacionados
+        foreach (var gpw in game.GamePlayWiths)
+        {
+            await _context.Entry(gpw)
+                .Reference(m => m.PlayWith)
+                .LoadAsync();
+        }
 
         return CreatedAtAction("GetGame", new { id = game.Id }, game.ToDto());
     }

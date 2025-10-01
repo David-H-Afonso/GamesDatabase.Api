@@ -29,7 +29,6 @@ public class Game
     public string? Started { get; set; }
     public string? Finished { get; set; }
     public string? Comment { get; set; }
-    public int? PlayWithId { get; set; }
     public int? PlayedStatusId { get; set; }
 
     // Image paths for logo and cover
@@ -46,9 +45,11 @@ public class Game
     [JsonIgnore]
     public virtual GamePlatform? Platform { get; set; }
     [JsonIgnore]
-    public virtual GamePlayWith? PlayWith { get; set; }
-    [JsonIgnore]
     public virtual GamePlayedStatus? PlayedStatus { get; set; }
+
+    // Relación muchos-a-muchos con PlayWith
+    [JsonIgnore]
+    public virtual ICollection<GamePlayWithMapping> GamePlayWiths { get; set; } = new List<GamePlayWithMapping>();
 
     /// <summary>
     /// Calcula el score automáticamente basado en la fórmula: 10 * (Critic / 100) * (10 / (Story + 10))

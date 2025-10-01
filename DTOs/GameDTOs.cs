@@ -15,7 +15,7 @@ public class GameDto
     public string? Started { get; set; }
     public string? Finished { get; set; }
     public string? Comment { get; set; }
-    public int? PlayWithId { get; set; }
+    public List<int> PlayWithIds { get; set; } = new List<int>();
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
     public string? Cover { get; set; }
@@ -27,7 +27,7 @@ public class GameDto
     // Navigation properties simplificadas (solo datos básicos)
     public string? StatusName { get; set; }
     public string? PlatformName { get; set; }
-    public string? PlayWithName { get; set; }
+    public List<string> PlayWithNames { get; set; } = new List<string>();
     public string? PlayedStatusName { get; set; }
 }
 
@@ -44,7 +44,7 @@ public class GameCreateDto
     public string? Started { get; set; }
     public string? Finished { get; set; }
     public string? Comment { get; set; }
-    public int? PlayWithId { get; set; }
+    public List<int> PlayWithIds { get; set; } = new List<int>();
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
     public string? Cover { get; set; }
@@ -64,7 +64,7 @@ public class GameUpdateDto
     public string? Started { get; set; }
     public string? Finished { get; set; }
     public string? Comment { get; set; }
-    public int? PlayWithId { get; set; }
+    public List<int>? PlayWithIds { get; set; }
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
     public string? Cover { get; set; }

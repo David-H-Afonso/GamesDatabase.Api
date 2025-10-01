@@ -22,7 +22,7 @@ public static class MappingExtensions
             Started = game.Started,
             Finished = game.Finished,
             Comment = game.Comment,
-            PlayWithId = game.PlayWithId,
+            PlayWithIds = game.GamePlayWiths?.Select(gpw => gpw.PlayWithId).ToList() ?? new List<int>(),
             PlayedStatusId = game.PlayedStatusId,
             Logo = game.Logo,
             Cover = game.Cover,
@@ -30,7 +30,7 @@ public static class MappingExtensions
             UpdatedAt = game.UpdatedAt,
             StatusName = game.Status?.Name,
             PlatformName = game.Platform?.Name,
-            PlayWithName = game.PlayWith?.Name,
+            PlayWithNames = game.GamePlayWiths?.Select(gpw => gpw.PlayWith.Name).ToList() ?? new List<string>(),
             PlayedStatusName = game.PlayedStatus?.Name
         };
     }
@@ -51,7 +51,6 @@ public static class MappingExtensions
             Started = dto.Started,
             Finished = dto.Finished,
             Comment = dto.Comment,
-            PlayWithId = dto.PlayWithId,
             PlayedStatusId = dto.PlayedStatusId,
             Logo = dto.Logo,
             Cover = dto.Cover
@@ -76,7 +75,6 @@ public static class MappingExtensions
         if (dto.Started != null) entity.Started = dto.Started;
         if (dto.Finished != null) entity.Finished = dto.Finished;
         if (dto.Comment != null) entity.Comment = dto.Comment;
-        if (dto.PlayWithId.HasValue) entity.PlayWithId = dto.PlayWithId.Value;
         if (dto.PlayedStatusId.HasValue) entity.PlayedStatusId = dto.PlayedStatusId.Value;
         if (dto.Logo != null) entity.Logo = dto.Logo;
         if (dto.Cover != null) entity.Cover = dto.Cover;

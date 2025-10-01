@@ -124,7 +124,7 @@ using (var scope = app.Services.CreateScope())
         // Aplicar migraciones pendientes
         context.Database.Migrate();
         Console.WriteLine($"Database connected successfully at: {connectionString}");
-        
+
         // Insertar datos por defecto solo si las tablas están vacías
         await SeedDefaultDataAsync(context);
     }
@@ -165,7 +165,8 @@ static async Task SeedDefaultDataAsync(GamesDbContext context)
             new GameStatus { Name = "Some", Color = "#d19a66", IsActive = true, SortOrder = 2, IsDefault = false, StatusType = SpecialStatusType.None },
             new GameStatus { Name = "Almost", Color = "#e5c07b", IsActive = true, SortOrder = 3, IsDefault = false, StatusType = SpecialStatusType.None },
             new GameStatus { Name = "Completed", Color = "#98c379", IsActive = true, SortOrder = 4, IsDefault = false, StatusType = SpecialStatusType.None },
-            new GameStatus { Name = "Abandoned", Color = "#e06c75", IsActive = true, SortOrder = 5, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled }
+            new GameStatus { Name = "Abandoned", Color = "#e06c75", IsActive = true, SortOrder = 5, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled },
+            new GameStatus { Name = "Playing", Color = "#61afef", IsActive = true, SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.Playing }
         };
         context.GameStatuses.AddRange(statuses);
         await context.SaveChangesAsync();
