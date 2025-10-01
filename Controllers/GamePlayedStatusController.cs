@@ -42,12 +42,12 @@ public class GamePlayedStatusController : ControllerBase
                     query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")),
                 "isactive" => parameters.SortDescending ? query.OrderByDescending(p => p.IsActive) : query.OrderBy(p => p.IsActive),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(p => p.Id) : query.OrderBy(p => p.Id),
-                _ => query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Default: orden alfabético case-insensitive
+                _ => query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Default: orden personalizado
             };
         }
         else
         {
-            query = query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")); // Default: orden alfabético case-insensitive
+            query = query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")); // Default: orden personalizado
         }
 
         var totalCount = await query.CountAsync();
@@ -171,6 +171,29 @@ public class GamePlayedStatusController : ControllerBase
         _context.GamePlayedStatuses.Remove(item);
         await _context.SaveChangesAsync();
 
+        return NoContent();
+    }
+
+    [HttpPost("reorder")]
+    public async Task<IActionResult> ReorderPlayedStatuses([FromBody] ReorderStatusesDto reorderDto)
+    {
+        if (reorderDto?.OrderedIds == null || reorderDto.OrderedIds.Count == 0)
+        {
+            return BadRequest("Se requiere la lista ordenada de IDs");
+        }
+
+        var allStatuses = await _context.GamePlayedStatuses.ToListAsync();
+        
+        for (int i = 0; i < reorderDto.OrderedIds.Count; i++)
+        {
+            var status = allStatuses.FirstOrDefault(s => s.Id == reorderDto.OrderedIds[i]);
+            if (status != null)
+            {
+                status.SortOrder = i + 1;
+            }
+        }
+
+        await _context.SaveChangesAsync();
         return NoContent();
     }
 }

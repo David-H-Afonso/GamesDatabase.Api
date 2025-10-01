@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.DTOs;
 using GamesDatabase.Api.Helpers;
+using GamesDatabase.Api.Services;
+using System.Text.Json;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -11,14 +13,17 @@ namespace GamesDatabase.Api.Controllers;
 public class GamesController : ControllerBase
 {
     private readonly GamesDbContext _context;
+    private readonly IViewFilterService _viewFilterService;
 
-    public GamesController(GamesDbContext context)
+    public GamesController(GamesDbContext context, IViewFilterService viewFilterService)
     {
         _context = context;
+        _viewFilterService = viewFilterService;
     }
 
     /// <summary>
     /// Obtiene todos los juegos con paginado, filtrado y ordenado
+    /// Soporta aplicar vistas personalizadas que contienen filtros y ordenamientos complejos
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<PagedResult<GameDto>>> GetGames([FromQuery] GameQueryParameters parameters)
@@ -30,6 +35,119 @@ public class GamesController : ControllerBase
             .Include(g => g.PlayedStatus)
             .AsQueryable();
 
+        // Verificar si se debe aplicar una vista
+        Models.ViewConfiguration? viewConfiguration = null;
+        if (parameters.ViewId.HasValue || !string.IsNullOrEmpty(parameters.ViewName))
+        {
+            Models.GameView? gameView = null;
+
+            if (parameters.ViewId.HasValue)
+            {
+                gameView = await _context.GameViews.FindAsync(parameters.ViewId.Value);
+            }
+            else if (!string.IsNullOrEmpty(parameters.ViewName))
+            {
+                gameView = await _context.GameViews
+                    .FirstOrDefaultAsync(v => v.Name == parameters.ViewName);
+            }
+
+            if (gameView == null)
+            {
+                return BadRequest($"Vista no encontrada: {parameters.ViewId?.ToString() ?? parameters.ViewName}");
+            }
+
+            try
+            {
+                // FiltersJson historically stores an array of ViewFilter objects.
+                // Try to deserialize as List<ViewFilter> first and wrap into a ViewConfiguration.
+                if (!string.IsNullOrEmpty(gameView.FiltersJson))
+                {
+                    try
+                    {
+                        var filters = JsonSerializer.Deserialize<List<Models.ViewFilter>>(gameView.FiltersJson);
+                        if (filters != null)
+                        {
+                            viewConfiguration = new Models.ViewConfiguration
+                            {
+                                FilterGroups = new List<Models.FilterGroup>
+                                {
+                                    new Models.FilterGroup { Filters = filters }
+                                }
+                            };
+                        }
+                        else
+                        {
+                            // If that fails, try to deserialize as full ViewConfiguration
+                            viewConfiguration = JsonSerializer.Deserialize<Models.ViewConfiguration>(gameView.FiltersJson);
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // Fallback: try to deserialize as full configuration
+                        viewConfiguration = JsonSerializer.Deserialize<Models.ViewConfiguration>(gameView.FiltersJson);
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(gameView.SortingJson))
+                {
+                    var sorting = JsonSerializer.Deserialize<List<Models.ViewSort>>(gameView.SortingJson);
+                    if (sorting != null)
+                    {
+                        if (viewConfiguration == null) viewConfiguration = new Models.ViewConfiguration();
+                        viewConfiguration.Sorting = sorting;
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                return BadRequest($"Error procesando configuración de vista: {ex.Message}");
+            }
+        }
+
+        // Si hay configuración de vista, aplicarla; si no, usar filtros tradicionales
+        if (viewConfiguration != null)
+        {
+            try
+            {
+                query = _viewFilterService.ApplyFilters(query, viewConfiguration);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Error aplicando filtros de vista: {ex.Message}");
+            }
+        }
+        else
+        {
+            // Aplicar filtros tradicionales
+            query = ApplyTraditionalFilters(query, parameters);
+
+            // Aplicar ordenado tradicional
+            query = ApplyTraditionalSorting(query, parameters);
+        }
+
+        var totalCount = await query.CountAsync();
+
+        var games = await query
+            .Skip(parameters.Skip)
+            .Take(parameters.Take)
+            .ToListAsync();
+
+        var gameDtos = games.Select(g => g.ToDto()).ToList();
+
+        return Ok(new PagedResult<GameDto>
+        {
+            Data = gameDtos,
+            TotalCount = totalCount,
+            Page = parameters.Page,
+            PageSize = parameters.PageSize
+        });
+    }
+
+    /// <summary>
+    /// Aplica filtros tradicionales cuando no se usa una vista
+    /// </summary>
+    private IQueryable<Models.Game> ApplyTraditionalFilters(IQueryable<Models.Game> query, GameQueryParameters parameters)
+    {
         // Aplicar filtros
         if (!string.IsNullOrEmpty(parameters.Search))
         {
@@ -87,6 +205,14 @@ public class GamesController : ControllerBase
             query = query.Where(g => g.Finished != null && g.Finished.Contains(parameters.Finished));
         }
 
+        return query;
+    }
+
+    /// <summary>
+    /// Aplica ordenamiento tradicional cuando no se usa una vista
+    /// </summary>
+    private IQueryable<Models.Game> ApplyTraditionalSorting(IQueryable<Models.Game> query, GameQueryParameters parameters)
+    {
         // Aplicar ordenado
         if (!string.IsNullOrEmpty(parameters.SortBy))
         {
@@ -115,22 +241,7 @@ public class GamesController : ControllerBase
             query = query.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")); // Default: orden alfabético case-insensitive
         }
 
-        var totalCount = await query.CountAsync();
-
-        var games = await query
-            .Skip(parameters.Skip)
-            .Take(parameters.Take)
-            .ToListAsync();
-
-        var gameDtos = games.Select(g => g.ToDto()).ToList();
-
-        return Ok(new PagedResult<GameDto>
-        {
-            Data = gameDtos,
-            TotalCount = totalCount,
-            Page = parameters.Page,
-            PageSize = parameters.PageSize
-        });
+        return query;
     }
 
     /// <summary>
@@ -313,282 +424,5 @@ public class GamesController : ControllerBase
     private bool GameExists(int id)
     {
         return _context.Games.Any(e => e.Id == id);
-    }
-
-    // Apply the same filtering logic used by GetGames (without ordering or pagination)
-    private IQueryable<Models.Game> ApplyCommonFilters(IQueryable<Models.Game> query, GameQueryParameters parameters)
-    {
-        if (!string.IsNullOrEmpty(parameters.Search))
-        {
-            query = query.Where(g => g.Name.Contains(parameters.Search) || (g.Comment != null && g.Comment.Contains(parameters.Search)));
-        }
-
-        if (parameters.StatusId.HasValue)
-        {
-            query = query.Where(g => g.StatusId == parameters.StatusId.Value);
-        }
-
-        if (parameters.PlatformId.HasValue)
-        {
-            query = query.Where(g => g.PlatformId == parameters.PlatformId.Value);
-        }
-
-        if (parameters.PlayWithId.HasValue)
-        {
-            query = query.Where(g => g.PlayWithId == parameters.PlayWithId.Value);
-        }
-
-        if (parameters.PlayedStatusId.HasValue)
-        {
-            query = query.Where(g => g.PlayedStatusId == parameters.PlayedStatusId.Value);
-        }
-
-        if (parameters.MinGrade.HasValue)
-        {
-            query = query.Where(g => g.Grade >= parameters.MinGrade.Value);
-        }
-
-        if (parameters.MaxGrade.HasValue)
-        {
-            query = query.Where(g => g.Grade <= parameters.MaxGrade.Value);
-        }
-
-        if (!string.IsNullOrEmpty(parameters.Released))
-        {
-            query = query.Where(g => g.Released != null && g.Released.Contains(parameters.Released));
-        }
-
-        if (!string.IsNullOrEmpty(parameters.Started))
-        {
-            query = query.Where(g => g.Started != null && g.Started.Contains(parameters.Started));
-        }
-
-        if (!string.IsNullOrEmpty(parameters.Finished))
-        {
-            query = query.Where(g => g.Finished != null && g.Finished.Contains(parameters.Finished));
-        }
-
-        return query;
-    }
-
-    /// <summary>
-    /// Vista: juegos que empezaron en un año dado Y/O que tienen un status que coincida
-    /// Parámetros: year (int, required), status (string, optional)
-    /// Devuelve juegos donde (Started year == year) OR (Status.Name LIKE %status%)
-    /// </summary>
-    [HttpGet("started-or-status")]
-    public async Task<ActionResult<PagedResult<GameDto>>> GetStartedOrStatus([FromQuery] GameQueryParameters parameters, [FromQuery] int year, [FromQuery] string? status)
-    {
-        if (year <= 0) return BadRequest("year is required and must be a positive integer");
-
-        // base query with common filters
-        var baseQuery = _context.Games
-            .Include(g => g.Status)
-            .Include(g => g.Platform)
-            .Include(g => g.PlayWith)
-            .Include(g => g.PlayedStatus)
-            .AsQueryable();
-
-        baseQuery = ApplyCommonFilters(baseQuery, parameters);
-
-        // started matches
-        var startedMatch = baseQuery.Where(g => g.Started != null && (
-            g.Started == year.ToString() ||
-            g.Started.StartsWith(year + "-") ||
-            g.Started.Contains("/" + year.ToString() + "/") ||
-            g.Started.Contains("-" + year.ToString() + "-") ||
-            g.Started.EndsWith("/" + year)
-        ));
-
-        IQueryable<Models.Game> finalQuery;
-
-        if (string.IsNullOrWhiteSpace(status))
-        {
-            finalQuery = startedMatch;
-        }
-        else
-        {
-            var statusTrim = status.Trim();
-            var statusMatch = baseQuery.Where(g => g.Status != null && EF.Functions.Like(g.Status.Name, "%" + statusTrim + "%"));
-            finalQuery = startedMatch.Union(statusMatch);
-        }
-
-        // apply ordering
-        if (!string.IsNullOrEmpty(parameters.SortBy))
-        {
-            finalQuery = parameters.SortBy.ToLower() switch
-            {
-                "name" => parameters.SortDescending ? finalQuery.OrderByDescending(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "grade" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Grade).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Grade).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "critic" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Critic).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Critic).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "story" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "storyduration" => parameters.SortDescending ? finalQuery.OrderByDescending(g => (double?)g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => (double?)g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "completion" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "completionduration" => parameters.SortDescending ? finalQuery.OrderByDescending(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "status" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Status.SortOrder).ThenByDescending(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "score" => parameters.SortDescending ? finalQuery.OrderByDescending(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "released" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "started" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "finished" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : finalQuery.OrderBy(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "creation" or "id" => parameters.SortDescending ? finalQuery.OrderByDescending(g => g.Id) : finalQuery.OrderBy(g => g.Id),
-                _ => finalQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
-            };
-        }
-        else
-        {
-            finalQuery = finalQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"));
-        }
-
-        var totalCount = await finalQuery.CountAsync();
-
-        var games = await finalQuery.Skip(parameters.Skip).Take(parameters.Take).ToListAsync();
-        var gameDtos = games.Select(g => g.ToDto()).ToList();
-
-        return Ok(new PagedResult<GameDto>
-        {
-            Data = gameDtos,
-            TotalCount = totalCount,
-            Page = parameters.Page,
-            PageSize = parameters.PageSize
-        });
-    }
-
-    /// <summary>
-    /// Vista: juegos cuyo `Released` es el año dado Y ademas `Started` es el mismo año
-    /// Parámetros: year (int, required)
-    /// </summary>
-    [HttpGet("released-and-started")]
-    public async Task<ActionResult<PagedResult<GameDto>>> GetReleasedAndStarted([FromQuery] GameQueryParameters parameters, [FromQuery] int year)
-    {
-        if (year <= 0) return BadRequest("year is required and must be a positive integer");
-
-        var baseQuery = _context.Games
-            .Include(g => g.Status)
-            .Include(g => g.Platform)
-            .Include(g => g.PlayWith)
-            .Include(g => g.PlayedStatus)
-            .AsQueryable();
-
-        baseQuery = ApplyCommonFilters(baseQuery, parameters);
-
-        // released matches
-        baseQuery = baseQuery.Where(g => g.Released != null && (
-            g.Released == year.ToString() ||
-            g.Released.StartsWith(year + "-") ||
-            g.Released.Contains("/" + year.ToString() + "/") ||
-            g.Released.Contains("-" + year.ToString() + "-") ||
-            g.Released.EndsWith("/" + year)
-        ));
-
-        // and started matches same year
-        baseQuery = baseQuery.Where(g => g.Started != null && (
-            g.Started == year.ToString() ||
-            g.Started.StartsWith(year + "-") ||
-            g.Started.Contains("/" + year.ToString() + "/") ||
-            g.Started.Contains("-" + year.ToString() + "-") ||
-            g.Started.EndsWith("/" + year)
-        ));
-
-        // apply ordering
-        if (!string.IsNullOrEmpty(parameters.SortBy))
-        {
-            baseQuery = parameters.SortBy.ToLower() switch
-            {
-                "name" => parameters.SortDescending ? baseQuery.OrderByDescending(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "grade" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Grade).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Grade).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "critic" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Critic).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Critic).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "story" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "storyduration" => parameters.SortDescending ? baseQuery.OrderByDescending(g => (double?)g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => (double?)g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "completion" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "completionduration" => parameters.SortDescending ? baseQuery.OrderByDescending(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "status" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Status.SortOrder).ThenByDescending(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "score" => parameters.SortDescending ? baseQuery.OrderByDescending(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "released" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "started" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "finished" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "creation" or "id" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Id) : baseQuery.OrderBy(g => g.Id),
-                _ => baseQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
-            };
-        }
-        else
-        {
-            baseQuery = baseQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"));
-        }
-
-        var totalCount = await baseQuery.CountAsync();
-        var games = await baseQuery.Skip(parameters.Skip).Take(parameters.Take).ToListAsync();
-        var dtos = games.Select(g => g.ToDto()).ToList();
-        return Ok(new PagedResult<GameDto>
-        {
-            Data = dtos,
-            TotalCount = totalCount,
-            Page = parameters.Page,
-            PageSize = parameters.PageSize
-        });
-    }
-
-    /// <summary>
-    /// Vista: juegos sin fecha `Started` (null/empty) ordenados por `Score` descendente
-    /// Acepta todos los `GameQueryParameters` para filtrar antes de ordenar/paginar
-    /// </summary>
-    [HttpGet("no-started-by-score")]
-    public async Task<ActionResult<PagedResult<GameDto>>> GetNoStartedByScore([FromQuery] GameQueryParameters parameters)
-    {
-        var baseQuery = _context.Games
-            .Include(g => g.Status)
-            .Include(g => g.Platform)
-            .Include(g => g.PlayWith)
-            .Include(g => g.PlayedStatus)
-            .AsQueryable();
-
-        baseQuery = ApplyCommonFilters(baseQuery, parameters);
-
-        // Filter where Started is null or empty
-        baseQuery = baseQuery.Where(g => string.IsNullOrEmpty(g.Started));
-
-        // Exclude certain statuses from this view (case-insensitive)
-        baseQuery = baseQuery.Where(g => g.Status == null || (
-            EF.Functions.Collate(g.Status.Name, "NOCASE") != "Always Playing" &&
-            EF.Functions.Collate(g.Status.Name, "NOCASE") != "Achievements"
-        ));
-
-        // Apply ordering: if client requested a sort, use it; otherwise default to Score desc (nulls last)
-        if (!string.IsNullOrEmpty(parameters.SortBy))
-        {
-            baseQuery = parameters.SortBy.ToLower() switch
-            {
-                "name" => parameters.SortDescending ? baseQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")).Reverse() : baseQuery.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "grade" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Grade) : baseQuery.OrderBy(g => g.Grade),
-                "critic" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Critic) : baseQuery.OrderBy(g => g.Critic),
-                "story" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Story) : baseQuery.OrderBy(g => g.Story),
-                "storyduration" => parameters.SortDescending ? baseQuery.OrderByDescending(g => (double?)g.Story) : baseQuery.OrderBy(g => (double?)g.Story),
-                "completion" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Completion) : baseQuery.OrderBy(g => g.Completion),
-                "completionduration" => parameters.SortDescending ? baseQuery.OrderByDescending(g => (double?)g.Completion) : baseQuery.OrderBy(g => (double?)g.Completion),
-                "status" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Status.SortOrder).ThenByDescending(g => EF.Functions.Collate(g.Status.Name, "NOCASE")) : baseQuery.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")),
-                "score" => parameters.SortDescending ? baseQuery.OrderByDescending(g => (double?)g.Score) : baseQuery.OrderBy(g => (double?)g.Score),
-                "released" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Released) : baseQuery.OrderBy(g => g.Released),
-                "started" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Started) : baseQuery.OrderBy(g => g.Started),
-                "finished" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Finished) : baseQuery.OrderBy(g => g.Finished),
-                "creation" or "id" => parameters.SortDescending ? baseQuery.OrderByDescending(g => g.Id) : baseQuery.OrderBy(g => g.Id),
-                _ => baseQuery.OrderByDescending(g => g.Score != null).ThenByDescending(g => (double?)g.Score)
-            };
-        }
-        else
-        {
-            // Default: Order by Score desc (nulls last)
-            baseQuery = baseQuery.OrderByDescending(g => g.Score != null).ThenByDescending(g => (double?)g.Score);
-        }
-
-        var totalCount = await baseQuery.CountAsync();
-        var games = await baseQuery.Skip(parameters.Skip).Take(parameters.Take).ToListAsync();
-        var dtos = games.Select(g => g.ToDto()).ToList();
-
-        return Ok(new PagedResult<GameDto>
-        {
-            Data = dtos,
-            TotalCount = totalCount,
-            Page = parameters.Page,
-            PageSize = parameters.PageSize
-        });
     }
 }

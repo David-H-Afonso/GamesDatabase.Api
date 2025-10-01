@@ -47,12 +47,13 @@ public class GamePlatformsController : ControllerBase
                     query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")),
                 "isactive" => parameters.SortDescending ? query.OrderByDescending(p => p.IsActive) : query.OrderBy(p => p.IsActive),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(p => p.Id) : query.OrderBy(p => p.Id),
-                _ => query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Default: orden alfabético case-insensitive
+                "sortorder" or "order" or "position" => parameters.SortDescending ? query.OrderByDescending(p => p.SortOrder) : query.OrderBy(p => p.SortOrder),
+                _ => query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Default: use SortOrder then name
             };
         }
         else
         {
-            query = query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")); // Default: orden alfabético case-insensitive
+            query = query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")); // Default: use SortOrder then name
         }
 
         var totalCount = await query.CountAsync();
@@ -74,14 +75,15 @@ public class GamePlatformsController : ControllerBase
     }
 
     /// <summary>
-    /// Obtiene solo las plataformas activas ordenadas alfabéticamente
+    /// Obtiene solo las plataformas activas ordenadas por SortOrder
     /// </summary>
     [HttpGet("active")]
     public async Task<ActionResult<IEnumerable<GamePlatformDto>>> GetActiveGamePlatforms()
     {
         var platforms = await _context.GamePlatforms
             .Where(p => p.IsActive)
-            .OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Orden alfabético case-insensitive para selectores
+            .OrderBy(p => p.SortOrder)
+            .ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE"))
             .ToListAsync();
 
         return Ok(platforms.Select(p => p.ToDto()));
@@ -189,6 +191,39 @@ public class GamePlatformsController : ControllerBase
 
         var result = gamePlatform.ToDto();
         return CreatedAtAction("GetGamePlatform", new { id = gamePlatform.Id }, result);
+    }
+
+    /// <summary>
+    /// Reordena las plataformas proporcionando una lista ordenada de IDs
+    /// </summary>
+    [HttpPost("reorder")]
+    public async Task<IActionResult> ReorderPlatforms([FromBody] ReorderStatusesDto dto)
+    {
+        if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
+        {
+            return BadRequest(new { message = "OrderedIds debe ser proporcionado" });
+        }
+
+        var platforms = await _context.GamePlatforms
+            .Where(p => dto.OrderedIds.Contains(p.Id))
+            .ToListAsync();
+
+        if (platforms.Count != dto.OrderedIds.Count)
+        {
+            return BadRequest(new { message = "Algunos IDs no existen" });
+        }
+
+        for (int i = 0; i < dto.OrderedIds.Count; i++)
+        {
+            var platform = platforms.FirstOrDefault(p => p.Id == dto.OrderedIds[i]);
+            if (platform != null)
+            {
+                platform.SortOrder = i + 1;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        return NoContent();
     }
 
     /// <summary>

@@ -26,9 +26,25 @@ public class GamesDbContext : DbContext
 
     private void UpdateTimestamps()
     {
-        var entries = ChangeTracker.Entries<Game>();
+        var gameEntries = ChangeTracker.Entries<Game>();
+        var viewEntries = ChangeTracker.Entries<GameView>();
 
-        foreach (var entry in entries)
+        foreach (var entry in gameEntries)
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.CreatedAt = DateTime.UtcNow;
+                entry.Entity.UpdatedAt = DateTime.UtcNow;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.UpdatedAt = DateTime.UtcNow;
+                // Prevent updating CreatedAt
+                entry.Property(e => e.CreatedAt).IsModified = false;
+            }
+        }
+
+        foreach (var entry in viewEntries)
         {
             if (entry.State == EntityState.Added)
             {
@@ -43,12 +59,12 @@ public class GamesDbContext : DbContext
             }
         }
     }
-
     public DbSet<Game> Games { get; set; }
     public DbSet<GamePlatform> GamePlatforms { get; set; }
     public DbSet<GamePlayWith> GamePlayWiths { get; set; }
     public DbSet<GamePlayedStatus> GamePlayedStatuses { get; set; }
     public DbSet<GameStatus> GameStatuses { get; set; }
+    public DbSet<GameView> GameViews { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -60,6 +76,7 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<GamePlayWith>().ToTable("game_play_with");
         modelBuilder.Entity<GamePlayedStatus>().ToTable("game_played_status");
         modelBuilder.Entity<GameStatus>().ToTable("game_status");
+        modelBuilder.Entity<GameView>().ToTable("game_view");
 
         // Configure Game entity
         modelBuilder.Entity<Game>(entity =>
@@ -166,6 +183,23 @@ public class GamesDbContext : DbContext
             entity.HasIndex(e => new { e.StatusType, e.IsDefault })
                 .HasFilter("is_default = 1")
                 .IsUnique();
+        });
+
+        // Configure GameView entity
+        modelBuilder.Entity<GameView>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Description).HasColumnName("description").HasMaxLength(500);
+            entity.Property(e => e.FiltersJson).HasColumnName("filters_json").IsRequired();
+            entity.Property(e => e.SortingJson).HasColumnName("sorting_json");
+            entity.Property(e => e.IsPublic).HasColumnName("is_public").HasDefaultValue(true);
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(50);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasIndex(e => e.Name).IsUnique();
         });
     }
 }

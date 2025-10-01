@@ -42,12 +42,12 @@ public class GamePlayWithController : ControllerBase
                     query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")),
                 "isactive" => parameters.SortDescending ? query.OrderByDescending(p => p.IsActive) : query.OrderBy(p => p.IsActive),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(p => p.Id) : query.OrderBy(p => p.Id),
-                _ => query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Default: orden alfabético case-insensitive
+                _ => query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Default: orden personalizado
             };
         }
         else
         {
-            query = query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")); // Default: orden alfabético case-insensitive
+            query = query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")); // Default: orden personalizado
         }
 
         var totalCount = await query.CountAsync();
@@ -160,6 +160,39 @@ public class GamePlayWithController : ControllerBase
 
         var result = item.ToDto();
         return CreatedAtAction("GetGamePlayWith", new { id = item.Id }, result);
+    }
+
+    /// <summary>
+    /// Reordena los elementos proporcionando una lista ordenada de IDs
+    /// </summary>
+    [HttpPost("reorder")]
+    public async Task<IActionResult> ReorderPlayWith([FromBody] ReorderStatusesDto dto)
+    {
+        if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
+        {
+            return BadRequest(new { message = "OrderedIds debe ser proporcionado" });
+        }
+
+        var items = await _context.GamePlayWiths
+            .Where(p => dto.OrderedIds.Contains(p.Id))
+            .ToListAsync();
+
+        if (items.Count != dto.OrderedIds.Count)
+        {
+            return BadRequest(new { message = "Algunos IDs no existen" });
+        }
+
+        for (int i = 0; i < dto.OrderedIds.Count; i++)
+        {
+            var item = items.FirstOrDefault(p => p.Id == dto.OrderedIds[i]);
+            if (item != null)
+            {
+                item.SortOrder = i + 1;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        return NoContent();
     }
 
     [HttpDelete("{id}")]

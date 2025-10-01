@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GamesDatabase.Api.Migrations.AutoMigrations
 {
     [DbContext(typeof(GamesDbContext))]
-    [Migration("20250930114056_AddAuditFields")]
-    partial class AddAuditFields
+    [Migration("20251001154841_SeedDefaultCatalogData")]
+    partial class SeedDefaultCatalogData
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -281,6 +281,60 @@ namespace GamesDatabase.Api.Migrations.AutoMigrations
                         .HasFilter("is_default = 1");
 
                     b.ToTable("game_status", (string)null);
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.GameView", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("description");
+
+                    b.Property<string>("FiltersJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("filters_json");
+
+                    b.Property<bool>("IsPublic")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_public");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("name");
+
+                    b.Property<string>("SortingJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sorting_json");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("game_view", (string)null);
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.Game", b =>

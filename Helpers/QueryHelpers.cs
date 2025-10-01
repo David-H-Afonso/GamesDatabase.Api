@@ -25,6 +25,16 @@ public class GameQueryParameters : QueryParameters
     public string? Released { get; set; }
     public string? Started { get; set; }
     public string? Finished { get; set; }
+
+    /// <summary>
+    /// ID de la vista a aplicar. Si se especifica, se ignorarán otros filtros y ordenamientos
+    /// </summary>
+    public int? ViewId { get; set; }
+
+    /// <summary>
+    /// Nombre de la vista a aplicar. Si se especifica, se ignorarán otros filtros y ordenamientos
+    /// </summary>
+    public string? ViewName { get; set; }
 }
 
 public class PagedResult<T>
