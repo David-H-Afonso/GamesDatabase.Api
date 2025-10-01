@@ -426,7 +426,7 @@ public class ViewFilterService : IViewFilterService
             SortField.Critic => g => g.Critic ?? 0,
             SortField.Story => g => g.Story ?? 0,
             SortField.Completion => g => g.Completion ?? 0,
-            SortField.Score => g => g.Score ?? 0,
+            SortField.Score => g => g.Score.HasValue ? (double)g.Score.Value : 0.0,
             SortField.Released => g => g.Released ?? "",
             SortField.Started => g => g.Started ?? "",
             SortField.Finished => g => g.Finished ?? "",
