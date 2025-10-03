@@ -1,8 +1,66 @@
-node_modules
-dist
-.git
+# Build artifacts
+bin/
+obj/
+out/
+publish/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Export files
+exports/
+
+# Visual Studio / Rider
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.cache
+*.userosscache
+*.sln.docstates
+
+# Git
+.git/
 .gitignore
-Dockerfile.*
+.gitattributes
+
+# Documentation
 *.md
-bin
-obj
+README*
+LICENSE*
+DOCS/
+
+# Docker files
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Test files
+*Tests/
+*.Tests/
+
+# Node (if any)
+node_modules/
+npm-debug.log
+dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
