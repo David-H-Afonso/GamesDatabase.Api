@@ -195,7 +195,23 @@ public class GamePlayWithController : BaseApiController
             .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
 
         if (item == null)
-            return NotFound();
+            return NotFound(new { message = "Elemento no encontrado" });
+
+        // Verificar si hay juegos usando este PlayWith
+        var gamesUsingPlayWith = await _context.GamePlayWithMappings
+            .Where(m => m.PlayWithId == id)
+            .Join(_context.Games, m => m.GameId, g => g.Id, (m, g) => g)
+            .CountAsync(g => g.UserId == userId);
+
+        if (gamesUsingPlayWith > 0)
+        {
+            return BadRequest(new
+            {
+                message = "No se puede eliminar el elemento",
+                details = $"Hay {gamesUsingPlayWith} juego(s) que usan este elemento",
+                gamesCount = gamesUsingPlayWith
+            });
+        }
 
         _context.GamePlayWiths.Remove(item);
         await _context.SaveChangesAsync();

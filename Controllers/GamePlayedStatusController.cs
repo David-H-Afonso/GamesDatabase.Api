@@ -156,7 +156,19 @@ public class GamePlayedStatusController : BaseApiController
             .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
 
         if (item == null)
-            return NotFound();
+            return NotFound(new { message = "Estado no encontrado" });
+
+        // Verificar si hay juegos usando este PlayedStatus
+        var gamesUsingPlayedStatus = await _context.Games.CountAsync(g => g.PlayedStatusId == id && g.UserId == userId);
+        if (gamesUsingPlayedStatus > 0)
+        {
+            return BadRequest(new
+            {
+                message = "No se puede eliminar el estado",
+                details = $"Hay {gamesUsingPlayedStatus} juego(s) que usan este estado",
+                gamesCount = gamesUsingPlayedStatus
+            });
+        }
 
         _context.GamePlayedStatuses.Remove(item);
         await _context.SaveChangesAsync();

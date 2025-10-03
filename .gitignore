@@ -180,8 +180,7 @@ $RECYCLE.BIN/
 # VS Code settings
 .history/
 
-# Pokemon files (should be in user's Documents)
-*.pk*
-*.pb*
-*.ekx
-*.ek*
+# Electron Desktop build (compiled backend)
+publish/
+*.exe
+!*.csproj

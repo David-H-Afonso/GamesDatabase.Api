@@ -207,7 +207,19 @@ public class GamePlatformsController : BaseApiController
             .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
 
         if (gamePlatform == null)
-            return NotFound();
+            return NotFound(new { message = "Plataforma no encontrada" });
+
+        // Verificar si hay juegos usando esta plataforma
+        var gamesUsingPlatform = await _context.Games.CountAsync(g => g.PlatformId == id && g.UserId == userId);
+        if (gamesUsingPlatform > 0)
+        {
+            return BadRequest(new
+            {
+                message = "No se puede eliminar la plataforma",
+                details = $"Hay {gamesUsingPlatform} juego(s) que usan esta plataforma",
+                gamesCount = gamesUsingPlatform
+            });
+        }
 
         _context.GamePlatforms.Remove(gamePlatform);
         await _context.SaveChangesAsync();
