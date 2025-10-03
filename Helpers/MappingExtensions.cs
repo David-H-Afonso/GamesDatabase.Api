@@ -88,6 +88,7 @@ public static class MappingExtensions
         {
             Id = platform.Id,
             Name = platform.Name,
+            SortOrder = platform.SortOrder,
             IsActive = platform.IsActive,
             Color = platform.Color
         };
@@ -126,6 +127,7 @@ public static class MappingExtensions
         {
             Id = playWith.Id,
             Name = playWith.Name,
+            SortOrder = playWith.SortOrder,
             IsActive = playWith.IsActive,
             Color = playWith.Color
         };
@@ -137,6 +139,7 @@ public static class MappingExtensions
         {
             Id = playedStatus.Id,
             Name = playedStatus.Name,
+            SortOrder = playedStatus.SortOrder,
             IsActive = playedStatus.IsActive,
             Color = playedStatus.Color
         };

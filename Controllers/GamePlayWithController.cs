@@ -128,11 +128,15 @@ public class GamePlayWithController : BaseApiController
             return Conflict(new { message = "Ya existe un elemento con este nombre" });
         }
 
+        var maxSort = await _context.GamePlayWiths
+            .Where(p => p.UserId == userId)
+            .MaxAsync(p => (int?)p.SortOrder) ?? 0;
+
         var item = new GamePlayWith
         {
             UserId = userId,
             Name = createDto.Name,
-            SortOrder = 0,
+            SortOrder = maxSort + 1,
             IsActive = createDto.IsActive,
             Color = createDto.Color
         };
@@ -150,24 +154,37 @@ public class GamePlayWithController : BaseApiController
         var userId = GetCurrentUserIdOrDefault(1);
 
         if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
-            return BadRequest(new { message = "OrderedIds debe ser proporcionado" });
+            return BadRequest(new { message = "OrderedIds must be provided" });
 
         var items = await _context.GamePlayWiths
             .Where(p => dto.OrderedIds.Contains(p.Id) && p.UserId == userId)
             .ToListAsync();
 
         if (items.Count != dto.OrderedIds.Count)
-            return BadRequest(new { message = "Algunos IDs no existen" });
-
-        for (int i = 0; i < dto.OrderedIds.Count; i++)
         {
-            var item = items.FirstOrDefault(p => p.Id == dto.OrderedIds[i]);
-            if (item != null)
-                item.SortOrder = i + 1;
+            return NotFound(new { message = "One or more play-with IDs not found" });
         }
 
-        await _context.SaveChangesAsync();
-        return NoContent();
+        using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            for (int i = 0; i < dto.OrderedIds.Count; i++)
+            {
+                var id = dto.OrderedIds[i];
+                var item = items.First(p => p.Id == id);
+                item.SortOrder = i + 1; // 1-based ordering
+            }
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new { message = "Play-with options reordered successfully" });
+        }
+        catch (Exception)
+        {
+            await transaction.RollbackAsync();
+            return StatusCode(500, new { message = "Error reordering play-with options" });
+        }
     }
 
     [HttpDelete("{id}")]

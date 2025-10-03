@@ -140,11 +140,15 @@ public class GamePlatformsController : BaseApiController
             return Conflict(new { message = "Ya existe una plataforma con este nombre" });
         }
 
+        var maxSort = await _context.GamePlatforms
+            .Where(p => p.UserId == userId)
+            .MaxAsync(p => (int?)p.SortOrder) ?? 0;
+
         var gamePlatform = new GamePlatform
         {
             UserId = userId,
             Name = createDto.Name,
-            SortOrder = 0,
+            SortOrder = maxSort + 1,
             IsActive = createDto.IsActive,
             Color = createDto.Color
         };
@@ -162,7 +166,7 @@ public class GamePlatformsController : BaseApiController
         var userId = GetCurrentUserIdOrDefault(1);
 
         if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
-            return BadRequest(new { message = "OrderedIds debe ser proporcionado" });
+            return BadRequest(new { message = "OrderedIds must be provided" });
 
         var platforms = await _context.GamePlatforms
             .Where(p => dto.OrderedIds.Contains(p.Id) && p.UserId == userId)
@@ -170,20 +174,29 @@ public class GamePlatformsController : BaseApiController
 
         if (platforms.Count != dto.OrderedIds.Count)
         {
-            return BadRequest(new { message = "Algunos IDs no existen" });
+            return NotFound(new { message = "One or more platform IDs not found" });
         }
 
-        for (int i = 0; i < dto.OrderedIds.Count; i++)
+        using var transaction = await _context.Database.BeginTransactionAsync();
+        try
         {
-            var platform = platforms.FirstOrDefault(p => p.Id == dto.OrderedIds[i]);
-            if (platform != null)
+            for (int i = 0; i < dto.OrderedIds.Count; i++)
             {
-                platform.SortOrder = i + 1;
+                var id = dto.OrderedIds[i];
+                var platform = platforms.First(p => p.Id == id);
+                platform.SortOrder = i + 1; // 1-based ordering
             }
-        }
 
-        await _context.SaveChangesAsync();
-        return NoContent();
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new { message = "Platforms reordered successfully" });
+        }
+        catch (Exception)
+        {
+            await transaction.RollbackAsync();
+            return StatusCode(500, new { message = "Error reordering platforms" });
+        }
     }
 
     [HttpDelete("{id}")]

@@ -128,11 +128,15 @@ public class GamePlayedStatusController : BaseApiController
             return Conflict(new { message = "Ya existe un estado con este nombre" });
         }
 
+        var maxSort = await _context.GamePlayedStatuses
+            .Where(p => p.UserId == userId)
+            .MaxAsync(p => (int?)p.SortOrder) ?? 0;
+
         var item = new GamePlayedStatus
         {
             UserId = userId,
             Name = createDto.Name,
-            SortOrder = 0,
+            SortOrder = maxSort + 1,
             IsActive = createDto.IsActive,
             Color = createDto.Color
         };
@@ -161,25 +165,41 @@ public class GamePlayedStatusController : BaseApiController
     }
 
     [HttpPost("reorder")]
-    public async Task<IActionResult> ReorderPlayedStatuses([FromBody] ReorderStatusesDto reorderDto)
+    public async Task<IActionResult> ReorderPlayedStatuses([FromBody] ReorderStatusesDto dto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
 
-        if (reorderDto?.OrderedIds == null || reorderDto.OrderedIds.Count == 0)
-            return BadRequest("Se requiere la lista ordenada de IDs");
+        if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
+            return BadRequest(new { message = "OrderedIds must be provided" });
 
-        var allStatuses = await _context.GamePlayedStatuses
-            .Where(s => s.UserId == userId)
+        var statuses = await _context.GamePlayedStatuses
+            .Where(s => dto.OrderedIds.Contains(s.Id) && s.UserId == userId)
             .ToListAsync();
 
-        for (int i = 0; i < reorderDto.OrderedIds.Count; i++)
+        if (statuses.Count != dto.OrderedIds.Count)
         {
-            var status = allStatuses.FirstOrDefault(s => s.Id == reorderDto.OrderedIds[i]);
-            if (status != null)
-                status.SortOrder = i + 1;
+            return NotFound(new { message = "One or more played status IDs not found" });
         }
 
-        await _context.SaveChangesAsync();
-        return NoContent();
+        using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            for (int i = 0; i < dto.OrderedIds.Count; i++)
+            {
+                var id = dto.OrderedIds[i];
+                var status = statuses.First(s => s.Id == id);
+                status.SortOrder = i + 1; // 1-based ordering
+            }
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new { message = "Played statuses reordered successfully" });
+        }
+        catch (Exception)
+        {
+            await transaction.RollbackAsync();
+            return StatusCode(500, new { message = "Error reordering played statuses" });
+        }
     }
 }

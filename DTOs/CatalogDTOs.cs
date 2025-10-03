@@ -4,6 +4,7 @@ public class GamePlatformDto
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
     public bool IsActive { get; set; }
     public string Color { get; set; } = "#ffffff";
 }
@@ -81,6 +82,7 @@ public class GamePlayWithDto
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
     public bool IsActive { get; set; }
     public string Color { get; set; } = "#ffffff";
 }
@@ -103,6 +105,7 @@ public class GamePlayedStatusDto
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
     public bool IsActive { get; set; }
     public string Color { get; set; } = "#ffffff";
 }
