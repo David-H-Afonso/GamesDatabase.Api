@@ -7,13 +7,15 @@ namespace GamesDatabase.Api.Services;
 
 public interface IViewFilterService
 {
-    IQueryable<Game> ApplyFilters(IQueryable<Game> query, ViewConfiguration configuration);
+    IQueryable<Game> ApplyFilters(IQueryable<Game> query, ViewConfiguration configuration, int userId);
 }
 
 public class ViewFilterService : IViewFilterService
 {
-    public IQueryable<Game> ApplyFilters(IQueryable<Game> query, ViewConfiguration configuration)
+    public IQueryable<Game> ApplyFilters(IQueryable<Game> query, ViewConfiguration configuration, int userId)
     {
+        query = query.Where(g => g.UserId == userId);
+
         // Aplicar grupos de filtros
         if (configuration.FilterGroups.Any())
         {

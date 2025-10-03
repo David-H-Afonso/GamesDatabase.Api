@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GamesDatabase.Api.Migrations
 {
     [DbContext(typeof(GamesDbContext))]
-    [Migration("20251001192742_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20251002233338_AddMultiUserSupport")]
+    partial class AddMultiUserSupport
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -96,6 +96,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("updated_at");
 
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PlatformId");
@@ -103,6 +107,8 @@ namespace GamesDatabase.Api.Migrations
                     b.HasIndex("PlayedStatusId");
 
                     b.HasIndex("StatusId");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("game", (string)null);
                 });
@@ -138,9 +144,13 @@ namespace GamesDatabase.Api.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("sort_order");
 
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("UserId", "Name")
                         .IsUnique();
 
                     b.ToTable("game_platform", (string)null);
@@ -177,9 +187,13 @@ namespace GamesDatabase.Api.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("sort_order");
 
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("UserId", "Name")
                         .IsUnique();
 
                     b.ToTable("game_play_with", (string)null);
@@ -233,9 +247,13 @@ namespace GamesDatabase.Api.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("sort_order");
 
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("UserId", "Name")
                         .IsUnique();
 
                     b.ToTable("game_played_status", (string)null);
@@ -282,12 +300,16 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("status_type");
 
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("UserId", "Name")
                         .IsUnique();
 
-                    b.HasIndex("StatusType", "IsDefault")
+                    b.HasIndex("UserId", "StatusType", "IsDefault")
                         .IsUnique()
                         .HasFilter("is_default = 1");
 
@@ -340,12 +362,59 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("updated_at");
 
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("UserId", "Name")
                         .IsUnique();
 
                     b.ToTable("game_view", (string)null);
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.User", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_default");
+
+                    b.Property<string>("PasswordHash")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("password_hash");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("role");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("username");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("user", (string)null);
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.Game", b =>
@@ -366,11 +435,41 @@ namespace GamesDatabase.Api.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("GamesDatabase.Api.Models.User", "User")
+                        .WithMany("Games")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.Navigation("Platform");
 
                     b.Navigation("PlayedStatus");
 
                     b.Navigation("Status");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.GamePlatform", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Models.User", "User")
+                        .WithMany("Platforms")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayWith", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Models.User", "User")
+                        .WithMany("PlayWiths")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayWithMapping", b =>
@@ -390,6 +489,39 @@ namespace GamesDatabase.Api.Migrations
                     b.Navigation("Game");
 
                     b.Navigation("PlayWith");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.GamePlayedStatus", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Models.User", "User")
+                        .WithMany("PlayedStatuses")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.GameStatus", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Models.User", "User")
+                        .WithMany("Statuses")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.GameView", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Models.User", "User")
+                        .WithMany("Views")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.Game", b =>
@@ -415,6 +547,21 @@ namespace GamesDatabase.Api.Migrations
             modelBuilder.Entity("GamesDatabase.Api.Models.GameStatus", b =>
                 {
                     b.Navigation("Games");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Models.User", b =>
+                {
+                    b.Navigation("Games");
+
+                    b.Navigation("Platforms");
+
+                    b.Navigation("PlayWiths");
+
+                    b.Navigation("PlayedStatuses");
+
+                    b.Navigation("Statuses");
+
+                    b.Navigation("Views");
                 });
 #pragma warning restore 612, 618
         }

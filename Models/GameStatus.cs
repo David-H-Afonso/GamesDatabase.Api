@@ -28,7 +28,10 @@ public class GameStatus
     /// </summary>
     public SpecialStatusType StatusType { get; set; } = SpecialStatusType.None;
 
-    // Navigation property - ignorada en JSON
+    public int UserId { get; set; }
+
+    [JsonIgnore]
+    public virtual User User { get; set; } = null!;
     [JsonIgnore]
     public virtual ICollection<Game> Games { get; set; } = new List<Game>();
 

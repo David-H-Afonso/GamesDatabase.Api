@@ -9,7 +9,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class GamePlayWithController : ControllerBase
+public class GamePlayWithController : BaseApiController
 {
     private readonly GamesDbContext _context;
 
@@ -21,7 +21,8 @@ public class GamePlayWithController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<PagedResult<GamePlayWithDto>>> GetGamePlayWiths([FromQuery] QueryParameters parameters)
     {
-        var query = _context.GamePlayWiths.AsQueryable();
+        var userId = GetCurrentUserIdOrDefault(1);
+        var query = _context.GamePlayWiths.Where(p => p.UserId == userId).AsQueryable();
 
         if (!string.IsNullOrEmpty(parameters.Search))
         {
@@ -65,9 +66,10 @@ public class GamePlayWithController : ControllerBase
     [HttpGet("active")]
     public async Task<ActionResult<IEnumerable<GamePlayWithDto>>> GetActiveGamePlayWiths()
     {
+        var userId = GetCurrentUserIdOrDefault(1);
         var items = await _context.GamePlayWiths
-            .Where(p => p.IsActive)
-            .OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Orden alfabético case-insensitive
+            .Where(p => p.IsActive && p.UserId == userId)
+            .OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE"))
             .ToListAsync();
 
         return Ok(items.Select(p => p.ToDto()));
@@ -76,31 +78,25 @@ public class GamePlayWithController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<GamePlayWithDto>> GetGamePlayWith(int id)
     {
-        var item = await _context.GamePlayWiths.FindAsync(id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        var item = await _context.GamePlayWiths
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
         return item == null ? NotFound() : Ok(item.ToDto());
     }
 
     [HttpPut("{id}")]
     public async Task<IActionResult> PutGamePlayWith(int id, GamePlayWithUpdateDto updateDto)
     {
-        var item = await _context.GamePlayWiths.FindAsync(id);
-        if (item == null)
-        {
-            return NotFound(new
-            {
-                message = "Elemento no encontrado",
-                details = "El elemento que intenta actualizar no existe."
-            });
-        }
+        var userId = GetCurrentUserIdOrDefault(1);
+        var item = await _context.GamePlayWiths
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
 
-        // Validar que el nombre no exista en otro elemento
-        if (await _context.GamePlayWiths.AnyAsync(p => p.Name.ToLower() == updateDto.Name.ToLower() && p.Id != id))
+        if (item == null)
+            return NotFound(new { message = "Elemento no encontrado" });
+
+        if (await _context.GamePlayWiths.AnyAsync(p => p.Name.ToLower() == updateDto.Name.ToLower() && p.Id != id && p.UserId == userId))
         {
-            return Conflict(new
-            {
-                message = "Ya existe un elemento con este nombre",
-                details = "El nombre debe ser único. Por favor, use un nombre diferente."
-            });
+            return Conflict(new { message = "Ya existe un elemento con este nombre" });
         }
 
         item.Name = updateDto.Name;
@@ -113,22 +109,10 @@ public class GamePlayWithController : ControllerBase
         }
         catch (DbUpdateConcurrencyException)
         {
-            if (!_context.GamePlayWiths.Any(e => e.Id == id))
-            {
-                return NotFound(new
-                {
-                    message = "Elemento no encontrado",
-                    details = "El elemento fue eliminado por otro usuario."
-                });
-            }
+            if (!_context.GamePlayWiths.Any(e => e.Id == id && e.UserId == userId))
+                return NotFound(new { message = "Elemento no encontrado" });
             else
-            {
-                return Conflict(new
-                {
-                    message = "Conflicto de concurrencia",
-                    details = "El elemento fue modificado por otro usuario. Por favor, recargue e intente nuevamente."
-                });
-            }
+                return Conflict(new { message = "Conflicto de concurrencia" });
         }
 
         return NoContent();
@@ -137,20 +121,18 @@ public class GamePlayWithController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<GamePlayWithDto>> PostGamePlayWith(GamePlayWithCreateDto createDto)
     {
-        // Validar que el nombre no exista
-        if (await _context.GamePlayWiths.AnyAsync(p => p.Name.ToLower() == createDto.Name.ToLower()))
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        if (await _context.GamePlayWiths.AnyAsync(p => p.Name.ToLower() == createDto.Name.ToLower() && p.UserId == userId))
         {
-            return Conflict(new
-            {
-                message = "Ya existe un elemento con este nombre",
-                details = "El nombre debe ser único. Por favor, use un nombre diferente."
-            });
+            return Conflict(new { message = "Ya existe un elemento con este nombre" });
         }
 
         var item = new GamePlayWith
         {
+            UserId = userId,
             Name = createDto.Name,
-            SortOrder = 0, // Se mantiene para compatibilidad con la base de datos, pero no se usa
+            SortOrder = 0,
             IsActive = createDto.IsActive,
             Color = createDto.Color
         };
@@ -162,33 +144,26 @@ public class GamePlayWithController : ControllerBase
         return CreatedAtAction("GetGamePlayWith", new { id = item.Id }, result);
     }
 
-    /// <summary>
-    /// Reordena los elementos proporcionando una lista ordenada de IDs
-    /// </summary>
     [HttpPost("reorder")]
     public async Task<IActionResult> ReorderPlayWith([FromBody] ReorderStatusesDto dto)
     {
+        var userId = GetCurrentUserIdOrDefault(1);
+
         if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
-        {
             return BadRequest(new { message = "OrderedIds debe ser proporcionado" });
-        }
 
         var items = await _context.GamePlayWiths
-            .Where(p => dto.OrderedIds.Contains(p.Id))
+            .Where(p => dto.OrderedIds.Contains(p.Id) && p.UserId == userId)
             .ToListAsync();
 
         if (items.Count != dto.OrderedIds.Count)
-        {
             return BadRequest(new { message = "Algunos IDs no existen" });
-        }
 
         for (int i = 0; i < dto.OrderedIds.Count; i++)
         {
             var item = items.FirstOrDefault(p => p.Id == dto.OrderedIds[i]);
             if (item != null)
-            {
                 item.SortOrder = i + 1;
-            }
         }
 
         await _context.SaveChangesAsync();
@@ -198,8 +173,12 @@ public class GamePlayWithController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteGamePlayWith(int id)
     {
-        var item = await _context.GamePlayWiths.FindAsync(id);
-        if (item == null) return NotFound();
+        var userId = GetCurrentUserIdOrDefault(1);
+        var item = await _context.GamePlayWiths
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
+
+        if (item == null)
+            return NotFound();
 
         _context.GamePlayWiths.Remove(item);
         await _context.SaveChangesAsync();

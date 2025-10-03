@@ -28,19 +28,18 @@ public class GameView
     /// </summary>
     public string? SortingJson { get; set; }
 
-    /// <summary>
-    /// Indica si la vista es pública o privada
-    /// </summary>
     public bool IsPublic { get; set; } = true;
 
-    /// <summary>
-    /// Usuario creador de la vista (para futuras implementaciones de autenticación)
-    /// </summary>
     [MaxLength(50)]
     public string? CreatedBy { get; set; }
 
+    public int UserId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    [JsonIgnore]
+    public virtual User User { get; set; } = null!;
 }
 
 /// <summary>

@@ -35,11 +35,13 @@ public class Game
     public string? Logo { get; set; }
     public string? Cover { get; set; }
 
-    // Audit fields
+    public int UserId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
-    // Navigation properties - ignoradas en JSON
+    [JsonIgnore]
+    public virtual User User { get; set; } = null!;
     [JsonIgnore]
     public virtual GameStatus Status { get; set; } = null!;
     [JsonIgnore]

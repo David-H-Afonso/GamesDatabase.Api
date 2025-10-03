@@ -10,7 +10,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class GamesController : ControllerBase
+public class GamesController : BaseApiController
 {
     private readonly GamesDbContext _context;
     private readonly IViewFilterService _viewFilterService;
@@ -21,14 +21,13 @@ public class GamesController : ControllerBase
         _viewFilterService = viewFilterService;
     }
 
-    /// <summary>
-    /// Obtiene todos los juegos con paginado, filtrado y ordenado
-    /// Soporta aplicar vistas personalizadas que contienen filtros y ordenamientos complejos
-    /// </summary>
     [HttpGet]
     public async Task<ActionResult<PagedResult<GameDto>>> GetGames([FromQuery] GameQueryParameters parameters)
     {
+        var userId = GetCurrentUserIdOrDefault(1);
+
         var query = _context.Games
+            .Where(g => g.UserId == userId)
             .Include(g => g.Status)
             .Include(g => g.Platform)
             .Include(g => g.GamePlayWiths)
@@ -105,12 +104,11 @@ public class GamesController : ControllerBase
             }
         }
 
-        // Si hay configuración de vista, aplicarla; si no, usar filtros tradicionales
         if (viewConfiguration != null)
         {
             try
             {
-                query = _viewFilterService.ApplyFilters(query, viewConfiguration);
+                query = _viewFilterService.ApplyFilters(query, viewConfiguration, userId);
             }
             catch (Exception ex)
             {
@@ -245,13 +243,13 @@ public class GamesController : ControllerBase
         return query;
     }
 
-    /// <summary>
-    /// Obtiene un juego específico por ID
-    /// </summary>
     [HttpGet("{id}")]
     public async Task<ActionResult<GameDto>> GetGame(int id)
     {
+        var userId = GetCurrentUserIdOrDefault(1);
+
         var game = await _context.Games
+            .Where(g => g.UserId == userId)
             .Include(g => g.Status)
             .Include(g => g.Platform)
             .Include(g => g.GamePlayWiths)
@@ -260,24 +258,21 @@ public class GamesController : ControllerBase
             .FirstOrDefaultAsync(g => g.Id == id);
 
         if (game == null)
-        {
             return NotFound();
-        }
 
         return Ok(game.ToDto());
     }
 
-    /// <summary>
-    /// Actualiza un juego existente
-    /// </summary>
     [HttpPut("{id}")]
     public async Task<IActionResult> PutGame(int id, [FromBody] System.Text.Json.JsonElement gameDto)
     {
-        var game = await _context.Games.FindAsync(id);
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        var game = await _context.Games
+            .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
+
         if (game == null)
-        {
             return NotFound();
-        }
 
         // Actualizar solo los campos que están presentes en el JSON
         if (gameDto.TryGetProperty("statusId", out var statusIdElement) && statusIdElement.ValueKind != System.Text.Json.JsonValueKind.Null)
@@ -402,20 +397,48 @@ public class GamesController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>
-    /// Crea un nuevo juego
-    /// </summary>
     [HttpPost]
     public async Task<ActionResult<GameDto>> PostGame(GameCreateDto gameDto)
     {
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        var statusExists = await _context.GameStatuses
+            .AnyAsync(s => s.Id == gameDto.StatusId && s.UserId == userId);
+        if (!statusExists)
+            return BadRequest(new { message = "Invalid StatusId for current user" });
+
+        if (gameDto.PlatformId.HasValue)
+        {
+            var platformExists = await _context.GamePlatforms
+                .AnyAsync(p => p.Id == gameDto.PlatformId.Value && p.UserId == userId);
+            if (!platformExists)
+                return BadRequest(new { message = "Invalid PlatformId for current user" });
+        }
+
+        if (gameDto.PlayedStatusId.HasValue)
+        {
+            var playedStatusExists = await _context.GamePlayedStatuses
+                .AnyAsync(ps => ps.Id == gameDto.PlayedStatusId.Value && ps.UserId == userId);
+            if (!playedStatusExists)
+                return BadRequest(new { message = "Invalid PlayedStatusId for current user" });
+        }
+
         var game = gameDto.ToEntity();
+        game.UserId = userId;
         _context.Games.Add(game);
         await _context.SaveChangesAsync();
 
-        // Agregar las relaciones PlayWith
         if (gameDto.PlayWithIds != null && gameDto.PlayWithIds.Any())
         {
-            foreach (var playWithId in gameDto.PlayWithIds)
+            var validPlayWithIds = await _context.GamePlayWiths
+                .Where(pw => gameDto.PlayWithIds.Contains(pw.Id) && pw.UserId == userId)
+                .Select(pw => pw.Id)
+                .ToListAsync();
+
+            if (validPlayWithIds.Count != gameDto.PlayWithIds.Count)
+                return BadRequest(new { message = "One or more PlayWithIds are invalid for current user" });
+
+            foreach (var playWithId in validPlayWithIds)
             {
                 _context.GamePlayWithMappings.Add(new Models.GamePlayWithMapping
                 {
@@ -451,17 +474,16 @@ public class GamesController : ControllerBase
         return CreatedAtAction("GetGame", new { id = game.Id }, game.ToDto());
     }
 
-    /// <summary>
-    /// Elimina un juego
-    /// </summary>
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteGame(int id)
     {
-        var game = await _context.Games.FindAsync(id);
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        var game = await _context.Games
+            .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
+
         if (game == null)
-        {
             return NotFound();
-        }
 
         _context.Games.Remove(game);
         await _context.SaveChangesAsync();
@@ -471,6 +493,7 @@ public class GamesController : ControllerBase
 
     private bool GameExists(int id)
     {
-        return _context.Games.Any(e => e.Id == id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        return _context.Games.Any(e => e.Id == id && e.UserId == userId);
     }
 }

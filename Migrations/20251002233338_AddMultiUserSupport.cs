@@ -6,11 +6,29 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace GamesDatabase.Api.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class AddMultiUserSupport : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.CreateTable(
+                name: "user",
+                columns: table => new
+                {
+                    id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    username = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
+                    password_hash = table.Column<string>(type: "TEXT", nullable: true),
+                    role = table.Column<int>(type: "INTEGER", nullable: false),
+                    is_default = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: false),
+                    created_at = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    updated_at = table.Column<DateTime>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_user", x => x.id);
+                });
+
             migrationBuilder.CreateTable(
                 name: "game_platform",
                 columns: table => new
@@ -20,11 +38,18 @@ namespace GamesDatabase.Api.Migrations
                     name = table.Column<string>(type: "TEXT", nullable: false),
                     sort_order = table.Column<int>(type: "INTEGER", nullable: false, defaultValue: 0),
                     is_active = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
-                    color = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "#ffffff")
+                    color = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "#ffffff"),
+                    user_id = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_game_platform", x => x.id);
+                    table.ForeignKey(
+                        name: "FK_game_platform_user_user_id",
+                        column: x => x.user_id,
+                        principalTable: "user",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -36,11 +61,18 @@ namespace GamesDatabase.Api.Migrations
                     name = table.Column<string>(type: "TEXT", nullable: false),
                     sort_order = table.Column<int>(type: "INTEGER", nullable: false, defaultValue: 0),
                     is_active = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
-                    color = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "#ffffff")
+                    color = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "#ffffff"),
+                    user_id = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_game_play_with", x => x.id);
+                    table.ForeignKey(
+                        name: "FK_game_play_with_user_user_id",
+                        column: x => x.user_id,
+                        principalTable: "user",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -52,11 +84,18 @@ namespace GamesDatabase.Api.Migrations
                     name = table.Column<string>(type: "TEXT", nullable: false),
                     sort_order = table.Column<int>(type: "INTEGER", nullable: false, defaultValue: 0),
                     is_active = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
-                    color = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "#ffffff")
+                    color = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "#ffffff"),
+                    user_id = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_game_played_status", x => x.id);
+                    table.ForeignKey(
+                        name: "FK_game_played_status_user_user_id",
+                        column: x => x.user_id,
+                        principalTable: "user",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -70,11 +109,18 @@ namespace GamesDatabase.Api.Migrations
                     is_active = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
                     color = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "#ffffff"),
                     is_default = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: false),
-                    status_type = table.Column<int>(type: "INTEGER", nullable: false)
+                    status_type = table.Column<int>(type: "INTEGER", nullable: false),
+                    user_id = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_game_status", x => x.id);
+                    table.ForeignKey(
+                        name: "FK_game_status_user_user_id",
+                        column: x => x.user_id,
+                        principalTable: "user",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -89,12 +135,19 @@ namespace GamesDatabase.Api.Migrations
                     sorting_json = table.Column<string>(type: "TEXT", nullable: true),
                     is_public = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
                     created_by = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
+                    user_id = table.Column<int>(type: "INTEGER", nullable: false),
                     created_at = table.Column<DateTime>(type: "TEXT", nullable: false),
                     updated_at = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_game_view", x => x.id);
+                    table.ForeignKey(
+                        name: "FK_game_view_user_user_id",
+                        column: x => x.user_id,
+                        principalTable: "user",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -118,6 +171,7 @@ namespace GamesDatabase.Api.Migrations
                     played_status_id = table.Column<int>(type: "INTEGER", nullable: true),
                     logo = table.Column<string>(type: "TEXT", nullable: true),
                     cover = table.Column<string>(type: "TEXT", nullable: true),
+                    user_id = table.Column<int>(type: "INTEGER", nullable: false),
                     created_at = table.Column<DateTime>(type: "TEXT", nullable: false),
                     updated_at = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
@@ -142,6 +196,12 @@ namespace GamesDatabase.Api.Migrations
                         principalTable: "game_status",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_game_user_user_id",
+                        column: x => x.user_id,
+                        principalTable: "user",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -184,15 +244,20 @@ namespace GamesDatabase.Api.Migrations
                 column: "status_id");
 
             migrationBuilder.CreateIndex(
-                name: "IX_game_platform_name",
+                name: "IX_game_user_id",
+                table: "game",
+                column: "user_id");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_game_platform_user_id_name",
                 table: "game_platform",
-                column: "name",
+                columns: new[] { "user_id", "name" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_game_play_with_name",
+                name: "IX_game_play_with_user_id_name",
                 table: "game_play_with",
-                column: "name",
+                columns: new[] { "user_id", "name" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -201,28 +266,34 @@ namespace GamesDatabase.Api.Migrations
                 column: "play_with_id");
 
             migrationBuilder.CreateIndex(
-                name: "IX_game_played_status_name",
+                name: "IX_game_played_status_user_id_name",
                 table: "game_played_status",
-                column: "name",
+                columns: new[] { "user_id", "name" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_game_status_name",
+                name: "IX_game_status_user_id_name",
                 table: "game_status",
-                column: "name",
+                columns: new[] { "user_id", "name" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_game_status_status_type_is_default",
+                name: "IX_game_status_user_id_status_type_is_default",
                 table: "game_status",
-                columns: new[] { "status_type", "is_default" },
+                columns: new[] { "user_id", "status_type", "is_default" },
                 unique: true,
                 filter: "is_default = 1");
 
             migrationBuilder.CreateIndex(
-                name: "IX_game_view_name",
+                name: "IX_game_view_user_id_name",
                 table: "game_view",
-                column: "name",
+                columns: new[] { "user_id", "name" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_user_username",
+                table: "user",
+                column: "username",
                 unique: true);
         }
 
@@ -249,6 +320,9 @@ namespace GamesDatabase.Api.Migrations
 
             migrationBuilder.DropTable(
                 name: "game_status");
+
+            migrationBuilder.DropTable(
+                name: "user");
         }
     }
 }

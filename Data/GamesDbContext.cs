@@ -26,39 +26,50 @@ public class GamesDbContext : DbContext
 
     private void UpdateTimestamps()
     {
-        var gameEntries = ChangeTracker.Entries<Game>();
-        var viewEntries = ChangeTracker.Entries<GameView>();
+        var entities = ChangeTracker.Entries()
+            .Where(e => e.Entity is Game or GameView or User);
 
-        foreach (var entry in gameEntries)
+        foreach (var entry in entities)
         {
             if (entry.State == EntityState.Added)
             {
-                entry.Entity.CreatedAt = DateTime.UtcNow;
-                entry.Entity.UpdatedAt = DateTime.UtcNow;
+                if (entry.Entity is Game game)
+                {
+                    game.CreatedAt = DateTime.UtcNow;
+                    game.UpdatedAt = DateTime.UtcNow;
+                }
+                else if (entry.Entity is GameView view)
+                {
+                    view.CreatedAt = DateTime.UtcNow;
+                    view.UpdatedAt = DateTime.UtcNow;
+                }
+                else if (entry.Entity is User user)
+                {
+                    user.CreatedAt = DateTime.UtcNow;
+                    user.UpdatedAt = DateTime.UtcNow;
+                }
             }
             else if (entry.State == EntityState.Modified)
             {
-                entry.Entity.UpdatedAt = DateTime.UtcNow;
-                // Prevent updating CreatedAt
-                entry.Property(e => e.CreatedAt).IsModified = false;
-            }
-        }
-
-        foreach (var entry in viewEntries)
-        {
-            if (entry.State == EntityState.Added)
-            {
-                entry.Entity.CreatedAt = DateTime.UtcNow;
-                entry.Entity.UpdatedAt = DateTime.UtcNow;
-            }
-            else if (entry.State == EntityState.Modified)
-            {
-                entry.Entity.UpdatedAt = DateTime.UtcNow;
-                // Prevent updating CreatedAt
-                entry.Property(e => e.CreatedAt).IsModified = false;
+                if (entry.Entity is Game game)
+                {
+                    game.UpdatedAt = DateTime.UtcNow;
+                    entry.Property("CreatedAt").IsModified = false;
+                }
+                else if (entry.Entity is GameView view)
+                {
+                    view.UpdatedAt = DateTime.UtcNow;
+                    entry.Property("CreatedAt").IsModified = false;
+                }
+                else if (entry.Entity is User user)
+                {
+                    user.UpdatedAt = DateTime.UtcNow;
+                    entry.Property("CreatedAt").IsModified = false;
+                }
             }
         }
     }
+    public DbSet<User> Users { get; set; }
     public DbSet<Game> Games { get; set; }
     public DbSet<GamePlatform> GamePlatforms { get; set; }
     public DbSet<GamePlayWith> GamePlayWiths { get; set; }
@@ -71,7 +82,7 @@ public class GamesDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Configure table names to match SQLite schema
+        modelBuilder.Entity<User>().ToTable("user");
         modelBuilder.Entity<Game>().ToTable("game");
         modelBuilder.Entity<GamePlatform>().ToTable("game_platform");
         modelBuilder.Entity<GamePlayWith>().ToTable("game_play_with");
@@ -79,6 +90,21 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<GameStatus>().ToTable("game_status");
         modelBuilder.Entity<GameView>().ToTable("game_view");
         modelBuilder.Entity<GamePlayWithMapping>().ToTable("game_play_with_mapping");
+
+        // Configure User entity
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Username).HasColumnName("username").IsRequired().HasMaxLength(50);
+            entity.Property(e => e.PasswordHash).HasColumnName("password_hash");
+            entity.Property(e => e.Role).HasColumnName("role").HasConversion<int>();
+            entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasIndex(e => e.Username).IsUnique();
+        });
 
         // Configure Game entity
         modelBuilder.Entity<Game>(entity =>
@@ -100,10 +126,15 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.PlayedStatusId).HasColumnName("played_status_id");
             entity.Property(e => e.Logo).HasColumnName("logo");
             entity.Property(e => e.Cover).HasColumnName("cover");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 
-            // Configure relationships
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Games)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             entity.HasOne(e => e.Status)
                 .WithMany(s => s.Games)
                 .HasForeignKey(e => e.StatusId)
@@ -129,8 +160,14 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
 
-            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Platforms)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
         });
 
         // Configure GamePlayWith entity
@@ -142,8 +179,14 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
 
-            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.PlayWiths)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
         });
 
         // Configure GamePlayedStatus entity
@@ -155,8 +198,14 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
 
-            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.PlayedStatuses)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
         });
 
         // Configure GameStatus entity
@@ -172,11 +221,16 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.StatusType)
                 .HasColumnName("status_type")
                 .HasConversion<int>();
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
 
-            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Statuses)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
 
-            // Ensure only one default status per status type
-            entity.HasIndex(e => new { e.StatusType, e.IsDefault })
+            entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
+
+            entity.HasIndex(e => new { e.UserId, e.StatusType, e.IsDefault })
                 .HasFilter("is_default = 1")
                 .IsUnique();
         });
@@ -210,10 +264,16 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.SortingJson).HasColumnName("sorting_json");
             entity.Property(e => e.IsPublic).HasColumnName("is_public").HasDefaultValue(true);
             entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(50);
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 
-            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Views)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
         });
     }
 }

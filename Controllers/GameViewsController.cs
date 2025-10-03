@@ -10,7 +10,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class GameViewsController : ControllerBase
+public class GameViewsController : BaseApiController
 {
     private readonly GamesDbContext _context;
 
@@ -25,7 +25,8 @@ public class GameViewsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<GameViewSummaryDto>>> GetGameViews([FromQuery] bool includePrivate = false)
     {
-        var query = _context.GameViews.AsQueryable();
+        var userId = GetCurrentUserIdOrDefault(1);
+        var query = _context.GameViews.Where(v => v.UserId == userId);
 
         if (!includePrivate)
         {
@@ -47,8 +48,9 @@ public class GameViewsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<GameViewDto>> GetGameView(int id)
     {
+        var userId = GetCurrentUserIdOrDefault(1);
         var view = await _context.GameViews
-            .FirstOrDefaultAsync(v => v.Id == id);
+            .FirstOrDefaultAsync(v => v.Id == id && v.UserId == userId);
 
         if (view == null)
         {
@@ -64,8 +66,9 @@ public class GameViewsController : ControllerBase
     [HttpGet("by-name/{name}")]
     public async Task<ActionResult<GameViewDto>> GetGameViewByName(string name)
     {
+        var userId = GetCurrentUserIdOrDefault(1);
         var view = await _context.GameViews
-            .FirstOrDefaultAsync(v => v.Name == name);
+            .FirstOrDefaultAsync(v => v.Name == name && v.UserId == userId);
 
         if (view == null)
         {
@@ -83,9 +86,11 @@ public class GameViewsController : ControllerBase
     {
         try
         {
-            // Verificar que el nombre no esté duplicado
+            var userId = GetCurrentUserIdOrDefault(1);
+
+            // Verificar que el nombre no esté duplicado para este usuario
             var existingView = await _context.GameViews
-                .FirstOrDefaultAsync(v => v.Name == createDto.Name);
+                .FirstOrDefaultAsync(v => v.Name == createDto.Name && v.UserId == userId);
 
             if (existingView != null)
             {
@@ -100,6 +105,7 @@ public class GameViewsController : ControllerBase
             }
 
             var view = createDto.ToEntity();
+            view.UserId = userId;
 
             _context.GameViews.Add(view);
             await _context.SaveChangesAsync();
@@ -120,7 +126,8 @@ public class GameViewsController : ControllerBase
     {
         try
         {
-            var view = await _context.GameViews.FindAsync(id);
+            var userId = GetCurrentUserIdOrDefault(1);
+            var view = await _context.GameViews.FirstOrDefaultAsync(v => v.Id == id && v.UserId == userId);
             if (view == null)
             {
                 return NotFound($"Vista con ID {id} no encontrada.");
@@ -130,7 +137,7 @@ public class GameViewsController : ControllerBase
             if (!string.IsNullOrWhiteSpace(updateDto.Name) && updateDto.Name != view.Name)
             {
                 var existingView = await _context.GameViews
-                    .FirstOrDefaultAsync(v => v.Name == updateDto.Name && v.Id != id);
+                    .FirstOrDefaultAsync(v => v.Name == updateDto.Name && v.Id != id && v.UserId == userId);
 
                 if (existingView != null)
                 {
@@ -167,7 +174,8 @@ public class GameViewsController : ControllerBase
     {
         try
         {
-            var view = await _context.GameViews.FindAsync(id);
+            var userId = GetCurrentUserIdOrDefault(1);
+            var view = await _context.GameViews.FirstOrDefaultAsync(v => v.Id == id && v.UserId == userId);
             if (view == null)
             {
                 return NotFound($"Vista con ID {id} no encontrada.");
@@ -190,15 +198,16 @@ public class GameViewsController : ControllerBase
     {
         try
         {
-            var originalView = await _context.GameViews.FindAsync(id);
+            var userId = GetCurrentUserIdOrDefault(1);
+            var originalView = await _context.GameViews.FirstOrDefaultAsync(v => v.Id == id && v.UserId == userId);
             if (originalView == null)
             {
                 return NotFound($"Vista con ID {id} no encontrada.");
             }
 
-            // Verificar que el nuevo nombre no esté duplicado
+            // Verificar que el nuevo nombre no esté duplicado para este usuario
             var existingView = await _context.GameViews
-                .FirstOrDefaultAsync(v => v.Name == newName);
+                .FirstOrDefaultAsync(v => v.Name == newName && v.UserId == userId);
 
             if (existingView != null)
             {
@@ -207,6 +216,7 @@ public class GameViewsController : ControllerBase
 
             var duplicatedView = new Models.GameView
             {
+                UserId = userId,
                 Name = newName,
                 Description = originalView.Description != null ? $"Copia de {originalView.Description}" : $"Copia de {originalView.Name}",
                 FiltersJson = originalView.FiltersJson,

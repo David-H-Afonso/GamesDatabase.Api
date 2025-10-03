@@ -9,7 +9,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class GamePlatformsController : ControllerBase
+public class GamePlatformsController : BaseApiController
 {
     private readonly GamesDbContext _context;
 
@@ -18,15 +18,11 @@ public class GamePlatformsController : ControllerBase
         _context = context;
     }
 
-    /// <summary>
-    /// Obtiene todas las plataformas con paginado, filtrado y ordenado
-    /// </summary>
     [HttpGet]
     public async Task<ActionResult<PagedResult<GamePlatformDto>>> GetGamePlatforms([FromQuery] QueryParameters parameters)
     {
-        var query = _context.GamePlatforms.AsQueryable();
-
-        // Aplicar filtros
+        var userId = GetCurrentUserIdOrDefault(1);
+        var query = _context.GamePlatforms.Where(p => p.UserId == userId).AsQueryable();
         if (!string.IsNullOrEmpty(parameters.Search))
         {
             query = query.Where(p => p.Name.Contains(parameters.Search));
@@ -74,14 +70,12 @@ public class GamePlatformsController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Obtiene solo las plataformas activas ordenadas por SortOrder
-    /// </summary>
     [HttpGet("active")]
     public async Task<ActionResult<IEnumerable<GamePlatformDto>>> GetActiveGamePlatforms()
     {
+        var userId = GetCurrentUserIdOrDefault(1);
         var platforms = await _context.GamePlatforms
-            .Where(p => p.IsActive)
+            .Where(p => p.IsActive && p.UserId == userId)
             .OrderBy(p => p.SortOrder)
             .ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE"))
             .ToListAsync();
@@ -89,46 +83,32 @@ public class GamePlatformsController : ControllerBase
         return Ok(platforms.Select(p => p.ToDto()));
     }
 
-    /// <summary>
-    /// Obtiene una plataforma específica por ID
-    /// </summary>
     [HttpGet("{id}")]
     public async Task<ActionResult<GamePlatformDto>> GetGamePlatform(int id)
     {
-        var gamePlatform = await _context.GamePlatforms.FindAsync(id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gamePlatform = await _context.GamePlatforms
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
 
         if (gamePlatform == null)
-        {
             return NotFound();
-        }
 
         return Ok(gamePlatform.ToDto());
     }
 
-    /// <summary>
-    /// Actualiza una plataforma existente
-    /// </summary>
     [HttpPut("{id}")]
     public async Task<IActionResult> PutGamePlatform(int id, GamePlatformUpdateDto updateDto)
     {
-        var gamePlatform = await _context.GamePlatforms.FindAsync(id);
-        if (gamePlatform == null)
-        {
-            return NotFound(new
-            {
-                message = "Plataforma no encontrada",
-                details = "La plataforma que intenta actualizar no existe."
-            });
-        }
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gamePlatform = await _context.GamePlatforms
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
 
-        // Validar que el nombre no exista en otra plataforma
-        if (await _context.GamePlatforms.AnyAsync(p => p.Name.ToLower() == updateDto.Name.ToLower() && p.Id != id))
+        if (gamePlatform == null)
+            return NotFound(new { message = "Plataforma no encontrada" });
+
+        if (await _context.GamePlatforms.AnyAsync(p => p.Name.ToLower() == updateDto.Name.ToLower() && p.Id != id && p.UserId == userId))
         {
-            return Conflict(new
-            {
-                message = "Ya existe una plataforma con este nombre",
-                details = "El nombre de la plataforma debe ser único. Por favor, use un nombre diferente."
-            });
+            return Conflict(new { message = "Ya existe una plataforma con este nombre" });
         }
 
         gamePlatform.Name = updateDto.Name;
@@ -142,46 +122,29 @@ public class GamePlatformsController : ControllerBase
         catch (DbUpdateConcurrencyException)
         {
             if (!GamePlatformExists(id))
-            {
-                return NotFound(new
-                {
-                    message = "Plataforma no encontrada",
-                    details = "La plataforma fue eliminada por otro usuario."
-                });
-            }
+                return NotFound(new { message = "Plataforma no encontrada" });
             else
-            {
-                return Conflict(new
-                {
-                    message = "Conflicto de concurrencia",
-                    details = "La plataforma fue modificada por otro usuario. Por favor, recargue e intente nuevamente."
-                });
-            }
+                return Conflict(new { message = "Conflicto de concurrencia" });
         }
 
         return NoContent();
     }
 
-    /// <summary>
-    /// Crea una nueva plataforma
-    /// </summary>
     [HttpPost]
     public async Task<ActionResult<GamePlatformDto>> PostGamePlatform(GamePlatformCreateDto createDto)
     {
-        // Validar que el nombre no exista
-        if (await _context.GamePlatforms.AnyAsync(p => p.Name.ToLower() == createDto.Name.ToLower()))
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        if (await _context.GamePlatforms.AnyAsync(p => p.Name.ToLower() == createDto.Name.ToLower() && p.UserId == userId))
         {
-            return Conflict(new
-            {
-                message = "Ya existe una plataforma con este nombre",
-                details = "El nombre de la plataforma debe ser único. Por favor, use un nombre diferente."
-            });
+            return Conflict(new { message = "Ya existe una plataforma con este nombre" });
         }
 
         var gamePlatform = new GamePlatform
         {
+            UserId = userId,
             Name = createDto.Name,
-            SortOrder = 0, // Ya no usamos sortOrder para ordenación
+            SortOrder = 0,
             IsActive = createDto.IsActive,
             Color = createDto.Color
         };
@@ -193,19 +156,16 @@ public class GamePlatformsController : ControllerBase
         return CreatedAtAction("GetGamePlatform", new { id = gamePlatform.Id }, result);
     }
 
-    /// <summary>
-    /// Reordena las plataformas proporcionando una lista ordenada de IDs
-    /// </summary>
     [HttpPost("reorder")]
     public async Task<IActionResult> ReorderPlatforms([FromBody] ReorderStatusesDto dto)
     {
+        var userId = GetCurrentUserIdOrDefault(1);
+
         if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
-        {
             return BadRequest(new { message = "OrderedIds debe ser proporcionado" });
-        }
 
         var platforms = await _context.GamePlatforms
-            .Where(p => dto.OrderedIds.Contains(p.Id))
+            .Where(p => dto.OrderedIds.Contains(p.Id) && p.UserId == userId)
             .ToListAsync();
 
         if (platforms.Count != dto.OrderedIds.Count)
@@ -226,17 +186,15 @@ public class GamePlatformsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>
-    /// Elimina una plataforma
-    /// </summary>
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteGamePlatform(int id)
     {
-        var gamePlatform = await _context.GamePlatforms.FindAsync(id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gamePlatform = await _context.GamePlatforms
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
+
         if (gamePlatform == null)
-        {
             return NotFound();
-        }
 
         _context.GamePlatforms.Remove(gamePlatform);
         await _context.SaveChangesAsync();
@@ -246,6 +204,7 @@ public class GamePlatformsController : ControllerBase
 
     private bool GamePlatformExists(int id)
     {
-        return _context.GamePlatforms.Any(e => e.Id == id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        return _context.GamePlatforms.Any(e => e.Id == id && e.UserId == userId);
     }
 }

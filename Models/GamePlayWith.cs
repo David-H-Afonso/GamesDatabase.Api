@@ -10,7 +10,10 @@ public class GamePlayWith
     public bool IsActive { get; set; } = true;
     public string Color { get; set; } = "#ffffff";
 
-    // Relación muchos-a-muchos con Game
+    public int UserId { get; set; }
+
+    [JsonIgnore]
+    public virtual User User { get; set; } = null!;
     [JsonIgnore]
     public virtual ICollection<GamePlayWithMapping> GamePlayWiths { get; set; } = new List<GamePlayWithMapping>();
 }

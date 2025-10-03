@@ -9,7 +9,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class GameStatusController : ControllerBase
+public class GameStatusController : BaseApiController
 {
     private readonly GamesDbContext _context;
 
@@ -18,13 +18,11 @@ public class GameStatusController : ControllerBase
         _context = context;
     }
 
-    /// <summary>
-    /// Obtiene todos los estados con paginado, filtrado y ordenado
-    /// </summary>
     [HttpGet]
     public async Task<ActionResult<PagedResult<GameStatusDto>>> GetGameStatuses([FromQuery] QueryParameters parameters)
     {
-        var query = _context.GameStatuses.AsQueryable();
+        var userId = GetCurrentUserIdOrDefault(1);
+        var query = _context.GameStatuses.Where(s => s.UserId == userId).AsQueryable();
 
         // Aplicar filtros
         if (!string.IsNullOrEmpty(parameters.Search))
@@ -74,28 +72,25 @@ public class GameStatusController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Obtiene solo los estados activos ordenados alfabéticamente
-    /// </summary>
     [HttpGet("active")]
     public async Task<ActionResult<IEnumerable<GameStatusDto>>> GetActiveGameStatuses()
     {
+        var userId = GetCurrentUserIdOrDefault(1);
         var statuses = await _context.GameStatuses
-            .Where(s => s.IsActive)
+            .Where(s => s.IsActive && s.UserId == userId)
             .OrderBy(s => s.SortOrder)
-            .ThenBy(s => EF.Functions.Collate(s.Name, "NOCASE")) // Orden por SortOrder luego alfabético
+            .ThenBy(s => EF.Functions.Collate(s.Name, "NOCASE"))
             .ToListAsync();
 
         return Ok(statuses.Select(s => s.ToDto()));
     }
 
-    /// <summary>
-    /// Returns a minimal ordered list of active statuses (Id, Name, SortOrder) for UI selectors and verification.
-    /// </summary>
     [HttpGet("ordered")]
     public async Task<ActionResult<IEnumerable<object>>> GetOrderedStatuses()
     {
+        var userId = GetCurrentUserIdOrDefault(1);
         var statuses = await _context.GameStatuses
+            .Where(s => s.UserId == userId)
             .OrderBy(s => s.SortOrder)
             .ThenBy(s => EF.Functions.Collate(s.Name, "NOCASE"))
             .Select(s => new { s.Id, s.Name, s.SortOrder })
@@ -104,68 +99,50 @@ public class GameStatusController : ControllerBase
         return Ok(statuses);
     }
 
-    /// <summary>
-    /// Obtiene un estado específico por ID
-    /// </summary>
     [HttpGet("{id}")]
     public async Task<ActionResult<GameStatusDto>> GetGameStatus(int id)
     {
-        var gameStatus = await _context.GameStatuses.FindAsync(id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gameStatus = await _context.GameStatuses
+            .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
 
         if (gameStatus == null)
-        {
             return NotFound();
-        }
 
         return Ok(gameStatus.ToDto());
     }
 
-    /// <summary>
-    /// Actualiza un estado existente
-    /// </summary>
     [HttpPut("{id}")]
     public async Task<IActionResult> PutGameStatus(int id, GameStatusUpdateDto updateDto)
     {
-        var gameStatus = await _context.GameStatuses.FindAsync(id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gameStatus = await _context.GameStatuses
+            .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
+
         if (gameStatus == null)
+            return NotFound(new { message = "Estado no encontrado" });
+
+        if (await _context.GameStatuses.AnyAsync(s => s.Name.ToLower() == updateDto.Name.ToLower() && s.Id != id && s.UserId == userId))
         {
-            return NotFound(new
-            {
-                message = "Estado no encontrado",
-                details = "El estado que intenta actualizar no existe."
-            });
+            return Conflict(new { message = "Ya existe un estado con este nombre" });
         }
 
-        // Validar que el nombre no exista en otro estado
-        if (await _context.GameStatuses.AnyAsync(s => s.Name.ToLower() == updateDto.Name.ToLower() && s.Id != id))
-        {
-            return Conflict(new
-            {
-                message = "Ya existe un estado con este nombre",
-                details = "El nombre del estado debe ser único. Por favor, use un nombre diferente."
-            });
-        }
-
-        // Handle special status reassignment if requested
         if (updateDto.IsDefault.HasValue && updateDto.IsDefault.Value && !gameStatus.IsDefault)
         {
-            // Remove default flag from current default status of the same type
             var targetStatusType = gameStatus.StatusType != Models.SpecialStatusType.None
                 ? gameStatus.StatusType
                 : Models.SpecialStatusType.NotFulfilled;
 
             var currentDefault = await _context.GameStatuses
-                .FirstOrDefaultAsync(s => s.IsDefault && s.StatusType == targetStatusType);
+                .FirstOrDefaultAsync(s => s.IsDefault && s.StatusType == targetStatusType && s.UserId == userId);
 
             if (currentDefault != null)
             {
                 currentDefault.IsDefault = false;
-                currentDefault.StatusType = Models.SpecialStatusType.None; // Remove special status
-                // Save this change first to avoid unique constraint violation
+                currentDefault.StatusType = Models.SpecialStatusType.None;
                 await _context.SaveChangesAsync();
             }
 
-            // Set this status as the new default
             gameStatus.IsDefault = true;
             gameStatus.StatusType = targetStatusType;
         }
@@ -185,47 +162,31 @@ public class GameStatusController : ControllerBase
         catch (DbUpdateConcurrencyException)
         {
             if (!GameStatusExists(id))
-            {
-                return NotFound(new
-                {
-                    message = "Estado no encontrado",
-                    details = "El estado fue eliminado por otro usuario."
-                });
-            }
+                return NotFound(new { message = "Estado no encontrado" });
             else
-            {
-                return Conflict(new
-                {
-                    message = "Conflicto de concurrencia",
-                    details = "El estado fue modificado por otro usuario. Por favor, recargue e intente nuevamente."
-                });
-            }
+                return Conflict(new { message = "Conflicto de concurrencia" });
         }
 
         return NoContent();
     }
 
-    /// <summary>
-    /// Crea un nuevo estado
-    /// </summary>
     [HttpPost]
     public async Task<ActionResult<GameStatusDto>> PostGameStatus(GameStatusCreateDto createDto)
     {
-        // Validar que el nombre no exista
-        if (await _context.GameStatuses.AnyAsync(s => s.Name.ToLower() == createDto.Name.ToLower()))
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        if (await _context.GameStatuses.AnyAsync(s => s.Name.ToLower() == createDto.Name.ToLower() && s.UserId == userId))
         {
-            return Conflict(new
-            {
-                message = "Ya existe un estado con este nombre",
-                details = "El nombre del estado debe ser único. Por favor, use un nombre diferente."
-            });
+            return Conflict(new { message = "Ya existe un estado con este nombre" });
         }
 
-        // Determine default sort order: append to end if none provided
-        var maxSort = await _context.GameStatuses.MaxAsync(s => (int?)s.SortOrder) ?? 0;
+        var maxSort = await _context.GameStatuses
+            .Where(s => s.UserId == userId)
+            .MaxAsync(s => (int?)s.SortOrder) ?? 0;
 
         var gameStatus = new GameStatus
         {
+            UserId = userId,
             Name = createDto.Name,
             SortOrder = createDto.SortOrder ?? (maxSort + 1),
             IsActive = createDto.IsActive,
@@ -239,20 +200,16 @@ public class GameStatusController : ControllerBase
         return CreatedAtAction("GetGameStatus", new { id = gameStatus.Id }, result);
     }
 
-    /// <summary>
-    /// Reorder statuses by providing an ordered list of IDs.
-    /// </summary>
     [HttpPost("reorder")]
     public async Task<IActionResult> ReorderStatuses([FromBody] ReorderStatusesDto dto)
     {
-        if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
-        {
-            return BadRequest(new { message = "OrderedIds must be provided" });
-        }
+        var userId = GetCurrentUserIdOrDefault(1);
 
-        // Fetch statuses to ensure all IDs exist
+        if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
+            return BadRequest(new { message = "OrderedIds must be provided" });
+
         var statuses = await _context.GameStatuses
-            .Where(s => dto.OrderedIds.Contains(s.Id))
+            .Where(s => dto.OrderedIds.Contains(s.Id) && s.UserId == userId)
             .ToListAsync();
 
         if (statuses.Count != dto.OrderedIds.Count)
@@ -282,44 +239,34 @@ public class GameStatusController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Elimina un estado
-    /// </summary>
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteGameStatus(int id)
     {
-        var gameStatus = await _context.GameStatuses.FindAsync(id);
-        if (gameStatus == null)
-        {
-            return NotFound(new
-            {
-                message = "Estado no encontrado",
-                details = "El estado que intenta eliminar no existe."
-            });
-        }
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gameStatus = await _context.GameStatuses
+            .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
 
-        // Prevent deletion of special statuses (only those that are currently default)
+        if (gameStatus == null)
+            return NotFound(new { message = "Estado no encontrado" });
+
         if (gameStatus.IsSpecialStatus && gameStatus.IsDefault)
         {
             return BadRequest(new
             {
                 message = "No se puede eliminar un estado especial activo",
-                details = $"El estado '{gameStatus.Name}' es actualmente un estado especial activo de tipo {gameStatus.StatusType} y no puede ser eliminado directamente. " +
-                         "Primero debe reasignarlo a otro estado usando el endpoint de reasignación.",
+                details = $"El estado '{gameStatus.Name}' es actualmente un estado especial activo de tipo {gameStatus.StatusType}",
                 statusType = gameStatus.StatusType.ToString(),
                 isDefault = gameStatus.IsDefault
             });
         }
 
-        // Check if any games are using this status
-        var gamesUsingStatus = await _context.Games.CountAsync(g => g.StatusId == id);
+        var gamesUsingStatus = await _context.Games.CountAsync(g => g.StatusId == id && g.UserId == userId);
         if (gamesUsingStatus > 0)
         {
             return BadRequest(new
             {
                 message = "No se puede eliminar el estado",
-                details = $"Hay {gamesUsingStatus} juego(s) que usan este estado. " +
-                         "Primero debe cambiar el estado de estos juegos antes de eliminar este estado.",
+                details = $"Hay {gamesUsingStatus} juego(s) que usan este estado",
                 gamesCount = gamesUsingStatus
             });
         }
@@ -330,14 +277,12 @@ public class GameStatusController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>
-    /// Obtiene todos los estados especiales (que no pueden ser eliminados directamente)
-    /// </summary>
     [HttpGet("special")]
     public async Task<ActionResult<IEnumerable<SpecialStatusDto>>> GetSpecialStatuses()
     {
+        var userId = GetCurrentUserIdOrDefault(1);
         var specialStatuses = await _context.GameStatuses
-            .Where(s => s.StatusType != Models.SpecialStatusType.None && s.IsDefault)
+            .Where(s => s.StatusType != Models.SpecialStatusType.None && s.IsDefault && s.UserId == userId)
             .OrderBy(s => s.StatusType)
             .ThenBy(s => s.Name)
             .ToListAsync();
@@ -345,37 +290,25 @@ public class GameStatusController : ControllerBase
         return Ok(specialStatuses.Select(s => s.ToSpecialStatusDto()));
     }
 
-    /// <summary>
-    /// Reasigna un estado especial a otro estado
-    /// </summary>
     [HttpPost("reassign-special")]
     public async Task<IActionResult> ReassignSpecialStatus(ReassignDefaultStatusDto reassignDto)
     {
-        // Parse the status type
+        var userId = GetCurrentUserIdOrDefault(1);
+
         if (!Enum.TryParse<Models.SpecialStatusType>(reassignDto.StatusType, out var statusType) ||
             statusType == Models.SpecialStatusType.None)
         {
-            return BadRequest(new
-            {
-                message = "Tipo de estado especial inválido",
-                details = "El tipo de estado especial debe ser uno de los valores válidos (ej: NotFulfilled)."
-            });
+            return BadRequest(new { message = "Tipo de estado especial inválido" });
         }
 
-        // Find the new status to become default
-        var newDefaultStatus = await _context.GameStatuses.FindAsync(reassignDto.NewDefaultStatusId);
+        var newDefaultStatus = await _context.GameStatuses
+            .FirstOrDefaultAsync(s => s.Id == reassignDto.NewDefaultStatusId && s.UserId == userId);
+
         if (newDefaultStatus == null)
-        {
-            return NotFound(new
-            {
-                message = "Estado no encontrado",
-                details = "El estado al que intenta reasignar no existe."
-            });
-        }
+            return NotFound(new { message = "Estado no encontrado" });
 
-        // Find the current default status
         var currentDefaultStatus = await _context.GameStatuses
-            .FirstOrDefaultAsync(s => s.IsDefault && s.StatusType == statusType);
+            .FirstOrDefaultAsync(s => s.IsDefault && s.StatusType == statusType && s.UserId == userId);
 
         using var transaction = await _context.Database.BeginTransactionAsync();
         try
@@ -399,8 +332,6 @@ public class GameStatusController : ControllerBase
             return Ok(new
             {
                 message = "Estado especial reasignado exitosamente",
-                details = $"El estado '{newDefaultStatus.Name}' ahora es el estado especial por defecto de tipo {statusType}. " +
-                         $"El estado anterior '{currentDefaultStatus?.Name}' ya no es especial y puede ser eliminado normalmente.",
                 previousDefault = currentDefaultStatus?.Name,
                 newDefault = newDefaultStatus.Name,
                 statusType = statusType.ToString()
@@ -409,51 +340,35 @@ public class GameStatusController : ControllerBase
         catch (Exception)
         {
             await transaction.RollbackAsync();
-            return StatusCode(500, new
-            {
-                message = "Error al reasignar el estado especial",
-                details = "Ocurrió un error interno del servidor al procesar la reasignación."
-            });
+            return StatusCode(500, new { message = "Error al reasignar el estado especial" });
         }
     }
 
-    /// <summary>
-    /// Permite eliminar un estado especial después de reasignarlo
-    /// </summary>
     [HttpDelete("special/{id}")]
     public async Task<IActionResult> DeleteSpecialStatus(int id)
     {
-        var gameStatus = await _context.GameStatuses.FindAsync(id);
-        if (gameStatus == null)
-        {
-            return NotFound(new
-            {
-                message = "Estado no encontrado",
-                details = "El estado que intenta eliminar no existe."
-            });
-        }
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gameStatus = await _context.GameStatuses
+            .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
 
-        // Check if it's still a default status
+        if (gameStatus == null)
+            return NotFound(new { message = "Estado no encontrado" });
+
         if (gameStatus.IsDefault)
         {
             return BadRequest(new
             {
                 message = "No se puede eliminar el estado por defecto",
-                details = $"El estado '{gameStatus.Name}' es actualmente el estado por defecto de tipo {gameStatus.StatusType}. " +
-                         "Primero debe reasignar este tipo de estado especial a otro estado usando el endpoint de reasignación.",
                 statusType = gameStatus.StatusType.ToString()
             });
         }
 
-        // Check if any games are using this status
-        var gamesUsingStatus = await _context.Games.CountAsync(g => g.StatusId == id);
+        var gamesUsingStatus = await _context.Games.CountAsync(g => g.StatusId == id && g.UserId == userId);
         if (gamesUsingStatus > 0)
         {
             return BadRequest(new
             {
                 message = "No se puede eliminar el estado",
-                details = $"Hay {gamesUsingStatus} juego(s) que usan este estado. " +
-                         "Primero debe cambiar el estado de estos juegos antes de eliminar este estado.",
                 gamesCount = gamesUsingStatus
             });
         }
@@ -464,13 +379,13 @@ public class GameStatusController : ControllerBase
         return Ok(new
         {
             message = "Estado especial eliminado exitosamente",
-            details = $"El estado '{gameStatus.Name}' ha sido eliminado.",
             statusType = gameStatus.StatusType.ToString()
         });
     }
 
     private bool GameStatusExists(int id)
     {
-        return _context.GameStatuses.Any(e => e.Id == id);
+        var userId = GetCurrentUserIdOrDefault(1);
+        return _context.GameStatuses.Any(e => e.Id == id && e.UserId == userId);
     }
 }

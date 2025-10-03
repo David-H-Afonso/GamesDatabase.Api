@@ -13,7 +13,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DataExportController : ControllerBase
+public class DataExportController : BaseApiController
 {
     private readonly GamesDbContext _context;
     private readonly ExportSettings _exportSettings;
@@ -34,28 +34,29 @@ public class DataExportController : ControllerBase
     {
         try
         {
+            var userId = GetCurrentUserIdOrDefault(1);
             var allRecords = new List<FullExportModel>();
-            var platforms = await _context.GamePlatforms.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")).ToListAsync();
+            var platforms = await _context.GamePlatforms.Where(p => p.UserId == userId).OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")).ToListAsync();
             foreach (var p in platforms)
             {
                 allRecords.Add(new FullExportModel { Type = "Platform", Name = p.Name, Color = p.Color, IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
             }
-            var statuses = await _context.GameStatuses.OrderBy(s => s.SortOrder).ThenBy(s => EF.Functions.Collate(s.Name, "NOCASE")).ToListAsync();
+            var statuses = await _context.GameStatuses.Where(s => s.UserId == userId).OrderBy(s => s.SortOrder).ThenBy(s => EF.Functions.Collate(s.Name, "NOCASE")).ToListAsync();
             foreach (var s in statuses)
             {
                 allRecords.Add(new FullExportModel { Type = "Status", Name = s.Name, Color = s.Color, IsActive = s.IsActive.ToString(), SortOrder = s.SortOrder.ToString(), IsDefault = s.IsDefault.ToString(), StatusType = s.StatusType.ToString() });
             }
-            var playWiths = await _context.GamePlayWiths.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")).ToListAsync();
+            var playWiths = await _context.GamePlayWiths.Where(p => p.UserId == userId).OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")).ToListAsync();
             foreach (var p in playWiths)
             {
                 allRecords.Add(new FullExportModel { Type = "PlayWith", Name = p.Name, Color = p.Color, IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
             }
-            var playedStatuses = await _context.GamePlayedStatuses.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")).ToListAsync();
+            var playedStatuses = await _context.GamePlayedStatuses.Where(p => p.UserId == userId).OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")).ToListAsync();
             foreach (var p in playedStatuses)
             {
                 allRecords.Add(new FullExportModel { Type = "PlayedStatus", Name = p.Name, Color = p.Color, IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
             }
-            var views = await _context.GameViews.OrderBy(v => EF.Functions.Collate(v.Name, "NOCASE")).ToListAsync();
+            var views = await _context.GameViews.Where(v => v.UserId == userId).OrderBy(v => EF.Functions.Collate(v.Name, "NOCASE")).ToListAsync();
             foreach (var v in views)
             {
                 allRecords.Add(new FullExportModel
@@ -70,6 +71,7 @@ public class DataExportController : ControllerBase
                 });
             }
             var games = await _context.Games
+                .Where(g => g.UserId == userId)
                 .Include(g => g.Status)
                 .Include(g => g.Platform)
                 .Include(g => g.GamePlayWiths)
@@ -106,6 +108,7 @@ public class DataExportController : ControllerBase
         if (!csvFile.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)) return BadRequest(new { message = "El archivo debe tener extensión .csv" });
         try
         {
+            var userId = GetCurrentUserIdOrDefault(1);
             var results = new { platformsImported = 0, platformsUpdated = 0, statusesImported = 0, statusesUpdated = 0, playWithsImported = 0, playWithsUpdated = 0, playedStatusesImported = 0, playedStatusesUpdated = 0, viewsImported = 0, viewsUpdated = 0, gamesImported = 0, gamesUpdated = 0, errors = new List<string>() };
             using var stream = csvFile.OpenReadStream();
             using var reader = new StreamReader(stream, Encoding.UTF8);
@@ -120,9 +123,9 @@ public class DataExportController : ControllerBase
             foreach (var record in platforms)
             {
                 if (string.IsNullOrWhiteSpace(record.Name)) continue;
-                var existing = await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower());
+                var existing = await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower() && p.UserId == userId);
                 if (existing != null) { existing.Color = record.Color; existing.IsActive = bool.Parse(record.IsActive ?? "true"); existing.SortOrder = int.Parse(record.SortOrder ?? "0"); results = results with { platformsUpdated = results.platformsUpdated + 1 }; }
-                else { _context.GamePlatforms.Add(new GamePlatform { Name = record.Name, Color = record.Color, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { platformsImported = results.platformsImported + 1 }; }
+                else { _context.GamePlatforms.Add(new GamePlatform { UserId = userId, Name = record.Name, Color = record.Color, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { platformsImported = results.platformsImported + 1 }; }
             }
             await _context.SaveChangesAsync();
             foreach (var record in statuses)
@@ -136,18 +139,16 @@ public class DataExportController : ControllerBase
                     Enum.TryParse<SpecialStatusType>(record.StatusType, out statusType);
                 }
 
-                // For special status types with IsDefault=true, search by StatusType + IsDefault
-                // Otherwise search by name
                 GameStatus? existing = null;
                 if (statusType != SpecialStatusType.None && bool.Parse(record.IsDefault ?? "false"))
                 {
                     existing = await _context.GameStatuses.FirstOrDefaultAsync(s =>
-                        s.StatusType == statusType && s.IsDefault);
+                        s.StatusType == statusType && s.IsDefault && s.UserId == userId);
                 }
                 else
                 {
                     existing = await _context.GameStatuses.FirstOrDefaultAsync(s =>
-                        s.Name.ToLower() == record.Name.ToLower());
+                        s.Name.ToLower() == record.Name.ToLower() && s.UserId == userId);
                 }
 
                 if (existing != null)
@@ -164,6 +165,7 @@ public class DataExportController : ControllerBase
                 {
                     var newStatus = new GameStatus
                     {
+                        UserId = userId,
                         Name = record.Name,
                         Color = record.Color,
                         IsActive = bool.Parse(record.IsActive ?? "true"),
@@ -179,25 +181,24 @@ public class DataExportController : ControllerBase
             foreach (var record in playWiths)
             {
                 if (string.IsNullOrWhiteSpace(record.Name)) continue;
-                var existing = await _context.GamePlayWiths.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower());
+                var existing = await _context.GamePlayWiths.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower() && p.UserId == userId);
                 if (existing != null) { existing.Color = record.Color; existing.IsActive = bool.Parse(record.IsActive ?? "true"); existing.SortOrder = int.Parse(record.SortOrder ?? "0"); results = results with { playWithsUpdated = results.playWithsUpdated + 1 }; }
-                else { _context.GamePlayWiths.Add(new GamePlayWith { Name = record.Name, Color = record.Color, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { playWithsImported = results.playWithsImported + 1 }; }
+                else { _context.GamePlayWiths.Add(new GamePlayWith { UserId = userId, Name = record.Name, Color = record.Color, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { playWithsImported = results.playWithsImported + 1 }; }
             }
             await _context.SaveChangesAsync();
             foreach (var record in playedStatuses)
             {
                 if (string.IsNullOrWhiteSpace(record.Name)) continue;
-                var existing = await _context.GamePlayedStatuses.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower());
+                var existing = await _context.GamePlayedStatuses.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower() && p.UserId == userId);
                 if (existing != null) { existing.Color = record.Color; existing.IsActive = bool.Parse(record.IsActive ?? "true"); existing.SortOrder = int.Parse(record.SortOrder ?? "0"); results = results with { playedStatusesUpdated = results.playedStatusesUpdated + 1 }; }
-                else { _context.GamePlayedStatuses.Add(new GamePlayedStatus { Name = record.Name, Color = record.Color, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { playedStatusesImported = results.playedStatusesImported + 1 }; }
+                else { _context.GamePlayedStatuses.Add(new GamePlayedStatus { UserId = userId, Name = record.Name, Color = record.Color, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { playedStatusesImported = results.playedStatusesImported + 1 }; }
             }
             await _context.SaveChangesAsync();
 
-            // Import views - always prefer imported views over existing (overwrite)
             foreach (var record in views)
             {
                 if (string.IsNullOrWhiteSpace(record.Name)) continue;
-                var existing = await _context.GameViews.FirstOrDefaultAsync(v => v.Name.ToLower() == record.Name.ToLower());
+                var existing = await _context.GameViews.FirstOrDefaultAsync(v => v.Name.ToLower() == record.Name.ToLower() && v.UserId == userId);
                 if (existing != null)
                 {
                     // Overwrite with imported data
@@ -213,6 +214,7 @@ public class DataExportController : ControllerBase
                 {
                     var newView = new GameView
                     {
+                        UserId = userId,
                         Name = record.Name,
                         Description = record.Description,
                         FiltersJson = record.FiltersJson ?? "{}",
@@ -233,23 +235,22 @@ public class DataExportController : ControllerBase
                 try
                 {
                     if (string.IsNullOrWhiteSpace(record.Name)) { results.errors.Add("Juego sin nombre encontrado"); continue; }
-                    var status = string.IsNullOrWhiteSpace(record.Status) ? null : await _context.GameStatuses.FirstOrDefaultAsync(s => s.Name.ToLower() == record.Status.ToLower());
-                    var platform = string.IsNullOrWhiteSpace(record.Platform) ? null : await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Platform.ToLower());
+                    var status = string.IsNullOrWhiteSpace(record.Status) ? null : await _context.GameStatuses.FirstOrDefaultAsync(s => s.Name.ToLower() == record.Status.ToLower() && s.UserId == userId);
+                    var platform = string.IsNullOrWhiteSpace(record.Platform) ? null : await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Platform.ToLower() && p.UserId == userId);
 
-                    // Parse multiple PlayWith values separated by comma
                     var playWithIds = new List<int>();
                     if (!string.IsNullOrWhiteSpace(record.PlayWith))
                     {
                         var playWithNames = record.PlayWith.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                         foreach (var pwName in playWithNames)
                         {
-                            var pw = await _context.GamePlayWiths.FirstOrDefaultAsync(p => p.Name.ToLower() == pwName.ToLower());
+                            var pw = await _context.GamePlayWiths.FirstOrDefaultAsync(p => p.Name.ToLower() == pwName.ToLower() && p.UserId == userId);
                             if (pw != null) playWithIds.Add(pw.Id);
                         }
                     }
 
-                    var playedStatus = string.IsNullOrWhiteSpace(record.PlayedStatus) ? null : await _context.GamePlayedStatuses.FirstOrDefaultAsync(p => p.Name.ToLower() == record.PlayedStatus.ToLower());
-                    var existing = await _context.Games.Include(g => g.GamePlayWiths).FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower());
+                    var playedStatus = string.IsNullOrWhiteSpace(record.PlayedStatus) ? null : await _context.GamePlayedStatuses.FirstOrDefaultAsync(p => p.Name.ToLower() == record.PlayedStatus.ToLower() && p.UserId == userId);
+                    var existing = await _context.Games.Include(g => g.GamePlayWiths).FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower() && g.UserId == userId);
 
                     if (existing != null)
                     {
@@ -289,6 +290,7 @@ public class DataExportController : ControllerBase
                         if (status == null) { results.errors.Add($"No se puede crear '{record.Name}' sin un status válido"); continue; }
                         var newGame = new Game
                         {
+                            UserId = userId,
                             Name = record.Name,
                             StatusId = status.Id,
                             PlatformId = platform?.Id,
@@ -306,9 +308,8 @@ public class DataExportController : ControllerBase
                         };
                         newGame.CalculateScore();
                         _context.Games.Add(newGame);
-                        await _context.SaveChangesAsync(); // Save to get the ID
+                        await _context.SaveChangesAsync();
 
-                        // Add PlayWith relationships
                         foreach (var pwId in playWithIds)
                         {
                             _context.GamePlayWithMappings.Add(new GamePlayWithMapping { GameId = newGame.Id, PlayWithId = pwId });
