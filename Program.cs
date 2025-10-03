@@ -272,10 +272,11 @@ app.UseUserContext();
 app.UseAuthorization();
 
 // Health check endpoint
-app.MapGet("/health", () => Results.Ok(new { 
-    status = "healthy", 
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "healthy",
     version = "0.9.0",
-    timestamp = DateTime.UtcNow 
+    timestamp = DateTime.UtcNow
 })).AllowAnonymous();
 
 app.MapControllers();

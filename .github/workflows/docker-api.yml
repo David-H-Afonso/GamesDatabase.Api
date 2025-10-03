@@ -3,10 +3,7 @@ name: Build & Push API Docker Image
 on:
   push:
     branches: [main, master]
-    tags: ['v*']
-    paths:
-      - 'GamesDatabase.Api/**'
-      - '.github/workflows/docker-api.yml'
+    tags: ["v*"]
   workflow_dispatch:
 
 env:
@@ -54,8 +51,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./GamesDatabase.Api
-          file: ./GamesDatabase.Api/Dockerfile
+          context: .
+          file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
