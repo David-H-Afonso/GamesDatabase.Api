@@ -150,8 +150,9 @@ public class GamesController : BaseApiController
         // Aplicar filtros
         if (!string.IsNullOrEmpty(parameters.Search))
         {
-            query = query.Where(g => g.Name.Contains(parameters.Search) ||
-                                   (g.Comment != null && g.Comment.Contains(parameters.Search)));
+            var searchLower = parameters.Search.ToLower();
+            query = query.Where(g => EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchLower}%") ||
+                                   (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%")));
         }
 
         if (parameters.StatusId.HasValue)
@@ -232,12 +233,12 @@ public class GamesController : BaseApiController
                 "createdat" or "created" => parameters.SortDescending ? query.OrderByDescending(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "updatedat" or "updated" or "lastedited" => parameters.SortDescending ? query.OrderByDescending(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(g => g.Id) : query.OrderBy(g => g.Id),
-                _ => query.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")) // Default: orden alfabético case-insensitive
+                _ => query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) // Default: ordenar por status ascendente
             };
         }
         else
         {
-            query = query.OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE")); // Default: orden alfabético case-insensitive
+            query = query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")); // Default: ordenar por status ascendente
         }
 
         return query;

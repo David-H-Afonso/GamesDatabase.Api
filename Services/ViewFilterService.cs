@@ -196,12 +196,21 @@ public class ViewFilterService : IViewFilterService
                 $"Para campos numéricos o de fecha, usa operadores como 'Equals', 'GreaterThan', 'LessThan', 'On', 'Before', 'After', etc.");
         }
 
+        // Hacer la búsqueda case-insensitive convirtiendo a minúsculas
+        var toLowerMethod = typeof(string).GetMethod("ToLower", Type.EmptyTypes)!;
         var containsMethod = typeof(string).GetMethod("Contains", new[] { typeof(string) })!;
-        var valueExpression = Expression.Constant(value.ToString(), typeof(string));
+
+        // Convertir el valor de búsqueda a minúsculas
+        var searchValueLower = value.ToString()!.ToLower();
+        var valueExpression = Expression.Constant(searchValueLower, typeof(string));
 
         // Manejar el caso donde la propiedad puede ser null
         var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
-        var containsCall = Expression.Call(propertyExpression, containsMethod, valueExpression);
+
+        // Convertir la propiedad a minúsculas antes de hacer Contains
+        var propertyToLower = Expression.Call(propertyExpression, toLowerMethod);
+        var containsCall = Expression.Call(propertyToLower, containsMethod, valueExpression);
+
         return Expression.AndAlso(nullCheck, containsCall);
     }
 
@@ -350,11 +359,20 @@ public class ViewFilterService : IViewFilterService
 
         if (propertyExpression.Type == typeof(string))
         {
+            // Hacer la búsqueda case-insensitive convirtiendo a minúsculas
+            var toLowerMethod = typeof(string).GetMethod("ToLower", Type.EmptyTypes)!;
             var startsWithMethod = typeof(string).GetMethod("StartsWith", new[] { typeof(string) })!;
-            var valueExpression = Expression.Constant(value.ToString(), typeof(string));
+
+            // Convertir el valor de búsqueda a minúsculas
+            var searchValueLower = value.ToString()!.ToLower();
+            var valueExpression = Expression.Constant(searchValueLower, typeof(string));
 
             var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
-            var startsWithCall = Expression.Call(propertyExpression, startsWithMethod, valueExpression);
+
+            // Convertir la propiedad a minúsculas antes de hacer StartsWith
+            var propertyToLower = Expression.Call(propertyExpression, toLowerMethod);
+            var startsWithCall = Expression.Call(propertyToLower, startsWithMethod, valueExpression);
+
             return Expression.AndAlso(nullCheck, startsWithCall);
         }
 
@@ -370,11 +388,20 @@ public class ViewFilterService : IViewFilterService
 
         if (propertyExpression.Type == typeof(string))
         {
+            // Hacer la búsqueda case-insensitive convirtiendo a minúsculas
+            var toLowerMethod = typeof(string).GetMethod("ToLower", Type.EmptyTypes)!;
             var endsWithMethod = typeof(string).GetMethod("EndsWith", new[] { typeof(string) })!;
-            var valueExpression = Expression.Constant(value.ToString(), typeof(string));
+
+            // Convertir el valor de búsqueda a minúsculas
+            var searchValueLower = value.ToString()!.ToLower();
+            var valueExpression = Expression.Constant(searchValueLower, typeof(string));
 
             var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
-            var endsWithCall = Expression.Call(propertyExpression, endsWithMethod, valueExpression);
+
+            // Convertir la propiedad a minúsculas antes de hacer EndsWith
+            var propertyToLower = Expression.Call(propertyExpression, toLowerMethod);
+            var endsWithCall = Expression.Call(propertyToLower, endsWithMethod, valueExpression);
+
             return Expression.AndAlso(nullCheck, endsWithCall);
         }
 
