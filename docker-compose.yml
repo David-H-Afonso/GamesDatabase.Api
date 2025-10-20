@@ -14,4 +14,10 @@ services:
       - CorsSettings__AllowedOrigins__1=http://localhost:4200
       - CorsSettings__AllowedOrigins__2=http://192.168.0.32:3000
       - CorsSettings__AllowedOrigins__3=http://192.168.0.32:4200
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/api/users/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped

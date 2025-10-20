@@ -151,8 +151,14 @@ public class GamesController : BaseApiController
         if (!string.IsNullOrEmpty(parameters.Search))
         {
             var searchLower = parameters.Search.ToLower();
-            query = query.Where(g => EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchLower}%") ||
-                                   (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%")));
+            var searchNoAccents = RemoveDiacritics(searchLower);
+
+            // Buscar con el término original Y con el término sin acentos
+            query = query.Where(g =>
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchLower}%") ||
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchNoAccents}%") ||
+                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%")) ||
+                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchNoAccents}%")));
         }
 
         if (parameters.StatusId.HasValue)
@@ -496,5 +502,29 @@ public class GamesController : BaseApiController
     {
         var userId = GetCurrentUserIdOrDefault(1);
         return _context.Games.Any(e => e.Id == id && e.UserId == userId);
+    }
+
+    /// <summary>
+    /// Normaliza un string removiendo tildes y diacríticos.
+    /// Pokémon -> Pokemon, José -> Jose, etc.
+    /// </summary>
+    private static string RemoveDiacritics(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var normalizedString = text.Normalize(System.Text.NormalizationForm.FormD);
+        var stringBuilder = new System.Text.StringBuilder();
+
+        foreach (var c in normalizedString)
+        {
+            var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+            if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                stringBuilder.Append(c);
+            }
+        }
+
+        return stringBuilder.ToString().Normalize(System.Text.NormalizationForm.FormC);
     }
 }

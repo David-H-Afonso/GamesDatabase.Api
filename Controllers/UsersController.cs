@@ -319,4 +319,24 @@ public class UsersController : ControllerBase
 
         await _context.SaveChangesAsync();
     }
+
+    /// <summary>
+    /// Health check endpoint for Docker/Kubernetes
+    /// </summary>
+    [HttpGet("health")]
+    [AllowAnonymous]
+    public async Task<IActionResult> HealthCheck()
+    {
+        try
+        {
+            // Verificar que la base de datos esté accesible
+            await _context.Database.CanConnectAsync();
+            return Ok(new { status = "healthy", timestamp = DateTime.UtcNow });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Health check failed");
+            return StatusCode(503, new { status = "unhealthy", error = ex.Message });
+        }
+    }
 }
