@@ -153,25 +153,13 @@ public class GamesController : BaseApiController
             var searchLower = parameters.Search.ToLower();
             var searchNoAccents = RemoveDiacritics(searchLower);
 
-            // Generar variantes con tildes si el término original no las tiene
-            var searchVariants = new List<string> { searchLower, searchNoAccents };
-
-            // Si buscas "poke", también buscar "poké", "pokemon" y "pokémon"
-            if (searchLower == searchNoAccents) // No tiene tildes originalmente
-            {
-                // Añadir variantes comunes con tildes
-                searchVariants.Add(searchLower.Replace("e", "é"));
-                searchVariants.Add(searchLower.Replace("o", "ó"));
-                searchVariants.Add(searchLower.Replace("a", "á"));
-                searchVariants.Add(searchLower.Replace("i", "í"));
-                searchVariants.Add(searchLower.Replace("u", "ú"));
-            }
-
-            // Buscar con todas las variantes
-            // Esto permite que "poke" encuentre "poké" y "poké" encuentre "poke"
+            // Buscar con el término original y sin acentos
+            // Esto permite búsqueda bidireccional: "poke" encuentra "poké" Y "poké" encuentra "poke"
             query = query.Where(g =>
-                searchVariants.Any(variant => EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{variant}%")) ||
-                (g.Comment != null && searchVariants.Any(variant => EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{variant}%"))));
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchLower}%") ||
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchNoAccents}%") ||
+                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%")) ||
+                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchNoAccents}%")));
         }
 
         if (parameters.StatusId.HasValue)
