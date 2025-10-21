@@ -153,12 +153,25 @@ public class GamesController : BaseApiController
             var searchLower = parameters.Search.ToLower();
             var searchNoAccents = RemoveDiacritics(searchLower);
 
-            // Buscar con el término original Y con el término sin acentos
+            // Generar variantes con tildes si el término original no las tiene
+            var searchVariants = new List<string> { searchLower, searchNoAccents };
+
+            // Si buscas "poke", también buscar "poké", "pokemon" y "pokémon"
+            if (searchLower == searchNoAccents) // No tiene tildes originalmente
+            {
+                // Añadir variantes comunes con tildes
+                searchVariants.Add(searchLower.Replace("e", "é"));
+                searchVariants.Add(searchLower.Replace("o", "ó"));
+                searchVariants.Add(searchLower.Replace("a", "á"));
+                searchVariants.Add(searchLower.Replace("i", "í"));
+                searchVariants.Add(searchLower.Replace("u", "ú"));
+            }
+
+            // Buscar con todas las variantes
+            // Esto permite que "poke" encuentre "poké" y "poké" encuentre "poke"
             query = query.Where(g =>
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchLower}%") ||
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchNoAccents}%") ||
-                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%")) ||
-                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchNoAccents}%")));
+                searchVariants.Any(variant => EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{variant}%")) ||
+                (g.Comment != null && searchVariants.Any(variant => EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{variant}%"))));
         }
 
         if (parameters.StatusId.HasValue)
@@ -231,7 +244,7 @@ public class GamesController : BaseApiController
                 "storyduration" => parameters.SortDescending ? query.OrderByDescending(g => (double?)g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => (double?)g.Story).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "completion" => parameters.SortDescending ? query.OrderByDescending(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "completionduration" => parameters.SortDescending ? query.OrderByDescending(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "status" => parameters.SortDescending ? query.OrderByDescending(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
+                "status" => parameters.SortDescending ? query.OrderByDescending(g => g.Status.SortOrder).ThenByDescending(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "score" => parameters.SortDescending ? query.OrderByDescending(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "released" => parameters.SortDescending ? query.OrderByDescending(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "started" => parameters.SortDescending ? query.OrderByDescending(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
