@@ -153,13 +153,32 @@ public class GamesController : BaseApiController
             var searchLower = parameters.Search.ToLower();
             var searchNoAccents = RemoveDiacritics(searchLower);
 
-            // Buscar con el término original y sin acentos
-            // Esto permite búsqueda bidireccional: "poke" encuentra "poké" Y "poké" encuentra "poke"
+            // Generar variantes con tildes comunes (para que "poke" encuentre "poké")
+            var searchWithE = searchNoAccents.Replace("e", "é");
+            var searchWithO = searchNoAccents.Replace("o", "ó");
+            var searchWithA = searchNoAccents.Replace("a", "á");
+            var searchWithI = searchNoAccents.Replace("i", "í");
+            var searchWithU = searchNoAccents.Replace("u", "ú");
+
+            // Buscar con el término original, sin acentos, Y con variantes de tildes
+            // Esto permite búsqueda bidireccional completa: "poke" encuentra "poké" Y "poké" encuentra "poke"
             query = query.Where(g =>
                 EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchLower}%") ||
                 EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchNoAccents}%") ||
-                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%")) ||
-                (g.Comment != null && EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchNoAccents}%")));
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithE}%") ||
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithO}%") ||
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithA}%") ||
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithI}%") ||
+                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithU}%") ||
+                (g.Comment != null && (
+                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%") ||
+                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchNoAccents}%") ||
+                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithE}%") ||
+                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithO}%") ||
+                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithA}%") ||
+                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithI}%") ||
+                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithU}%")
+                )));
         }
 
         if (parameters.StatusId.HasValue)
