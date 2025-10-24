@@ -20,6 +20,10 @@ public class GameDto
     public string? Logo { get; set; }
     public string? Cover { get; set; }
 
+    // Price comparison fields
+    public bool? IsCheaperByKey { get; set; }
+    public string? KeyStoreUrl { get; set; }
+
     // Audit fields
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -48,6 +52,10 @@ public class GameCreateDto
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
     public string? Cover { get; set; }
+
+    // Price comparison fields
+    public bool? IsCheaperByKey { get; set; }
+    public string? KeyStoreUrl { get; set; }
 }
 
 public class GameUpdateDto
@@ -68,5 +76,9 @@ public class GameUpdateDto
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
     public string? Cover { get; set; }
+
+    // Price comparison fields
+    public bool? IsCheaperByKey { get; set; }
+    public string? KeyStoreUrl { get; set; }
 
 }

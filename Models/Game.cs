@@ -35,6 +35,10 @@ public class Game
     public string? Logo { get; set; }
     public string? Cover { get; set; }
 
+    // Price comparison fields
+    public bool? IsCheaperByKey { get; set; }
+    public string? KeyStoreUrl { get; set; }
+
     public int UserId { get; set; }
 
     public DateTime CreatedAt { get; set; }

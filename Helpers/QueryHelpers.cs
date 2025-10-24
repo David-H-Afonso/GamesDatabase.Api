@@ -27,6 +27,11 @@ public class GameQueryParameters : QueryParameters
     public string? Finished { get; set; }
 
     /// <summary>
+    /// Filtrar por juegos más baratos por clave. true = solo más baratos por clave, false = solo más baratos en tienda oficial, null = todos
+    /// </summary>
+    public bool? IsCheaperByKey { get; set; }
+
+    /// <summary>
     /// ID de la vista a aplicar. Si se especifica, se ignorarán otros filtros y ordenamientos
     /// </summary>
     public int? ViewId { get; set; }

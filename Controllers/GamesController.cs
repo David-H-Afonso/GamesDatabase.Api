@@ -231,6 +231,11 @@ public class GamesController : BaseApiController
             query = query.Where(g => g.Finished != null && g.Finished.Contains(parameters.Finished));
         }
 
+        if (parameters.IsCheaperByKey.HasValue)
+        {
+            query = query.Where(g => g.IsCheaperByKey == parameters.IsCheaperByKey.Value);
+        }
+
         return query;
     }
 

@@ -26,6 +26,8 @@ public static class MappingExtensions
             PlayedStatusId = game.PlayedStatusId,
             Logo = game.Logo,
             Cover = game.Cover,
+            IsCheaperByKey = game.IsCheaperByKey,
+            KeyStoreUrl = game.KeyStoreUrl,
             CreatedAt = game.CreatedAt,
             UpdatedAt = game.UpdatedAt,
             StatusName = game.Status?.Name,
@@ -53,7 +55,9 @@ public static class MappingExtensions
             Comment = dto.Comment,
             PlayedStatusId = dto.PlayedStatusId,
             Logo = dto.Logo,
-            Cover = dto.Cover
+            Cover = dto.Cover,
+            IsCheaperByKey = dto.IsCheaperByKey,
+            KeyStoreUrl = dto.KeyStoreUrl
         };
 
         // Calcular el score automáticamente
@@ -78,6 +82,8 @@ public static class MappingExtensions
         if (dto.PlayedStatusId.HasValue) entity.PlayedStatusId = dto.PlayedStatusId.Value;
         if (dto.Logo != null) entity.Logo = dto.Logo;
         if (dto.Cover != null) entity.Cover = dto.Cover;
+        if (dto.IsCheaperByKey.HasValue) entity.IsCheaperByKey = dto.IsCheaperByKey.Value;
+        if (dto.KeyStoreUrl != null) entity.KeyStoreUrl = dto.KeyStoreUrl;
 
         entity.CalculateScore();
     }
