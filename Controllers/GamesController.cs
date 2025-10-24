@@ -407,6 +407,16 @@ public class GamesController : BaseApiController
             game.Cover = coverElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : coverElement.GetString();
         }
 
+        if (gameDto.TryGetProperty("isCheaperByKey", out var isCheaperByKeyElement))
+        {
+            game.IsCheaperByKey = isCheaperByKeyElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : isCheaperByKeyElement.GetBoolean();
+        }
+
+        if (gameDto.TryGetProperty("keyStoreUrl", out var keyStoreUrlElement))
+        {
+            game.KeyStoreUrl = keyStoreUrlElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : keyStoreUrlElement.GetString();
+        }
+
         // Recalcular el score
         game.CalculateScore();
 

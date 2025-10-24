@@ -82,7 +82,10 @@ public static class MappingExtensions
         if (dto.PlayedStatusId.HasValue) entity.PlayedStatusId = dto.PlayedStatusId.Value;
         if (dto.Logo != null) entity.Logo = dto.Logo;
         if (dto.Cover != null) entity.Cover = dto.Cover;
-        if (dto.IsCheaperByKey.HasValue) entity.IsCheaperByKey = dto.IsCheaperByKey.Value;
+
+        // Always update IsCheaperByKey if present in DTO (even if null, to allow clearing)
+        entity.IsCheaperByKey = dto.IsCheaperByKey;
+
         if (dto.KeyStoreUrl != null) entity.KeyStoreUrl = dto.KeyStoreUrl;
 
         entity.CalculateScore();
