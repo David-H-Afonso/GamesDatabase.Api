@@ -25,21 +25,21 @@ if (File.Exists(envFilePath))
 }
 
 // Override configuration with environment variables for NetworkSync
-builder.Configuration["NetworkSync:Enabled"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_ENABLED") 
+builder.Configuration["NetworkSync:Enabled"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_ENABLED")
     ?? builder.Configuration["NetworkSync:Enabled"];
-builder.Configuration["NetworkSync:NetworkPath"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PATH") 
+builder.Configuration["NetworkSync:NetworkPath"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PATH")
     ?? builder.Configuration["NetworkSync:NetworkPath"];
-builder.Configuration["NetworkSync:Username"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_USERNAME") 
+builder.Configuration["NetworkSync:Username"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_USERNAME")
     ?? builder.Configuration["NetworkSync:Username"];
-builder.Configuration["NetworkSync:Password"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PASSWORD") 
+builder.Configuration["NetworkSync:Password"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PASSWORD")
     ?? builder.Configuration["NetworkSync:Password"];
 
 // Override JWT settings from environment variables
-builder.Configuration["JwtSettings:SecretKey"] = Environment.GetEnvironmentVariable("JWT_SECRET_KEY") 
+builder.Configuration["JwtSettings:SecretKey"] = Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
     ?? builder.Configuration["JwtSettings:SecretKey"];
-builder.Configuration["JwtSettings:Issuer"] = Environment.GetEnvironmentVariable("JWT_ISSUER") 
+builder.Configuration["JwtSettings:Issuer"] = Environment.GetEnvironmentVariable("JWT_ISSUER")
     ?? builder.Configuration["JwtSettings:Issuer"];
-builder.Configuration["JwtSettings:Audience"] = Environment.GetEnvironmentVariable("JWT_AUDIENCE") 
+builder.Configuration["JwtSettings:Audience"] = Environment.GetEnvironmentVariable("JWT_AUDIENCE")
     ?? builder.Configuration["JwtSettings:Audience"];
 if (int.TryParse(Environment.GetEnvironmentVariable("JWT_EXPIRATION_MINUTES"), out var expMinutes))
 {

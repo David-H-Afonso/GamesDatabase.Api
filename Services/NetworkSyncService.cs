@@ -54,7 +54,7 @@ public class NetworkSyncService : INetworkSyncService
                 return result;
             }
 
-            _logger.LogInformation("Starting network sync to {Path} (fullSync: {FullSync})", 
+            _logger.LogInformation("Starting network sync to {Path} (fullSync: {FullSync})",
                 _syncOptions.NetworkPath, fullSync);
 
             // Verify network path is accessible
@@ -344,7 +344,7 @@ public class NetworkSyncService : INetworkSyncService
             {
                 bool isRetry = cache?.LogoUrl == game.Logo && !cache.LogoDownloaded;
                 bool urlChanged = cache?.LogoUrl != game.Logo;
-                
+
                 if (isRetry)
                 {
                     _logger.LogInformation("Retrying logo download for '{Name}'", game.Name);
@@ -382,7 +382,7 @@ public class NetworkSyncService : INetworkSyncService
             {
                 bool isRetry = cache?.CoverUrl == game.Cover && !cache.CoverDownloaded;
                 bool urlChanged = cache?.CoverUrl != game.Cover;
-                
+
                 if (isRetry)
                 {
                     _logger.LogInformation("Retrying cover download for '{Name}'", game.Name);
@@ -442,11 +442,11 @@ public class NetworkSyncService : INetworkSyncService
         if (File.Exists(filePath))
         {
             var existingJson = await File.ReadAllTextAsync(filePath, Encoding.UTF8);
-            
+
             // Compare content hash to detect changes
             var newHash = ComputeHash(json);
             var existingHash = ComputeHash(existingJson);
-            
+
             if (newHash == existingHash)
             {
                 _logger.LogDebug("Skipping {FileName} - no changes detected", Path.GetFileName(filePath));
