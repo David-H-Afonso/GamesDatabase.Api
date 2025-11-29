@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.DTOs;
@@ -10,6 +11,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class GamesController : BaseApiController
 {
     private readonly GamesDbContext _context;

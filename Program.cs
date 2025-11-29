@@ -98,22 +98,43 @@ builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer
         {
             OnMessageReceived = context =>
             {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                var authHeader = context.Request.Headers["Authorization"].ToString();
-                logger.LogInformation($"Authorization Header: {(string.IsNullOrEmpty(authHeader) ? "VACÍO" : authHeader.Substring(0, Math.Min(50, authHeader.Length)))}");
+                // Only log if there's no token or if in debug mode
+                if (builder.Environment.IsDevelopment())
+                {
+                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                    var authHeader = context.Request.Headers["Authorization"].ToString();
+                    if (!string.IsNullOrEmpty(authHeader))
+                    {
+                        logger.LogDebug($"Authorization Header received: {authHeader.Substring(0, Math.Min(30, authHeader.Length))}...");
+                    }
+                }
                 return Task.CompletedTask;
             },
             OnAuthenticationFailed = context =>
             {
                 var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                logger.LogError($"Autenticación fallida: {context.Exception.Message}");
+
+                // Check if it's a token expiration (common and expected)
+                if (context.Exception.Message.Contains("expired") || context.Exception.Message.Contains("IDX10223"))
+                {
+                    logger.LogWarning("Token has expired - client needs to re-authenticate");
+                }
+                else
+                {
+                    // Other authentication failures are more concerning
+                    logger.LogError($"Authentication failed: {context.Exception.Message}");
+                }
                 return Task.CompletedTask;
             },
             OnTokenValidated = context =>
             {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                var userId = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-                logger.LogInformation($"Token validado correctamente. UserId: {userId}");
+                // Only log successful validations in debug mode
+                if (builder.Environment.IsDevelopment())
+                {
+                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                    var userId = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                    logger.LogDebug($"Token validated successfully for UserId: {userId}");
+                }
                 return Task.CompletedTask;
             }
         };

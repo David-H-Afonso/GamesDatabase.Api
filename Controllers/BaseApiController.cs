@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using GamesDatabase.Api.Helpers;
 
 namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
+[Authorize]
 public abstract class BaseApiController : ControllerBase
 {
     protected int? CurrentUserId => HttpContext.GetUserId();

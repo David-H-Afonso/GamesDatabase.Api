@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.Models;
@@ -9,6 +10,7 @@ namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class GameStatusController : BaseApiController
 {
     private readonly GamesDbContext _context;
