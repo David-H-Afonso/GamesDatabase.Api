@@ -7,6 +7,45 @@ using GamesDatabase.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load environment variables from .env file if it exists (for local development)
+var envFilePath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
+if (File.Exists(envFilePath))
+{
+    foreach (var line in File.ReadAllLines(envFilePath))
+    {
+        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
+            continue;
+
+        var parts = line.Split('=', 2);
+        if (parts.Length == 2)
+        {
+            Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
+        }
+    }
+}
+
+// Override configuration with environment variables for NetworkSync
+builder.Configuration["NetworkSync:Enabled"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_ENABLED") 
+    ?? builder.Configuration["NetworkSync:Enabled"];
+builder.Configuration["NetworkSync:NetworkPath"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PATH") 
+    ?? builder.Configuration["NetworkSync:NetworkPath"];
+builder.Configuration["NetworkSync:Username"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_USERNAME") 
+    ?? builder.Configuration["NetworkSync:Username"];
+builder.Configuration["NetworkSync:Password"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PASSWORD") 
+    ?? builder.Configuration["NetworkSync:Password"];
+
+// Override JWT settings from environment variables
+builder.Configuration["JwtSettings:SecretKey"] = Environment.GetEnvironmentVariable("JWT_SECRET_KEY") 
+    ?? builder.Configuration["JwtSettings:SecretKey"];
+builder.Configuration["JwtSettings:Issuer"] = Environment.GetEnvironmentVariable("JWT_ISSUER") 
+    ?? builder.Configuration["JwtSettings:Issuer"];
+builder.Configuration["JwtSettings:Audience"] = Environment.GetEnvironmentVariable("JWT_AUDIENCE") 
+    ?? builder.Configuration["JwtSettings:Audience"];
+if (int.TryParse(Environment.GetEnvironmentVariable("JWT_EXPIRATION_MINUTES"), out var expMinutes))
+{
+    builder.Configuration["JwtSettings:ExpirationMinutes"] = expMinutes.ToString();
+}
+
 builder.Services.Configure<CorsSettings>(
     builder.Configuration.GetSection(CorsSettings.SectionName));
 builder.Services.Configure<DatabaseSettings>(
@@ -15,6 +54,10 @@ builder.Services.Configure<ExportSettings>(
     builder.Configuration.GetSection(ExportSettings.SectionName));
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection(JwtSettings.SectionName));
+builder.Services.Configure<DataExportOptions>(
+    builder.Configuration.GetSection(DataExportOptions.SectionName));
+builder.Services.Configure<NetworkSyncOptions>(
+    builder.Configuration.GetSection(NetworkSyncOptions.SectionName));
 
 // Add services to the container.
 builder.Services.AddControllers()
@@ -46,6 +89,22 @@ builder.Services.AddDbContext<GamesDbContext>(options =>
 
 builder.Services.AddScoped<IViewFilterService, ViewFilterService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IZipExportService, ZipExportService>();
+builder.Services.AddScoped<INetworkSyncService, NetworkSyncService>();
+
+// Configure HttpClient to trust development certificates
+builder.Services.AddHttpClient("TrustAllCerts")
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        var handler = new HttpClientHandler();
+        if (builder.Environment.IsDevelopment())
+        {
+            handler.ServerCertificateCustomValidationCallback =
+                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        }
+        return handler;
+    });
 
 // Configure CORS
 var corsSettings = builder.Configuration.GetSection(CorsSettings.SectionName).Get<CorsSettings>() ?? new CorsSettings();
@@ -158,8 +217,9 @@ builder.Services.AddSwaggerGen(c =>
         Description = "JWT Authorization header usando el esquema Bearer. Ejemplo: \"Bearer {token}\"",
         Name = "Authorization",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
-        Scheme = "Bearer"
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
     });
 
     c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement

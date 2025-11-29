@@ -401,12 +401,24 @@ public class GamesController : BaseApiController
 
         if (gameDto.TryGetProperty("logo", out var logoElement))
         {
-            game.Logo = logoElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : logoElement.GetString();
+            var logoUrl = logoElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : logoElement.GetString();
+            // Validate URL if provided
+            if (!string.IsNullOrWhiteSpace(logoUrl) && !IsValidUrl(logoUrl))
+            {
+                return BadRequest(new { error = "Invalid logo URL format" });
+            }
+            game.Logo = logoUrl;
         }
 
         if (gameDto.TryGetProperty("cover", out var coverElement))
         {
-            game.Cover = coverElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : coverElement.GetString();
+            var coverUrl = coverElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : coverElement.GetString();
+            // Validate URL if provided
+            if (!string.IsNullOrWhiteSpace(coverUrl) && !IsValidUrl(coverUrl))
+            {
+                return BadRequest(new { error = "Invalid cover URL format" });
+            }
+            game.Cover = coverUrl;
         }
 
         if (gameDto.TryGetProperty("isCheaperByKey", out var isCheaperByKeyElement))
@@ -416,7 +428,13 @@ public class GamesController : BaseApiController
 
         if (gameDto.TryGetProperty("keyStoreUrl", out var keyStoreUrlElement))
         {
-            game.KeyStoreUrl = keyStoreUrlElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : keyStoreUrlElement.GetString();
+            var keyStoreUrl = keyStoreUrlElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : keyStoreUrlElement.GetString();
+            // Validate URL if provided
+            if (!string.IsNullOrWhiteSpace(keyStoreUrl) && !IsValidUrl(keyStoreUrl))
+            {
+                return BadRequest(new { error = "Invalid key store URL format" });
+            }
+            game.KeyStoreUrl = keyStoreUrl;
         }
 
         // Recalcular el score
@@ -539,6 +557,22 @@ public class GamesController : BaseApiController
     {
         var userId = GetCurrentUserIdOrDefault(1);
         return _context.Games.Any(e => e.Id == id && e.UserId == userId);
+    }
+
+    /// <summary>
+    /// Validates if a string is a valid URL
+    /// </summary>
+    private static bool IsValidUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        // Check if it's a valid URI
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uriResult))
+            return false;
+
+        // Must be http or https
+        return uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps;
     }
 
     /// <summary>

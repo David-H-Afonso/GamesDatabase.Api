@@ -54,11 +54,33 @@ public class GamesDbContext : DbContext
                 if (entry.Entity is Game game)
                 {
                     game.UpdatedAt = DateTime.UtcNow;
+
+                    // Only mark as modified if it's not just the ModifiedSinceExport flag being updated
+                    var modifiedProperties = entry.Properties
+                        .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt")
+                        .ToList();
+
+                    if (modifiedProperties.Any())
+                    {
+                        game.ModifiedSinceExport = true;
+                    }
+
                     entry.Property("CreatedAt").IsModified = false;
                 }
                 else if (entry.Entity is GameView view)
                 {
                     view.UpdatedAt = DateTime.UtcNow;
+
+                    // Only mark as modified if it's not just the ModifiedSinceExport flag being updated
+                    var modifiedProperties = entry.Properties
+                        .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt")
+                        .ToList();
+
+                    if (modifiedProperties.Any())
+                    {
+                        view.ModifiedSinceExport = true;
+                    }
+
                     entry.Property("CreatedAt").IsModified = false;
                 }
                 else if (entry.Entity is User user)
@@ -77,6 +99,8 @@ public class GamesDbContext : DbContext
     public DbSet<GameStatus> GameStatuses { get; set; }
     public DbSet<GameView> GameViews { get; set; }
     public DbSet<GamePlayWithMapping> GamePlayWithMappings { get; set; }
+    public DbSet<GameExportCache> GameExportCaches { get; set; }
+    public DbSet<GameViewExportCache> GameViewExportCaches { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +114,7 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<GameStatus>().ToTable("game_status");
         modelBuilder.Entity<GameView>().ToTable("game_view");
         modelBuilder.Entity<GamePlayWithMapping>().ToTable("game_play_with_mapping");
+        modelBuilder.Entity<GameExportCache>().ToTable("game_export_cache");
 
         // Configure User entity
         modelBuilder.Entity<User>(entity =>
@@ -126,6 +151,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.PlayedStatusId).HasColumnName("played_status_id");
             entity.Property(e => e.Logo).HasColumnName("logo");
             entity.Property(e => e.Cover).HasColumnName("cover");
+            entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
             entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
@@ -267,13 +293,55 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.Views)
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
-
             entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
+        });
+
+        // Configure GameViewExportCache entity
+        modelBuilder.Entity<GameViewExportCache>(entity =>
+        {
+            entity.ToTable("game_view_export_cache");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.GameViewId).HasColumnName("game_view_id").IsRequired();
+            entity.Property(e => e.LastExportedAt).HasColumnName("last_exported_at").IsRequired();
+            entity.Property(e => e.ConfigurationHash).HasColumnName("configuration_hash").HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasOne(e => e.GameView)
+                .WithMany()
+                .HasForeignKey(e => e.GameViewId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.GameViewId).IsUnique();
+        });
+
+        // Configure GameExportCache entity
+        modelBuilder.Entity<GameExportCache>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.GameId).HasColumnName("game_id").IsRequired();
+            entity.Property(e => e.LastExportedAt).HasColumnName("last_exported_at");
+            entity.Property(e => e.LogoDownloaded).HasColumnName("logo_downloaded").HasDefaultValue(false);
+            entity.Property(e => e.CoverDownloaded).HasColumnName("cover_downloaded").HasDefaultValue(false);
+            entity.Property(e => e.LogoUrl).HasColumnName("logo_url");
+            entity.Property(e => e.CoverUrl).HasColumnName("cover_url");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasOne(e => e.Game)
+                .WithMany()
+                .HasForeignKey(e => e.GameId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.GameId).IsUnique();
         });
     }
 }

@@ -3,6 +3,7 @@ using System;
 using GamesDatabase.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GamesDatabase.Api.Migrations
 {
     [DbContext(typeof(GamesDbContext))]
-    partial class GamesDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251129180539_AddExportCacheSystem")]
+    partial class AddExportCacheSystem
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -408,12 +411,6 @@ namespace GamesDatabase.Api.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("is_public");
 
-                    b.Property<bool>("ModifiedSinceExport")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(true)
-                        .HasColumnName("modified_since_export");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -438,43 +435,6 @@ namespace GamesDatabase.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("game_view", (string)null);
-                });
-
-            modelBuilder.Entity("GamesDatabase.Api.Models.GameViewExportCache", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ConfigurationHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT")
-                        .HasColumnName("configuration_hash");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("GameViewId")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("game_view_id");
-
-                    b.Property<DateTime>("LastExportedAt")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("last_exported_at");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GameViewId")
-                        .IsUnique();
-
-                    b.ToTable("game_view_export_cache", (string)null);
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.User", b =>
@@ -636,17 +596,6 @@ namespace GamesDatabase.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("GamesDatabase.Api.Models.GameViewExportCache", b =>
-                {
-                    b.HasOne("GamesDatabase.Api.Models.GameView", "GameView")
-                        .WithMany()
-                        .HasForeignKey("GameViewId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("GameView");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.Game", b =>

@@ -39,6 +39,9 @@ public class Game
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
 
+    // Export tracking
+    public bool ModifiedSinceExport { get; set; } = true;
+
     public int UserId { get; set; }
 
     public DateTime CreatedAt { get; set; }
