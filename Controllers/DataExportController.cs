@@ -19,15 +19,195 @@ public class DataExportController : BaseApiController
     private readonly GamesDbContext _context;
     private readonly ExportSettings _exportSettings;
     private readonly ILogger<DataExportController> _logger;
+    private readonly IConfiguration _configuration;
 
     public DataExportController(
         GamesDbContext context,
         IOptions<ExportSettings> exportSettings,
-        ILogger<DataExportController> logger)
+        ILogger<DataExportController> logger,
+        IConfiguration configuration)
     {
         _context = context;
         _exportSettings = exportSettings.Value;
         _logger = logger;
+        _configuration = configuration;
+    }
+
+    [HttpPost("update-image-urls")]
+    [Authorize]
+    public async Task<ActionResult<UpdateImageUrlsResult>> UpdateImageUrls()
+    {
+        var result = new UpdateImageUrlsResult();
+        var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
+
+        if (string.IsNullOrWhiteSpace(networkSyncPath))
+        {
+            return BadRequest("NetworkSync:NetworkPath not configured");
+        }
+
+        if (!Directory.Exists(networkSyncPath))
+        {
+            return BadRequest($"NetworkSync path does not exist: {networkSyncPath}");
+        }
+
+        var gamesPath = Path.Combine(networkSyncPath, "Games");
+        if (!Directory.Exists(gamesPath))
+        {
+            return BadRequest($"Games path does not exist: {gamesPath}");
+        }
+
+        var userId = GetCurrentUserIdOrDefault(1);
+        var games = await _context.Games
+            .Where(g => g.UserId == userId)
+            .ToListAsync();
+
+        result.TotalGames = games.Count;
+
+        foreach (var game in games)
+        {
+            try
+            {
+                var folderName = MakeSafeFolderName(game.Name);
+                if (string.IsNullOrWhiteSpace(folderName))
+                    folderName = "Unknown_Game";
+
+                var gamePath = Path.Combine(gamesPath, folderName);
+
+                if (!Directory.Exists(gamePath))
+                {
+                    _logger.LogWarning("Folder not found for game '{GameName}'. Expected path: {ExpectedPath}", game.Name, gamePath);
+                    result.SkippedGames++;
+                    continue;
+                }
+
+                bool updated = false;
+                bool alreadyCorrect = true;
+                var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+
+                // Check for logo
+                string? logoUrl = null;
+                foreach (var ext in extensions)
+                {
+                    var logoPath = Path.Combine(gamePath, $"logo{ext}");
+                    if (System.IO.File.Exists(logoPath))
+                    {
+                        logoUrl = $"/game-images/Games/{folderName}/logo{ext}";
+                        break;
+                    }
+                }
+
+                // Update logo - if found use actual file, otherwise use default logo.png
+                if (logoUrl == null)
+                {
+                    logoUrl = $"/game-images/Games/{folderName}/logo.png";
+                }
+
+                if (game.Logo != logoUrl)
+                {
+                    game.Logo = logoUrl;
+                    updated = true;
+                    alreadyCorrect = false;
+                }
+
+                // Check for cover
+                string? coverUrl = null;
+                foreach (var ext in extensions)
+                {
+                    var coverPath = Path.Combine(gamePath, $"cover{ext}");
+                    if (System.IO.File.Exists(coverPath))
+                    {
+                        coverUrl = $"/game-images/Games/{folderName}/cover{ext}";
+                        break;
+                    }
+                }
+
+                // Update cover - if found use actual file, otherwise use default cover.png
+                if (coverUrl == null)
+                {
+                    coverUrl = $"/game-images/Games/{folderName}/cover.png";
+                }
+
+                if (game.Cover != coverUrl)
+                {
+                    game.Cover = coverUrl;
+                    updated = true;
+                    alreadyCorrect = false;
+                }
+
+                if (updated)
+                {
+                    result.UpdatedGames++;
+                }
+                else if (alreadyCorrect)
+                {
+                    result.AlreadyCorrect++;
+                }
+                else
+                {
+                    result.NoImagesFound++;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating image URLs for game '{GameName}'", game.Name);
+                result.Errors.Add($"{game.Name}: {ex.Message}");
+            }
+        }
+
+        if (result.UpdatedGames > 0)
+        {
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Updated image URLs for {Count} games", result.UpdatedGames);
+        }
+
+        return Ok(result);
+    }
+
+    private static string MakeSafeFolderName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        var stringBuilder = new System.Text.StringBuilder();
+
+        // Directly process each character without normalizing (to keep accents/tildes)
+        foreach (var c in name)
+        {
+            // Allow letters (including accented), digits, and specific punctuation
+            if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')' ||
+                c == '\'' || c == '\u2019' || c == '&' || c == ':' || c == ',' || c == '!' || c == '+' || c == '?' ||
+                c == '™' || c == '®' || c == '—')
+            {
+                stringBuilder.Append(c);
+            }
+        }
+
+        var safeName = stringBuilder.ToString();
+
+        // Remove any remaining invalid filename characters (but keep underscores)
+        var invalidChars = Path.GetInvalidFileNameChars();
+        foreach (var invalidChar in invalidChars)
+        {
+            if (invalidChar != '_') // Don't replace underscores
+            {
+                safeName = safeName.Replace(invalidChar, '_');
+            }
+        }
+
+        // Replace spaces with underscores
+        safeName = safeName.Replace(" ", "_");
+
+        // Remove multiple consecutive underscores
+        safeName = System.Text.RegularExpressions.Regex.Replace(safeName, "_+", "_");
+
+        // Remove leading/trailing underscores
+        safeName = safeName.Trim('_');
+
+        // Limit length to avoid Windows MAX_PATH issues
+        if (safeName.Length > 200)
+            safeName = safeName.Substring(0, 200).TrimEnd('_');
+
+        return safeName;
     }
 
     [HttpGet("full")]
@@ -394,4 +574,14 @@ public class FullExportModel
     public string? SortingJson { get; set; }
     public string? IsPublic { get; set; }
     public string? CreatedBy { get; set; }
+}
+
+public class UpdateImageUrlsResult
+{
+    public int TotalGames { get; set; }
+    public int UpdatedGames { get; set; }
+    public int SkippedGames { get; set; }
+    public int AlreadyCorrect { get; set; }
+    public int NoImagesFound { get; set; }
+    public List<string> Errors { get; set; } = new();
 }

@@ -927,11 +927,46 @@ public class NetworkSyncService : INetworkSyncService
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;
 
+        // First, normalize Unicode characters and remove accents/diacritics
+        var normalizedString = name.Normalize(System.Text.NormalizationForm.FormD);
+        var stringBuilder = new System.Text.StringBuilder();
+
+        foreach (var c in normalizedString)
+        {
+            var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+            // Keep only letters, digits, spaces, and some safe punctuation
+            if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '.' || c == '(' || c == ')')
+                {
+                    stringBuilder.Append(c);
+                }
+            }
+        }
+
+        var safeName = stringBuilder.ToString().Normalize(System.Text.NormalizationForm.FormC);
+
+        // Remove any remaining invalid filename characters
         var invalidChars = Path.GetInvalidFileNameChars();
-        var safeName = string.Join("_", name.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries));
+        foreach (var invalidChar in invalidChars)
+        {
+            safeName = safeName.Replace(invalidChar, '_');
+        }
+
+        // Replace spaces with underscores
         safeName = safeName.Replace(" ", "_");
+
+        // Remove multiple consecutive underscores
         safeName = System.Text.RegularExpressions.Regex.Replace(safeName, "_+", "_");
-        return safeName.Trim('_');
+
+        // Remove leading/trailing underscores
+        safeName = safeName.Trim('_');
+
+        // Limit length to avoid Windows MAX_PATH issues
+        if (safeName.Length > 200)
+            safeName = safeName.Substring(0, 200).TrimEnd('_');
+
+        return safeName;
     }
 
     private static string GetExtensionFromUrl(string url)
