@@ -86,12 +86,13 @@ public class DataExportController : BaseApiController
 
                 // Check for logo
                 string? logoUrl = null;
+                var imageBaseUrl = _configuration["ImageSettings:BaseUrl"] ?? string.Empty;
                 foreach (var ext in extensions)
                 {
                     var logoPath = Path.Combine(gamePath, $"logo{ext}");
                     if (System.IO.File.Exists(logoPath))
                     {
-                        logoUrl = $"/game-images/Games/{folderName}/logo{ext}";
+                        logoUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/logo{ext}";
                         break;
                     }
                 }
@@ -99,7 +100,7 @@ public class DataExportController : BaseApiController
                 // Update logo - if found use actual file, otherwise use default logo.png
                 if (logoUrl == null)
                 {
-                    logoUrl = $"/game-images/Games/{folderName}/logo.png";
+                    logoUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/logo.png";
                 }
 
                 if (game.Logo != logoUrl)
@@ -116,7 +117,7 @@ public class DataExportController : BaseApiController
                     var coverPath = Path.Combine(gamePath, $"cover{ext}");
                     if (System.IO.File.Exists(coverPath))
                     {
-                        coverUrl = $"/game-images/Games/{folderName}/cover{ext}";
+                        coverUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/cover{ext}";
                         break;
                     }
                 }
@@ -124,7 +125,7 @@ public class DataExportController : BaseApiController
                 // Update cover - if found use actual file, otherwise use default cover.png
                 if (coverUrl == null)
                 {
-                    coverUrl = $"/game-images/Games/{folderName}/cover.png";
+                    coverUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/cover.png";
                 }
 
                 if (game.Cover != coverUrl)
