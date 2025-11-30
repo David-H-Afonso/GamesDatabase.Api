@@ -4,6 +4,7 @@ using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Middleware;
 using GamesDatabase.Api.Services;
 using GamesDatabase.Api.Models;
+using GamesDatabase.Api.Helpers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -92,6 +93,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IZipExportService, ZipExportService>();
 builder.Services.AddScoped<INetworkSyncService, NetworkSyncService>();
+builder.Services.AddHttpContextAccessor();
 
 // Configure HttpClient to trust development certificates
 builder.Services.AddHttpClient("TrustAllCerts")
@@ -104,6 +106,26 @@ builder.Services.AddHttpClient("TrustAllCerts")
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
         return handler;
+    })
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(60);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        client.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+        client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+        client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
+        client.DefaultRequestHeaders.Add("DNT", "1");
+        client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+        client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-User", "?1");
+        client.DefaultRequestHeaders.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
+        {
+            NoCache = false,
+            MaxAge = TimeSpan.FromDays(365)
+        };
     });
 
 // Configure CORS
