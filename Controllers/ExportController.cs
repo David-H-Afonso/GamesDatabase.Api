@@ -85,12 +85,13 @@ public class ExportController : BaseApiController
     {
         try
         {
-            _logger.LogInformation("Starting network sync (full: {Full})", request.FullExport);
+            var userId = GetCurrentUserIdOrDefault(1);
+            _logger.LogInformation("Starting network sync for user {UserId} (full: {Full})", userId, request.FullExport);
 
             // Get the Authorization header from the current request
             var authHeader = Request.Headers["Authorization"].ToString();
 
-            var result = await _networkSyncService.SyncToNetworkAsync(authHeader, request.FullExport);
+            var result = await _networkSyncService.SyncToNetworkAsync(userId, authHeader, request.FullExport);
 
             if (!result.Success)
             {
@@ -194,10 +195,11 @@ public class ExportController : BaseApiController
                 return Unauthorized(new { message = "Invalid API Key" });
             }
 
-            _logger.LogInformation("Starting automated network sync (full: {Full})", full);
+            var userId = GetCurrentUserIdOrDefault(1);
+            _logger.LogInformation("Starting automated network sync for user {UserId} (full: {Full})", userId, full);
 
             // No need for Authorization header in auto-sync (uses default user)
-            var result = await _networkSyncService.SyncToNetworkAsync(null, full);
+            var result = await _networkSyncService.SyncToNetworkAsync(userId, null, full);
 
             if (!result.Success)
             {

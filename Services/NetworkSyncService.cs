@@ -37,7 +37,7 @@ public class NetworkSyncService : INetworkSyncService
         _logger = logger;
     }
 
-    public async Task<NetworkSyncResult> SyncToNetworkAsync(string? authorizationHeader, bool fullSync = false)
+    public async Task<NetworkSyncResult> SyncToNetworkAsync(int userId, string? authorizationHeader, bool fullSync = false)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var result = new NetworkSyncResult { Success = false };
@@ -62,8 +62,8 @@ public class NetworkSyncService : INetworkSyncService
                 return result;
             }
 
-            _logger.LogInformation("Starting network sync to {Path} (fullSync: {FullSync})",
-                _syncOptions.NetworkPath, fullSync);
+            _logger.LogInformation("Starting network sync for user {UserId} to {Path} (fullSync: {FullSync})",
+                userId, _syncOptions.NetworkPath, fullSync);
 
             // Verify network path is accessible
             if (!Directory.Exists(_syncOptions.NetworkPath))
@@ -95,15 +95,15 @@ public class NetworkSyncService : INetworkSyncService
             _logger.LogInformation("Parsed {Count} records from CSV", records.Count);
 
             // 3. Sync Backup CSV
-            await SyncBackupCsvAsync(csvBytes);
+            await SyncBackupCsvAsync(userId, csvBytes);
             result.FilesWritten++;
 
             // 4. Sync Settings
-            var settingsWritten = await SyncSettingsAsync(records);
+            var settingsWritten = await SyncSettingsAsync(userId, records);
             result.FilesWritten += settingsWritten;
 
             // 5. Sync Games
-            await SyncGamesAsync(records, fullSync, result);
+            await SyncGamesAsync(userId, records, fullSync, result);
 
             stopwatch.Stop();
             result.Success = true;
@@ -143,9 +143,10 @@ public class NetworkSyncService : INetworkSyncService
         return csv.GetRecords<ExportRecord>().ToList();
     }
 
-    private async Task SyncBackupCsvAsync(byte[] csvBytes)
+    private async Task SyncBackupCsvAsync(int userId, byte[] csvBytes)
     {
-        var backupsPath = Path.Combine(_syncOptions.NetworkPath, "Backups");
+        var userPath = Path.Combine(_syncOptions.NetworkPath, userId.ToString());
+        var backupsPath = Path.Combine(userPath, "Backups");
         Directory.CreateDirectory(backupsPath);
 
         var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
@@ -193,9 +194,10 @@ public class NetworkSyncService : INetworkSyncService
         _logger.LogInformation("Synced backup CSV: {FileName}", fileName);
     }
 
-    private async Task<int> SyncSettingsAsync(List<ExportRecord> records)
+    private async Task<int> SyncSettingsAsync(int userId, List<ExportRecord> records)
     {
-        var settingsPath = Path.Combine(_syncOptions.NetworkPath, "Settings");
+        var userPath = Path.Combine(_syncOptions.NetworkPath, userId.ToString());
+        var settingsPath = Path.Combine(userPath, "Settings");
         Directory.CreateDirectory(settingsPath);
 
         int settingsSynced = 0;
@@ -284,17 +286,17 @@ public class NetworkSyncService : INetworkSyncService
         return settingsSynced;
     }
 
-    private async Task SyncGamesAsync(List<ExportRecord> records, bool fullSync, NetworkSyncResult result)
+    private async Task SyncGamesAsync(int userId, List<ExportRecord> records, bool fullSync, NetworkSyncResult result)
     {
         var games = records.Where(r => r.Type == "Game").ToList();
         result.TotalGames = games.Count;
 
-        _logger.LogInformation("Syncing {Count} games (fullSync: {FullSync})", games.Count, fullSync);
+        _logger.LogInformation("Syncing {Count} games for user {UserId} (fullSync: {FullSync})", games.Count, userId, fullSync);
 
         // Load cache info
         var gameNames = games.Select(g => g.Name).ToList();
         var dbGames = await _context.Games
-            .Where(g => gameNames.Contains(g.Name))
+            .Where(g => gameNames.Contains(g.Name) && g.UserId == userId)
             .Select(g => new { g.Id, g.Name, g.ModifiedSinceExport, g.Logo, g.Cover })
             .ToListAsync();
 
@@ -302,7 +304,8 @@ public class NetworkSyncService : INetworkSyncService
             .Where(ec => dbGames.Select(g => g.Id).Contains(ec.GameId))
             .ToDictionaryAsync(ec => ec.GameId);
 
-        var gamesPath = Path.Combine(_syncOptions.NetworkPath, "Games");
+        var userPath = Path.Combine(_syncOptions.NetworkPath, userId.ToString());
+        var gamesPath = Path.Combine(userPath, "Games");
         Directory.CreateDirectory(gamesPath);
 
         // Track failed images for retry at the end
@@ -934,10 +937,10 @@ public class NetworkSyncService : INetworkSyncService
         foreach (var c in normalizedString)
         {
             var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
-            // Keep only letters, digits, spaces, and some safe punctuation
+            // Keep only letters, digits, spaces, and some safe punctuation (including underscore)
             if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
             {
-                if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '.' || c == '(' || c == ')')
+                if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')')
                 {
                     stringBuilder.Append(c);
                 }

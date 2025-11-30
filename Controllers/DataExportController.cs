@@ -50,13 +50,14 @@ public class DataExportController : BaseApiController
             return BadRequest($"NetworkSync path does not exist: {networkSyncPath}");
         }
 
-        var gamesPath = Path.Combine(networkSyncPath, "Games");
+        var userId = GetCurrentUserIdOrDefault(1);
+        var userPath = Path.Combine(networkSyncPath, userId.ToString());
+        var gamesPath = Path.Combine(userPath, "Games");
         if (!Directory.Exists(gamesPath))
         {
             return BadRequest($"Games path does not exist: {gamesPath}");
         }
 
-        var userId = GetCurrentUserIdOrDefault(1);
         var games = await _context.Games
             .Where(g => g.UserId == userId)
             .ToListAsync();
@@ -92,7 +93,7 @@ public class DataExportController : BaseApiController
                     var logoPath = Path.Combine(gamePath, $"logo{ext}");
                     if (System.IO.File.Exists(logoPath))
                     {
-                        logoUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/logo{ext}";
+                        logoUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/logo{ext}";
                         break;
                     }
                 }
@@ -100,7 +101,7 @@ public class DataExportController : BaseApiController
                 // Update logo - if found use actual file, otherwise use default logo.png
                 if (logoUrl == null)
                 {
-                    logoUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/logo.png";
+                    logoUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/logo.png";
                 }
 
                 if (game.Logo != logoUrl)
@@ -117,7 +118,7 @@ public class DataExportController : BaseApiController
                     var coverPath = Path.Combine(gamePath, $"cover{ext}");
                     if (System.IO.File.Exists(coverPath))
                     {
-                        coverUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/cover{ext}";
+                        coverUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
                         break;
                     }
                 }
@@ -125,7 +126,7 @@ public class DataExportController : BaseApiController
                 // Update cover - if found use actual file, otherwise use default cover.png
                 if (coverUrl == null)
                 {
-                    coverUrl = $"{imageBaseUrl}/game-images/Games/{folderName}/cover.png";
+                    coverUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/cover.png";
                 }
 
                 if (game.Cover != coverUrl)
@@ -169,15 +170,22 @@ public class DataExportController : BaseApiController
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;
 
+        // Normalize to remove accents/diacritics (é→e, ó→o, á→a, etc.)
+        var normalized = name.Normalize(System.Text.NormalizationForm.FormD);
         var stringBuilder = new System.Text.StringBuilder();
 
-        // Directly process each character without normalizing (to keep accents/tildes)
-        foreach (var c in name)
+        foreach (var c in normalized)
         {
-            // Allow letters (including accented), digits, and specific punctuation
-            if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')' ||
-                c == '\'' || c == '\u2019' || c == '&' || c == ',' || c == '!' || c == '+' ||
-                c == '™' || c == '®' || c == '—')
+            // Skip diacritical marks (accent marks)
+            var category = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+            if (category == System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                continue; // Skip accent marks
+            }
+
+            // Only allow: letters, digits, space, hyphen, underscore, dot, parentheses
+            // Everything else (apostrophes, commas, symbols like ™®, etc.) is removed
+            if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')')
             {
                 stringBuilder.Append(c);
             }
