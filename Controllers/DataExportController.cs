@@ -37,6 +37,17 @@ public class DataExportController : BaseApiController
     [Authorize]
     public async Task<ActionResult<UpdateImageUrlsResult>> UpdateImageUrls()
     {
+        // Only allow from localhost or specific local IP
+        var host = Request.Host.Host;
+        var isLocalHost = host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                          host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                          host.Equals("192.168.0.32", StringComparison.OrdinalIgnoreCase);
+
+        if (!isLocalHost)
+        {
+            return StatusCode(403, new { message = "Image URL update is only available on local installations" });
+        }
+
         var result = new UpdateImageUrlsResult();
         var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
 
