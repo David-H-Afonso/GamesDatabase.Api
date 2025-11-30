@@ -95,7 +95,7 @@ builder.Services.AddScoped<IZipExportService, ZipExportService>();
 builder.Services.AddScoped<INetworkSyncService, NetworkSyncService>();
 builder.Services.AddHttpContextAccessor();
 
-// Configure HttpClient to trust development certificates
+// Configure HttpClient for CSV exports (longer timeout)
 builder.Services.AddHttpClient("TrustAllCerts")
     .ConfigurePrimaryHttpMessageHandler(() =>
     {
@@ -125,6 +125,37 @@ builder.Services.AddHttpClient("TrustAllCerts")
         {
             NoCache = false,
             MaxAge = TimeSpan.FromDays(365)
+        };
+    });
+
+// Configure HttpClient for images (shorter timeout to avoid hanging)
+builder.Services.AddHttpClient("ImageDownloader")
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        var handler = new HttpClientHandler();
+        if (builder.Environment.IsDevelopment())
+        {
+            handler.ServerCertificateCustomValidationCallback =
+                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        }
+        return handler;
+    })
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        client.DefaultRequestHeaders.Add("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
+        client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+        client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
+        client.DefaultRequestHeaders.Add("DNT", "1");
+        client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "image");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "no-cors");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "cross-site");
+        client.DefaultRequestHeaders.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
+        {
+            NoCache = false,
+            MaxAge = TimeSpan.FromHours(1)
         };
     });
 

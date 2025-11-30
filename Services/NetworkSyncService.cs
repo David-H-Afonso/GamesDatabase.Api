@@ -13,6 +13,7 @@ namespace GamesDatabase.Api.Services;
 public class NetworkSyncService : INetworkSyncService
 {
     private readonly HttpClient _httpClient;
+    private readonly HttpClient _imageHttpClient;
     private readonly DataExportOptions _exportOptions;
     private readonly NetworkSyncOptions _syncOptions;
     private readonly GamesDbContext _context;
@@ -26,6 +27,7 @@ public class NetworkSyncService : INetworkSyncService
         ILogger<NetworkSyncService> logger)
     {
         _httpClient = httpClientFactory.CreateClient("TrustAllCerts");
+        _imageHttpClient = httpClientFactory.CreateClient("ImageDownloader");
         _exportOptions = exportOptions.Value;
         _syncOptions = syncOptions.Value;
         _context = context;
@@ -712,7 +714,7 @@ public class NetworkSyncService : INetworkSyncService
             {
                 _logger.LogDebug("Downloading image from {Url} (attempt {Attempt}/{MaxRetries})", url, currentAttempt, maxRetries);
 
-                var response = await _httpClient.GetAsync(url);
+                var response = await _imageHttpClient.GetAsync(url);
 
                 if (!response.IsSuccessStatusCode)
                 {
