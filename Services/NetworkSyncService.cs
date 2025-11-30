@@ -411,7 +411,7 @@ public class NetworkSyncService : INetworkSyncService
                 }
 
                 // Check if URL is local (localhost or 192.168.0.32) - skip download
-                bool isLocalUrl = game.Logo.Contains("localhost", StringComparison.OrdinalIgnoreCase) || 
+                bool isLocalUrl = game.Logo.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
                                   game.Logo.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
 
                 if (isLocalUrl)
@@ -438,14 +438,14 @@ public class NetworkSyncService : INetworkSyncService
                     }
                     else
                     {
-                    if (cache != null) cache.LogoDownloaded = false;
-                    result.ImagesFailed++;
-                    failedImageTypes.Add("logo");
-                    // Track for retry at the end
-                    if (game.Logo != null)
-                    {
-                        failedImageRetries.Add((game, dbGame.Id, gamePath, "logo", game.Logo, cache));
-                    }
+                        if (cache != null) cache.LogoDownloaded = false;
+                        result.ImagesFailed++;
+                        failedImageTypes.Add("logo");
+                        // Track for retry at the end
+                        if (game.Logo != null)
+                        {
+                            failedImageRetries.Add((game, dbGame.Id, gamePath, "logo", game.Logo, cache));
+                        }
                     }
                 }
 
@@ -466,7 +466,7 @@ public class NetworkSyncService : INetworkSyncService
                 }
 
                 // Check if URL is local (localhost or 192.168.0.32) - skip download
-                bool isLocalUrl = game.Cover.Contains("localhost", StringComparison.OrdinalIgnoreCase) || 
+                bool isLocalUrl = game.Cover.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
                                   game.Cover.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
 
                 if (isLocalUrl)
