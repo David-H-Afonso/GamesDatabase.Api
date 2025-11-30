@@ -32,6 +32,11 @@ public class GameQueryParameters : QueryParameters
     public bool? IsCheaperByKey { get; set; }
 
     /// <summary>
+    /// Filtrar juegos incompletos: sin rellenar (Not Fulfilled), sin cover, sin logo, o sin plataforma
+    /// </summary>
+    public bool? ShowIncomplete { get; set; }
+
+    /// <summary>
     /// ID de la vista a aplicar. Si se especifica, se ignorarán otros filtros y ordenamientos
     /// </summary>
     public int? ViewId { get; set; }

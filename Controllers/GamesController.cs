@@ -240,6 +240,16 @@ public class GamesController : BaseApiController
             query = query.Where(g => g.IsCheaperByKey == parameters.IsCheaperByKey.Value);
         }
 
+        if (parameters.ShowIncomplete == true)
+        {
+            query = query.Where(g => 
+                g.Status != null && g.Status.Name == "Not Fulfilled" ||
+                string.IsNullOrEmpty(g.Cover) ||
+                string.IsNullOrEmpty(g.Logo) ||
+                g.PlatformId == null
+            );
+        }
+
         return query;
     }
 
