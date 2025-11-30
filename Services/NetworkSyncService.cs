@@ -298,7 +298,7 @@ public class NetworkSyncService : INetworkSyncService
         Directory.CreateDirectory(gamesPath);
 
         // Track failed images for retry at the end
-        var failedImageRetries = new List<(ExportRecord game, int gameId, string gamePath, string imageType, string url, GameExportCache cache)>();
+        var failedImageRetries = new List<(ExportRecord game, int gameId, string gamePath, string imageType, string url, GameExportCache? cache)>();
 
         // Rate limiting: track requests per domain
         var domainLastRequest = new Dictionary<string, DateTime>();
@@ -411,20 +411,23 @@ public class NetworkSyncService : INetworkSyncService
                     var extension = GetExtensionFromUrl(game.Logo);
                     var logoPath = Path.Combine(gamePath, $"logo{extension}");
                     await File.WriteAllBytesAsync(logoPath, logoBytes);
-                    cache.LogoDownloaded = true;
+                    if (cache != null) cache.LogoDownloaded = true;
                     result.ImagesSynced++;
                     result.FilesWritten++;
                 }
                 else
                 {
-                    cache.LogoDownloaded = false;
+                    if (cache != null) cache.LogoDownloaded = false;
                     result.ImagesFailed++;
                     failedImageTypes.Add("logo");
                     // Track for retry at the end
-                    failedImageRetries.Add((game, dbGame.Id, gamePath, "logo", game.Logo, cache));
+                    if (game.Logo != null)
+                    {
+                        failedImageRetries.Add((game, dbGame.Id, gamePath, "logo", game.Logo, cache));
+                    }
                 }
 
-                cache.LogoUrl = game.Logo;
+                if (cache != null) cache.LogoUrl = game.Logo;
             }
 
             // Sync cover
@@ -449,20 +452,23 @@ public class NetworkSyncService : INetworkSyncService
                     var extension = GetExtensionFromUrl(game.Cover);
                     var coverPath = Path.Combine(gamePath, $"cover{extension}");
                     await File.WriteAllBytesAsync(coverPath, coverBytes);
-                    cache.CoverDownloaded = true;
+                    if (cache != null) cache.CoverDownloaded = true;
                     result.ImagesSynced++;
                     result.FilesWritten++;
                 }
                 else
                 {
-                    cache.CoverDownloaded = false;
+                    if (cache != null) cache.CoverDownloaded = false;
                     result.ImagesFailed++;
                     failedImageTypes.Add("cover");
                     // Track for retry at the end
-                    failedImageRetries.Add((game, dbGame.Id, gamePath, "cover", game.Cover, cache));
+                    if (game.Cover != null)
+                    {
+                        failedImageRetries.Add((game, dbGame.Id, gamePath, "cover", game.Cover, cache));
+                    }
                 }
 
-                cache.CoverUrl = game.Cover;
+                if (cache != null) cache.CoverUrl = game.Cover;
             }
 
             // Add to failed images list if any images failed
@@ -510,7 +516,7 @@ public class NetworkSyncService : INetworkSyncService
                 _logger.LogInformation("Retry pass {Pass}/{MaxPasses} - Attempting {Count} failed images...",
                     pass, maxRetryPasses, currentFailedRetries.Count);
 
-                var nextPassFailures = new List<(ExportRecord game, int gameId, string gamePath, string imageType, string url, GameExportCache cache)>();
+                var nextPassFailures = new List<(ExportRecord game, int gameId, string gamePath, string imageType, string url, GameExportCache? cache)>();
 
                 foreach (var (game, gameId, gamePath, imageType, url, cache) in currentFailedRetries)
                 {
@@ -529,11 +535,11 @@ public class NetworkSyncService : INetworkSyncService
                         // Update cache
                         if (imageType == "logo")
                         {
-                            cache.LogoDownloaded = true;
+                            if (cache != null) cache.LogoDownloaded = true;
                         }
                         else if (imageType == "cover")
                         {
-                            cache.CoverDownloaded = true;
+                            if (cache != null) cache.CoverDownloaded = true;
                         }
 
                         // Update statistics - move from failed to synced
