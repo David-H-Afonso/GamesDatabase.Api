@@ -12,4 +12,11 @@ public class NetworkSyncResult
     public int ImagesFailed { get; set; }
     public int FilesWritten { get; set; }
     public string? ErrorMessage { get; set; }
+    public List<FailedImageInfo> FailedImages { get; set; } = new();
+}
+
+public class FailedImageInfo
+{
+    public string GameName { get; set; } = string.Empty;
+    public List<string> ImageTypes { get; set; } = new();
 }

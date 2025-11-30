@@ -91,8 +91,8 @@ public class NetworkSyncService : INetworkSyncService
             result.FilesWritten++;
 
             // 4. Sync Settings
-            await SyncSettingsAsync(records);
-            result.FilesWritten += 5; // 5 settings files
+            var settingsWritten = await SyncSettingsAsync(records);
+            result.FilesWritten += settingsWritten;
 
             // 5. Sync Games
             await SyncGamesAsync(records, fullSync, result);
@@ -140,14 +140,52 @@ public class NetworkSyncService : INetworkSyncService
         var backupsPath = Path.Combine(_syncOptions.NetworkPath, "Backups");
         Directory.CreateDirectory(backupsPath);
 
-        var fileName = $"database_full_export_{DateTime.UtcNow:yyyy-MM-dd}.csv";
-        var filePath = Path.Combine(backupsPath, fileName);
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        var baseFileName = $"database_full_export_{today}";
 
+        // Find existing backups for today and determine next version number
+        var existingFiles = Directory.GetFiles(backupsPath, $"{baseFileName}*.csv")
+            .Select(Path.GetFileName)
+            .ToList();
+
+        int version = 1;
+        string fileName;
+
+        if (existingFiles.Count > 0)
+        {
+            // Find highest version number
+            foreach (var file in existingFiles)
+            {
+                if (file == null) continue;
+
+                // Match patterns: database_full_export_2025-11-30.csv or database_full_export_2025-11-30_v2.csv
+                var match = System.Text.RegularExpressions.Regex.Match(file, @"_v(\d+)\.csv$");
+                if (match.Success)
+                {
+                    var fileVersion = int.Parse(match.Groups[1].Value);
+                    if (fileVersion >= version)
+                        version = fileVersion + 1;
+                }
+                else if (file == $"{baseFileName}.csv")
+                {
+                    // First version exists without _v suffix
+                    version = 2;
+                }
+            }
+
+            fileName = $"{baseFileName}_v{version}.csv";
+        }
+        else
+        {
+            fileName = $"{baseFileName}.csv";
+        }
+
+        var filePath = Path.Combine(backupsPath, fileName);
         await File.WriteAllBytesAsync(filePath, csvBytes);
         _logger.LogInformation("Synced backup CSV: {FileName}", fileName);
     }
 
-    private async Task SyncSettingsAsync(List<ExportRecord> records)
+    private async Task<int> SyncSettingsAsync(List<ExportRecord> records)
     {
         var settingsPath = Path.Combine(_syncOptions.NetworkPath, "Settings");
         Directory.CreateDirectory(settingsPath);
@@ -233,7 +271,9 @@ public class NetworkSyncService : INetworkSyncService
         if (settingsSynced > 0)
             _logger.LogInformation("Synced {Count} settings files that changed", settingsSynced);
         else
-            _logger.LogDebug("No settings changes detected, skipping sync");
+            _logger.LogDebug("All settings files are up to date");
+
+        return settingsSynced;
     }
 
     private async Task SyncGamesAsync(List<ExportRecord> records, bool fullSync, NetworkSyncResult result)
@@ -256,6 +296,13 @@ public class NetworkSyncService : INetworkSyncService
 
         var gamesPath = Path.Combine(_syncOptions.NetworkPath, "Games");
         Directory.CreateDirectory(gamesPath);
+
+        // Track failed images for retry at the end
+        var failedImageRetries = new List<(ExportRecord game, int gameId, string gamePath, string imageType, string url, GameExportCache cache)>();
+
+        // Rate limiting: track requests per domain
+        var domainLastRequest = new Dictionary<string, DateTime>();
+        const int minDelayBetweenRequestsMs = 200; // 200ms between requests to same domain
 
         foreach (var game in games)
         {
@@ -293,6 +340,9 @@ public class NetworkSyncService : INetworkSyncService
             }
 
             result.GamesSynced++;
+
+            // Track failed images for this game
+            var failedImageTypes = new List<string>();
 
             // Sync info.json
             if (needsSync)
@@ -345,24 +395,21 @@ public class NetworkSyncService : INetworkSyncService
                 bool isRetry = cache?.LogoUrl == game.Logo && !cache.LogoDownloaded;
                 bool urlChanged = cache?.LogoUrl != game.Logo;
 
-                if (isRetry)
-                {
-                    _logger.LogInformation("Retrying logo download for '{Name}'", game.Name);
-                    result.ImagesRetried++;
-                }
-                else if (urlChanged && cache?.LogoUrl != null)
+                if (urlChanged && cache?.LogoUrl != null)
                 {
                     // Delete old logo files when URL changes
                     DeleteOldImageFiles(gamePath, "logo");
                     _logger.LogInformation("Logo URL changed for '{Name}', downloading new image", game.Name);
                 }
 
-                var logoBytes = await SafeDownloadAsync(game.Logo);
+                // Apply rate limiting
+                await ApplyRateLimitAsync(game.Logo, domainLastRequest, minDelayBetweenRequestsMs);
+
+                var logoBytes = await SafeDownloadAsync(game.Logo, attempt: 1, maxAttempts: 1);
                 if (logoBytes != null)
                 {
                     var extension = GetExtensionFromUrl(game.Logo);
                     var logoPath = Path.Combine(gamePath, $"logo{extension}");
-                    // Overwrite existing file
                     await File.WriteAllBytesAsync(logoPath, logoBytes);
                     cache.LogoDownloaded = true;
                     result.ImagesSynced++;
@@ -372,6 +419,9 @@ public class NetworkSyncService : INetworkSyncService
                 {
                     cache.LogoDownloaded = false;
                     result.ImagesFailed++;
+                    failedImageTypes.Add("logo");
+                    // Track for retry at the end
+                    failedImageRetries.Add((game, dbGame.Id, gamePath, "logo", game.Logo, cache));
                 }
 
                 cache.LogoUrl = game.Logo;
@@ -383,24 +433,21 @@ public class NetworkSyncService : INetworkSyncService
                 bool isRetry = cache?.CoverUrl == game.Cover && !cache.CoverDownloaded;
                 bool urlChanged = cache?.CoverUrl != game.Cover;
 
-                if (isRetry)
-                {
-                    _logger.LogInformation("Retrying cover download for '{Name}'", game.Name);
-                    result.ImagesRetried++;
-                }
-                else if (urlChanged && cache?.CoverUrl != null)
+                if (urlChanged && cache?.CoverUrl != null)
                 {
                     // Delete old cover files when URL changes
                     DeleteOldImageFiles(gamePath, "cover");
                     _logger.LogInformation("Cover URL changed for '{Name}', downloading new image", game.Name);
                 }
 
-                var coverBytes = await SafeDownloadAsync(game.Cover);
+                // Apply rate limiting
+                await ApplyRateLimitAsync(game.Cover, domainLastRequest, minDelayBetweenRequestsMs);
+
+                var coverBytes = await SafeDownloadAsync(game.Cover, attempt: 1, maxAttempts: 1);
                 if (coverBytes != null)
                 {
                     var extension = GetExtensionFromUrl(game.Cover);
                     var coverPath = Path.Combine(gamePath, $"cover{extension}");
-                    // Overwrite existing file
                     await File.WriteAllBytesAsync(coverPath, coverBytes);
                     cache.CoverDownloaded = true;
                     result.ImagesSynced++;
@@ -410,9 +457,22 @@ public class NetworkSyncService : INetworkSyncService
                 {
                     cache.CoverDownloaded = false;
                     result.ImagesFailed++;
+                    failedImageTypes.Add("cover");
+                    // Track for retry at the end
+                    failedImageRetries.Add((game, dbGame.Id, gamePath, "cover", game.Cover, cache));
                 }
 
                 cache.CoverUrl = game.Cover;
+            }
+
+            // Add to failed images list if any images failed
+            if (failedImageTypes.Count > 0)
+            {
+                result.FailedImages.Add(new FailedImageInfo
+                {
+                    GameName = game.Name,
+                    ImageTypes = failedImageTypes
+                });
             }
 
             // Mark as synced
@@ -427,35 +487,161 @@ public class NetworkSyncService : INetworkSyncService
             }
         }
 
+        // Retry failed images at the end with multiple passes
+        if (failedImageRetries.Count > 0)
+        {
+            const int maxRetryPasses = 4; // 4 rondas de reintentos
+            const int retryDelayMs = 2000; // 2 segundos entre cada reintento
+
+            var currentFailedRetries = failedImageRetries.ToList();
+
+            for (int pass = 1; pass <= maxRetryPasses && currentFailedRetries.Count > 0; pass++)
+            {
+                _logger.LogInformation("Retry pass {Pass}/{MaxPasses} - Attempting {Count} failed images...",
+                    pass, maxRetryPasses, currentFailedRetries.Count);
+
+                var nextPassFailures = new List<(ExportRecord game, int gameId, string gamePath, string imageType, string url, GameExportCache cache)>();
+
+                foreach (var (game, gameId, gamePath, imageType, url, cache) in currentFailedRetries)
+                {
+                    _logger.LogInformation("Retrying {ImageType} for '{Name}' (pass {Pass})", imageType, game.Name, pass);
+                    result.ImagesRetried++;
+
+                    await Task.Delay(retryDelayMs); // Wait before each retry
+
+                    var imageBytes = await SafeDownloadAsync(url, attempt: 1, maxAttempts: 1); // 1 intento por cada reintento
+                    if (imageBytes != null)
+                    {
+                        var extension = GetExtensionFromUrl(url);
+                        var imagePath = Path.Combine(gamePath, $"{imageType}{extension}");
+                        await File.WriteAllBytesAsync(imagePath, imageBytes);
+
+                        // Update cache
+                        if (imageType == "logo")
+                        {
+                            cache.LogoDownloaded = true;
+                        }
+                        else if (imageType == "cover")
+                        {
+                            cache.CoverDownloaded = true;
+                        }
+
+                        // Update statistics - move from failed to synced
+                        result.ImagesFailed--;
+                        result.ImagesSynced++;
+                        result.FilesWritten++;
+
+                        // Remove from failed images report
+                        var failedImage = result.FailedImages.FirstOrDefault(f => f.GameName == game.Name);
+                        if (failedImage != null)
+                        {
+                            failedImage.ImageTypes.Remove(imageType);
+                            if (failedImage.ImageTypes.Count == 0)
+                            {
+                                result.FailedImages.Remove(failedImage);
+                            }
+                        }
+
+                        _logger.LogInformation("✓ Successfully retried {ImageType} for '{Name}' on pass {Pass}", imageType, game.Name, pass);
+                    }
+                    else
+                    {
+                        // Falló, guardar para la siguiente ronda
+                        nextPassFailures.Add((game, gameId, gamePath, imageType, url, cache));
+                        _logger.LogWarning("✗ Failed {ImageType} for '{Name}' on pass {Pass}, will retry in next pass", imageType, game.Name, pass);
+                    }
+                }
+
+                // Preparar para la siguiente ronda
+                currentFailedRetries = nextPassFailures;
+
+                if (currentFailedRetries.Count > 0 && pass < maxRetryPasses)
+                {
+                    _logger.LogInformation("Pass {Pass} complete. {Count} images still failing. Waiting before next pass...",
+                        pass, currentFailedRetries.Count);
+                    await Task.Delay(3000); // 3 segundos entre rondas completas
+                }
+            }
+
+            if (currentFailedRetries.Count > 0)
+            {
+                _logger.LogWarning("After {MaxPasses} retry passes, {Count} images still failed permanently",
+                    maxRetryPasses, currentFailedRetries.Count);
+            }
+            else
+            {
+                _logger.LogInformation("All failed images successfully recovered after retry passes!");
+            }
+        }
+
         await _context.SaveChangesAsync();
+    }
+
+    private async Task ApplyRateLimitAsync(string url, Dictionary<string, DateTime> domainLastRequest, int minDelayMs)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            var domain = uri.Host;
+
+            if (domainLastRequest.TryGetValue(domain, out var lastRequest))
+            {
+                var timeSinceLastRequest = DateTime.UtcNow - lastRequest;
+                var remainingDelay = minDelayMs - (int)timeSinceLastRequest.TotalMilliseconds;
+
+                if (remainingDelay > 0)
+                {
+                    await Task.Delay(remainingDelay);
+                }
+            }
+
+            domainLastRequest[domain] = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Error applying rate limit for URL '{Url}': {Error}", url, ex.Message);
+        }
     }
 
     private async Task<bool> WriteJsonToFileIfChangedAsync<T>(string filePath, T data)
     {
-        var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
+        var jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            // Ensure consistent ordering
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+
+        var json = JsonSerializer.Serialize(data, jsonOptions);
 
         // Check if file exists and compare content
         if (File.Exists(filePath))
         {
             var existingJson = await File.ReadAllTextAsync(filePath, Encoding.UTF8);
 
+            // Normalize both strings by removing BOM and trimming whitespace
+            var normalizedNew = json.Trim().TrimStart('\uFEFF');
+            var normalizedExisting = existingJson.Trim().TrimStart('\uFEFF');
+
             // Compare content hash to detect changes
-            var newHash = ComputeHash(json);
-            var existingHash = ComputeHash(existingJson);
+            var newHash = ComputeHash(normalizedNew);
+            var existingHash = ComputeHash(normalizedExisting);
 
             if (newHash == existingHash)
             {
                 _logger.LogDebug("Skipping {FileName} - no changes detected", Path.GetFileName(filePath));
                 return false;
             }
+
+            _logger.LogDebug("Updating {FileName} - content changed", Path.GetFileName(filePath));
+        }
+        else
+        {
+            _logger.LogDebug("Creating new {FileName}", Path.GetFileName(filePath));
         }
 
         await File.WriteAllTextAsync(filePath, json, Encoding.UTF8);
-        _logger.LogDebug("Updated {FileName}", Path.GetFileName(filePath));
         return true;
     }
 
@@ -467,18 +653,101 @@ public class NetworkSyncService : INetworkSyncService
         return Convert.ToBase64String(hash);
     }
 
-    private async Task<byte[]?> SafeDownloadAsync(string url)
+    private async Task<byte[]?> SafeDownloadAsync(string url, int attempt = 1, int maxAttempts = 3)
     {
-        try
+        int maxRetries = maxAttempts;
+
+        for (int currentAttempt = attempt; currentAttempt <= maxRetries; currentAttempt++)
         {
-            _logger.LogDebug("Downloading image from {Url}", url);
-            return await _httpClient.GetByteArrayAsync(url);
+            try
+            {
+                _logger.LogDebug("Downloading image from {Url} (attempt {Attempt}/{MaxRetries})", url, currentAttempt, maxRetries);
+
+                var response = await _httpClient.GetAsync(url);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning(
+                        "Failed to download image from {Url} - HTTP {StatusCode} {Reason}",
+                        url,
+                        (int)response.StatusCode,
+                        response.ReasonPhrase
+                    );
+
+                    // Don't retry on 404 or 403
+                    if (response.StatusCode == System.Net.HttpStatusCode.NotFound ||
+                        response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    {
+                        return null;
+                    }
+
+                    // Retry on server errors or timeouts
+                    if (currentAttempt < maxRetries)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
+                        continue;
+                    }
+
+                    return null;
+                }
+
+                var bytes = await response.Content.ReadAsByteArrayAsync();
+                _logger.LogDebug("Successfully downloaded {Size} bytes from {Url}", bytes.Length, url);
+                return bytes;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "HTTP request failed for {Url} (attempt {Attempt}/{MaxRetries}): {Message}",
+                    url,
+                    currentAttempt,
+                    maxRetries,
+                    ex.Message
+                );
+
+                if (currentAttempt < maxRetries)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
+                    continue;
+                }
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Request timeout for {Url} (attempt {Attempt}/{MaxRetries})",
+                    url,
+                    currentAttempt,
+                    maxRetries
+                );
+
+                if (currentAttempt < maxRetries)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
+                    continue;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Unexpected error downloading from {Url} (attempt {Attempt}/{MaxRetries}): {Message}",
+                    url,
+                    currentAttempt,
+                    maxRetries,
+                    ex.Message
+                );
+
+                if (currentAttempt < maxRetries)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
+                    continue;
+                }
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to download image from {Url}", url);
-            return null;
-        }
+
+        return null;
     }
 
     private static void DeleteOldImageFiles(string gamePath, string prefix)
@@ -519,6 +788,22 @@ public class NetworkSyncService : INetworkSyncService
         {
             var uri = new Uri(url);
             var path = uri.AbsolutePath;
+
+            // Remove size suffixes like :large, :medium, :small from SteamGridDB URLs
+            // Example: /icon/abc123.png:large -> /icon/abc123.png
+            var colonIndex = path.LastIndexOf(':');
+            if (colonIndex > 0)
+            {
+                var afterColon = path.Substring(colonIndex + 1);
+                // Check if it's a size suffix (not a drive letter like C:)
+                if (afterColon.Equals("large", StringComparison.OrdinalIgnoreCase) ||
+                    afterColon.Equals("medium", StringComparison.OrdinalIgnoreCase) ||
+                    afterColon.Equals("small", StringComparison.OrdinalIgnoreCase))
+                {
+                    path = path.Substring(0, colonIndex);
+                }
+            }
+
             var extension = Path.GetExtension(path);
 
             if (!string.IsNullOrWhiteSpace(extension))
