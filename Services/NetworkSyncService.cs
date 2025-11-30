@@ -492,22 +492,28 @@ public class NetworkSyncService : INetworkSyncService
                 }
             }
 
-            // Save changes after each game to avoid long transactions
+            // Save changes after each game to prevent long transactions
             try
             {
                 await _context.SaveChangesAsync();
             }
+            catch (DbUpdateException ex) when (ex.InnerException?.Message?.Contains("UNIQUE constraint") == true)
+            {
+                _logger.LogWarning("Skipping duplicate cache entry for game '{Name}'", game.Name);
+                _context.ChangeTracker.Clear(); // Clear tracked entities to avoid further errors
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to save changes for game '{Name}': {Message}", game.Name, ex.Message);
+                _context.ChangeTracker.Clear();
             }
         }
 
         // Retry failed images at the end with multiple passes
         if (failedImageRetries.Count > 0)
         {
-            const int maxRetryPasses = 4; // 4 rondas de reintentos
-            const int retryDelayMs = 2000; // 2 segundos entre cada reintento
+            const int maxRetryPasses = 2; // 2 rondas de reintentos (reducido para evitar loops infinitos)
+            const int retryDelayMs = 3000; // 3 segundos entre cada reintento
 
             var currentFailedRetries = failedImageRetries.ToList();
 
@@ -582,11 +588,16 @@ public class NetworkSyncService : INetworkSyncService
                         await _context.SaveChangesAsync();
                         _logger.LogDebug("Saved changes after retry pass {Pass}", pass);
                     }
+                    catch (DbUpdateException ex) when (ex.InnerException?.Message?.Contains("UNIQUE constraint") == true)
+                    {
+                        _logger.LogWarning("Skipping duplicate cache entries in retry pass {Pass}", pass);
+                        _context.ChangeTracker.Clear();
+                    }
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed to save changes after retry pass {Pass}: {Message}", pass, ex.Message);
+                        _context.ChangeTracker.Clear();
                     }
-
                     await Task.Delay(3000); // 3 segundos entre rondas completas
                 }
             }
