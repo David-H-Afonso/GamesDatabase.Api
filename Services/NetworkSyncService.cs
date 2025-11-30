@@ -18,6 +18,9 @@ public class NetworkSyncService : INetworkSyncService
     private readonly NetworkSyncOptions _syncOptions;
     private readonly GamesDbContext _context;
     private readonly ILogger<NetworkSyncService> _logger;
+    private readonly Dictionary<string, bool> _cdnHealthCache = new();
+    private readonly TimeSpan _cdnHealthCacheDuration = TimeSpan.FromMinutes(5);
+    private DateTime _cdnHealthCacheExpiry = DateTime.MinValue;
 
     public NetworkSyncService(
         IHttpClientFactory httpClientFactory,
@@ -48,6 +51,9 @@ public class NetworkSyncService : INetworkSyncService
                 _logger.LogWarning("Network sync attempted but it's disabled");
                 return result;
             }
+
+            // Check CDN health at the start of sync
+            await CheckCdnHealthAsync();
 
             if (string.IsNullOrWhiteSpace(_syncOptions.NetworkPath))
             {
@@ -704,8 +710,91 @@ public class NetworkSyncService : INetworkSyncService
         return Convert.ToBase64String(hash);
     }
 
+    private async Task CheckCdnHealthAsync()
+    {
+        // Check if cache is still valid
+        if (DateTime.UtcNow < _cdnHealthCacheExpiry)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Checking CDN health...");
+        _cdnHealthCache.Clear();
+
+        // List of CDNs to check
+        var cdnsToCheck = new[]
+        {
+            "cdn2.steamgriddb.com",
+            "cdn.steamgriddb.com",
+            "images.igdb.com"
+        };
+
+        foreach (var cdn in cdnsToCheck)
+        {
+            try
+            {
+                // Try a quick HEAD request to check if CDN is reachable
+                var testUrl = $"https://{cdn}/favicon.ico";
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var request = new HttpRequestMessage(HttpMethod.Head, testUrl);
+                var response = await _imageHttpClient.SendAsync(request, cts.Token);
+
+                _cdnHealthCache[cdn] = response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound;
+
+                if (_cdnHealthCache[cdn])
+                {
+                    _logger.LogInformation("CDN {Cdn} is reachable", cdn);
+                }
+                else
+                {
+                    _logger.LogWarning("CDN {Cdn} returned error: {StatusCode}", cdn, response.StatusCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                _cdnHealthCache[cdn] = false;
+                _logger.LogWarning(ex, "CDN {Cdn} is unreachable or timed out", cdn);
+            }
+        }
+
+        _cdnHealthCacheExpiry = DateTime.UtcNow.Add(_cdnHealthCacheDuration);
+
+        var healthyCdns = _cdnHealthCache.Count(x => x.Value);
+        var totalCdns = _cdnHealthCache.Count;
+        _logger.LogInformation("CDN health check complete: {Healthy}/{Total} CDNs available", healthyCdns, totalCdns);
+    }
+
+    private bool IsCdnHealthy(string url)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            var host = uri.Host;
+
+            // If we have health info for this CDN, use it
+            if (_cdnHealthCache.TryGetValue(host, out bool isHealthy))
+            {
+                return isHealthy;
+            }
+
+            // If no health info, assume it's healthy (will fail on first attempt and get cached)
+            return true;
+        }
+        catch
+        {
+            return true; // Assume healthy if we can't parse URL
+        }
+    }
+
     private async Task<byte[]?> SafeDownloadAsync(string url, int attempt = 1, int maxAttempts = 3)
     {
+        // Check if CDN is healthy before attempting download
+        if (!IsCdnHealthy(url))
+        {
+            _logger.LogWarning("Skipping download from unhealthy CDN: {Url}", url);
+            return null;
+        }
+
         int maxRetries = maxAttempts;
 
         for (int currentAttempt = attempt; currentAttempt <= maxRetries; currentAttempt++)
@@ -772,6 +861,18 @@ public class NetworkSyncService : INetworkSyncService
                     currentAttempt,
                     maxRetries
                 );
+
+                // Mark CDN as unhealthy after timeout
+                if (currentAttempt >= maxRetries)
+                {
+                    try
+                    {
+                        var uri = new Uri(url);
+                        _cdnHealthCache[uri.Host] = false;
+                        _logger.LogWarning("Marking CDN {Host} as unhealthy due to repeated timeouts", uri.Host);
+                    }
+                    catch { }
+                }
 
                 if (currentAttempt < maxRetries)
                 {
