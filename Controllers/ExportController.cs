@@ -167,9 +167,9 @@ public class ExportController : BaseApiController
         try
         {
             // Validate API Key from environment variable
-            var configuredApiKey = Environment.GetEnvironmentVariable("AUTOMATION_API_KEY") 
+            var configuredApiKey = Environment.GetEnvironmentVariable("AUTOMATION_API_KEY")
                                 ?? _configuration["AutomationSettings:ApiKey"];
-            
+
             if (string.IsNullOrWhiteSpace(configuredApiKey))
             {
                 _logger.LogWarning("Auto-sync attempted but API Key is not configured");
