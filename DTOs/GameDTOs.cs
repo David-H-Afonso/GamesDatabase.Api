@@ -82,3 +82,17 @@ public class GameUpdateDto
     public string? KeyStoreUrl { get; set; }
 
 }
+
+public class BulkUpdateGameDto
+{
+    public int[]? GameIds { get; set; }
+    public int? StatusId { get; set; }
+    public int? PlatformId { get; set; }
+    public int[]? PlayWithIds { get; set; }
+}
+
+public class BulkUpdateResult
+{
+    public int UpdatedCount { get; set; }
+    public int TotalRequested { get; set; }
+}

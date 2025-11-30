@@ -242,7 +242,7 @@ public class GamesController : BaseApiController
 
         if (parameters.ShowIncomplete == true)
         {
-            query = query.Where(g => 
+            query = query.Where(g =>
                 g.Status != null && g.Status.Name == "Not Fulfilled" ||
                 string.IsNullOrEmpty(g.Cover) ||
                 string.IsNullOrEmpty(g.Logo) ||
@@ -610,4 +610,83 @@ public class GamesController : BaseApiController
 
         return stringBuilder.ToString().Normalize(System.Text.NormalizationForm.FormC);
     }
+
+    [HttpPatch("bulk")]
+    public async Task<ActionResult<BulkUpdateResult>> BulkUpdateGames([FromBody] BulkUpdateGameDto bulkUpdate)
+    {
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        if (bulkUpdate.GameIds == null || bulkUpdate.GameIds.Length == 0)
+        {
+            return BadRequest("No game IDs provided");
+        }
+
+        var games = await _context.Games
+            .Where(g => bulkUpdate.GameIds.Contains(g.Id) && g.UserId == userId)
+            .ToListAsync();
+
+        if (games.Count == 0)
+        {
+            return NotFound("No games found with provided IDs");
+        }
+
+        int updatedCount = 0;
+
+        foreach (var game in games)
+        {
+            bool updated = false;
+
+            if (bulkUpdate.StatusId.HasValue)
+            {
+                game.StatusId = bulkUpdate.StatusId.Value;
+                updated = true;
+            }
+
+            if (bulkUpdate.PlatformId.HasValue)
+            {
+                game.PlatformId = bulkUpdate.PlatformId.Value;
+                updated = true;
+            }
+
+            if (bulkUpdate.PlayWithIds != null)
+            {
+                // Remove existing PlayWith mappings
+                var existingMappings = await _context.GamePlayWithMappings
+                    .Where(gpw => gpw.GameId == game.Id)
+                    .ToListAsync();
+                _context.GamePlayWithMappings.RemoveRange(existingMappings);
+
+                // Add new PlayWith mappings
+                foreach (var playWithId in bulkUpdate.PlayWithIds)
+                {
+                    _context.GamePlayWithMappings.Add(new Models.GamePlayWithMapping
+                    {
+                        GameId = game.Id,
+                        PlayWithId = playWithId
+                    });
+                }
+                updated = true;
+            }
+
+            if (updated)
+            {
+                game.UpdatedAt = DateTime.UtcNow;
+                updatedCount++;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new BulkUpdateResult
+        {
+            UpdatedCount = updatedCount,
+            TotalRequested = bulkUpdate.GameIds.Length
+        });
+    }
+}
+
+public class BulkUpdateResult
+{
+    public int UpdatedCount { get; set; }
+    public int TotalRequested { get; set; }
 }
