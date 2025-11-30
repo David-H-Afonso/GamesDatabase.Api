@@ -17,7 +17,9 @@ public class GamesController : BaseApiController
     private readonly GamesDbContext _context;
     private readonly IViewFilterService _viewFilterService;
 
-    public GamesController(GamesDbContext context, IViewFilterService viewFilterService)
+    public GamesController(
+        GamesDbContext context,
+        IViewFilterService viewFilterService)
     {
         _context = context;
         _viewFilterService = viewFilterService;
