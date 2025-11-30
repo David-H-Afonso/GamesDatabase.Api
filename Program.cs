@@ -392,6 +392,20 @@ static async Task SeedDefaultDataAsync(GamesDbContext context)
 
 app.UseHttpsRedirection();
 
+// Serve static files from network sync path (game images)
+var networkSyncPath = builder.Configuration["NetworkSync:NetworkPath"];
+if (!string.IsNullOrWhiteSpace(networkSyncPath) && Directory.Exists(networkSyncPath))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(networkSyncPath),
+        RequestPath = "/game-images",
+        ServeUnknownFileTypes = true,
+        DefaultContentType = "application/octet-stream"
+    });
+    app.Logger.LogInformation("Serving game images from {Path} at /game-images", networkSyncPath);
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseCors("AllowAll");
