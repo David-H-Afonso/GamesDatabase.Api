@@ -403,26 +403,27 @@ public class NetworkSyncService : INetworkSyncService
                 bool isRetry = cache?.LogoUrl == game.Logo && !cache.LogoDownloaded;
                 bool urlChanged = cache?.LogoUrl != game.Logo;
 
-                if (urlChanged && cache?.LogoUrl != null)
-                {
-                    // Delete old logo files when URL changes
-                    DeleteOldImageFiles(gamePath, "logo");
-                    _logger.LogInformation("Logo URL changed for '{Name}', downloading new image", game.Name);
-                }
-
                 // Check if URL is local (localhost or 192.168.0.32) - skip download
                 bool isLocalUrl = game.Logo.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
                                   game.Logo.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
 
                 if (isLocalUrl)
                 {
-                    // Mark as downloaded without actually downloading
+                    // Mark as downloaded without actually downloading (leave existing files intact)
                     if (cache != null) cache.LogoDownloaded = true;
                     result.ImagesSynced++;
                     _logger.LogDebug("Skipping local logo download for '{Name}'", game.Name);
                 }
                 else
                 {
+                    if (urlChanged && cache?.LogoUrl != null)
+                    {
+                        // Delete old logo files when URL changes (only for external URLs)
+                        DeleteOldImageFiles(gamePath, "logo");
+                        _logger.LogInformation("Logo URL changed for '{Name}', downloading new image", game.Name);
+                    }
+
+
                     // Apply rate limiting
                     await ApplyRateLimitAsync(game.Logo, domainLastRequest, minDelayBetweenRequestsMs);
 
@@ -458,26 +459,27 @@ public class NetworkSyncService : INetworkSyncService
                 bool isRetry = cache?.CoverUrl == game.Cover && !cache.CoverDownloaded;
                 bool urlChanged = cache?.CoverUrl != game.Cover;
 
-                if (urlChanged && cache?.CoverUrl != null)
-                {
-                    // Delete old cover files when URL changes
-                    DeleteOldImageFiles(gamePath, "cover");
-                    _logger.LogInformation("Cover URL changed for '{Name}', downloading new image", game.Name);
-                }
-
                 // Check if URL is local (localhost or 192.168.0.32) - skip download
                 bool isLocalUrl = game.Cover.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
                                   game.Cover.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
 
                 if (isLocalUrl)
                 {
-                    // Mark as downloaded without actually downloading
+                    // Mark as downloaded without actually downloading (leave existing files intact)
                     if (cache != null) cache.CoverDownloaded = true;
                     result.ImagesSynced++;
                     _logger.LogDebug("Skipping local cover download for '{Name}'", game.Name);
                 }
                 else
                 {
+                    if (urlChanged && cache?.CoverUrl != null)
+                    {
+                        // Delete old cover files when URL changes (only for external URLs)
+                        DeleteOldImageFiles(gamePath, "cover");
+                        _logger.LogInformation("Cover URL changed for '{Name}', downloading new image", game.Name);
+                    }
+
+
                     // Apply rate limiting
                     await ApplyRateLimitAsync(game.Cover, domainLastRequest, minDelayBetweenRequestsMs);
 

@@ -30,15 +30,14 @@ public class AuthService : IAuthService
         if (user == null)
             return null;
 
+        // Allow login without password for users with null PasswordHash (like default Admin)
         if (user.PasswordHash != null)
         {
+            // User has a password - must provide correct password
             if (string.IsNullOrEmpty(password) || !VerifyPassword(password, user.PasswordHash))
                 return null;
         }
-        else if (!string.IsNullOrEmpty(password))
-        {
-            return null;
-        }
+        // If user has no password (PasswordHash is null), allow login without password or with empty password
 
         var token = GenerateToken(user);
 
