@@ -176,7 +176,7 @@ public class DataExportController : BaseApiController
         {
             // Allow letters (including accented), digits, and specific punctuation
             if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')' ||
-                c == '\'' || c == '\u2019' || c == '&' || c == ':' || c == ',' || c == '!' || c == '+' || c == '?' ||
+                c == '\'' || c == '\u2019' || c == '&' || c == ',' || c == '!' || c == '+' || c == '?' ||
                 c == '™' || c == '®' || c == '—')
             {
                 stringBuilder.Append(c);
