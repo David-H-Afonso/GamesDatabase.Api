@@ -52,9 +52,6 @@ public class NetworkSyncService : INetworkSyncService
                 return result;
             }
 
-            // Check CDN health at the start of sync
-            await CheckCdnHealthAsync();
-
             if (string.IsNullOrWhiteSpace(_syncOptions.NetworkPath))
             {
                 result.ErrorMessage = "Network path is not configured";
@@ -413,21 +410,34 @@ public class NetworkSyncService : INetworkSyncService
                     _logger.LogInformation("Logo URL changed for '{Name}', downloading new image", game.Name);
                 }
 
-                // Apply rate limiting
-                await ApplyRateLimitAsync(game.Logo, domainLastRequest, minDelayBetweenRequestsMs);
+                // Check if URL is local (localhost or 192.168.0.32) - skip download
+                bool isLocalUrl = game.Logo.Contains("localhost", StringComparison.OrdinalIgnoreCase) || 
+                                  game.Logo.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
 
-                var logoBytes = await SafeDownloadAsync(game.Logo, attempt: 1, maxAttempts: 1);
-                if (logoBytes != null)
+                if (isLocalUrl)
                 {
-                    var extension = GetExtensionFromUrl(game.Logo);
-                    var logoPath = Path.Combine(gamePath, $"logo{extension}");
-                    await File.WriteAllBytesAsync(logoPath, logoBytes);
+                    // Mark as downloaded without actually downloading
                     if (cache != null) cache.LogoDownloaded = true;
                     result.ImagesSynced++;
-                    result.FilesWritten++;
+                    _logger.LogDebug("Skipping local logo download for '{Name}'", game.Name);
                 }
                 else
                 {
+                    // Apply rate limiting
+                    await ApplyRateLimitAsync(game.Logo, domainLastRequest, minDelayBetweenRequestsMs);
+
+                    var logoBytes = await SafeDownloadAsync(game.Logo, attempt: 1, maxAttempts: 1);
+                    if (logoBytes != null)
+                    {
+                        var extension = GetExtensionFromUrl(game.Logo);
+                        var logoPath = Path.Combine(gamePath, $"logo{extension}");
+                        await File.WriteAllBytesAsync(logoPath, logoBytes);
+                        if (cache != null) cache.LogoDownloaded = true;
+                        result.ImagesSynced++;
+                        result.FilesWritten++;
+                    }
+                    else
+                    {
                     if (cache != null) cache.LogoDownloaded = false;
                     result.ImagesFailed++;
                     failedImageTypes.Add("logo");
@@ -435,6 +445,7 @@ public class NetworkSyncService : INetworkSyncService
                     if (game.Logo != null)
                     {
                         failedImageRetries.Add((game, dbGame.Id, gamePath, "logo", game.Logo, cache));
+                    }
                     }
                 }
 
@@ -454,28 +465,42 @@ public class NetworkSyncService : INetworkSyncService
                     _logger.LogInformation("Cover URL changed for '{Name}', downloading new image", game.Name);
                 }
 
-                // Apply rate limiting
-                await ApplyRateLimitAsync(game.Cover, domainLastRequest, minDelayBetweenRequestsMs);
+                // Check if URL is local (localhost or 192.168.0.32) - skip download
+                bool isLocalUrl = game.Cover.Contains("localhost", StringComparison.OrdinalIgnoreCase) || 
+                                  game.Cover.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
 
-                var coverBytes = await SafeDownloadAsync(game.Cover, attempt: 1, maxAttempts: 1);
-                if (coverBytes != null)
+                if (isLocalUrl)
                 {
-                    var extension = GetExtensionFromUrl(game.Cover);
-                    var coverPath = Path.Combine(gamePath, $"cover{extension}");
-                    await File.WriteAllBytesAsync(coverPath, coverBytes);
+                    // Mark as downloaded without actually downloading
                     if (cache != null) cache.CoverDownloaded = true;
                     result.ImagesSynced++;
-                    result.FilesWritten++;
+                    _logger.LogDebug("Skipping local cover download for '{Name}'", game.Name);
                 }
                 else
                 {
-                    if (cache != null) cache.CoverDownloaded = false;
-                    result.ImagesFailed++;
-                    failedImageTypes.Add("cover");
-                    // Track for retry at the end
-                    if (game.Cover != null)
+                    // Apply rate limiting
+                    await ApplyRateLimitAsync(game.Cover, domainLastRequest, minDelayBetweenRequestsMs);
+
+                    var coverBytes = await SafeDownloadAsync(game.Cover, attempt: 1, maxAttempts: 1);
+                    if (coverBytes != null)
                     {
-                        failedImageRetries.Add((game, dbGame.Id, gamePath, "cover", game.Cover, cache));
+                        var extension = GetExtensionFromUrl(game.Cover);
+                        var coverPath = Path.Combine(gamePath, $"cover{extension}");
+                        await File.WriteAllBytesAsync(coverPath, coverBytes);
+                        if (cache != null) cache.CoverDownloaded = true;
+                        result.ImagesSynced++;
+                        result.FilesWritten++;
+                    }
+                    else
+                    {
+                        if (cache != null) cache.CoverDownloaded = false;
+                        result.ImagesFailed++;
+                        failedImageTypes.Add("cover");
+                        // Track for retry at the end
+                        if (game.Cover != null)
+                        {
+                            failedImageRetries.Add((game, dbGame.Id, gamePath, "cover", game.Cover, cache));
+                        }
                     }
                 }
 
