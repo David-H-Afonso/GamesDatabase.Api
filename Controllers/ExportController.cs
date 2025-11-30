@@ -94,6 +94,7 @@ public class ExportController : BaseApiController
 
             if (!result.Success)
             {
+                _logger.LogWarning("Network sync failed: {Error}", result.ErrorMessage);
                 return StatusCode(500, new
                 {
                     message = "Network sync failed",
@@ -150,8 +151,19 @@ public class ExportController : BaseApiController
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Network sync failed with exception");
-            return StatusCode(500, new { message = "Network sync failed", error = ex.Message });
+            _logger.LogError(ex, "Network sync failed with exception: {Message}", ex.Message);
+
+            // Return detailed error for debugging
+            var errorDetails = new
+            {
+                message = "Network sync failed",
+                error = ex.Message,
+                type = ex.GetType().Name,
+                stackTrace = ex.StackTrace?.Split('\n').Take(5).ToArray(), // First 5 lines
+                innerError = ex.InnerException?.Message
+            };
+
+            return StatusCode(500, errorDetails);
         }
     }
 

@@ -485,6 +485,16 @@ public class NetworkSyncService : INetworkSyncService
                     _context.Entry(gameToUpdate).Property(g => g.ModifiedSinceExport).IsModified = true;
                 }
             }
+
+            // Save changes after each game to avoid long transactions
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save changes for game '{Name}': {Message}", game.Name, ex.Message);
+            }
         }
 
         // Retry failed images at the end with multiple passes
@@ -559,6 +569,18 @@ public class NetworkSyncService : INetworkSyncService
                 {
                     _logger.LogInformation("Pass {Pass} complete. {Count} images still failing. Waiting before next pass...",
                         pass, currentFailedRetries.Count);
+
+                    // Save changes after each retry pass
+                    try
+                    {
+                        await _context.SaveChangesAsync();
+                        _logger.LogDebug("Saved changes after retry pass {Pass}", pass);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to save changes after retry pass {Pass}: {Message}", pass, ex.Message);
+                    }
+
                     await Task.Delay(3000); // 3 segundos entre rondas completas
                 }
             }
@@ -574,7 +596,17 @@ public class NetworkSyncService : INetworkSyncService
             }
         }
 
-        await _context.SaveChangesAsync();
+        // Final save to ensure all changes are persisted
+        try
+        {
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Final save completed successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save final changes: {Message}", ex.Message);
+            throw;
+        }
     }
 
     private async Task ApplyRateLimitAsync(string url, Dictionary<string, DateTime> domainLastRequest, int minDelayMs)
