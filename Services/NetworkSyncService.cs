@@ -1053,4 +1053,97 @@ public class NetworkSyncService : INetworkSyncService
 
         return null;
     }
+
+    public async Task<FolderAnalysisResult> AnalyzeFoldersAsync(int userId)
+    {
+        var result = new FolderAnalysisResult();
+
+        try
+        {
+            // Get games count from database
+            result.TotalGamesInDatabase = await _context.Games
+                .Where(g => g.UserId == userId)
+                .CountAsync();
+
+            // Get user's games path
+            var userPath = Path.Combine(_syncOptions.NetworkPath!, userId.ToString(), "Games");
+
+            if (!Directory.Exists(userPath))
+            {
+                result.Difference = result.TotalGamesInDatabase;
+                return result;
+            }
+
+            // Get folders from filesystem
+            var folders = Directory.GetDirectories(userPath)
+                .Select(Path.GetFileName)
+                .Where(name => !string.IsNullOrEmpty(name))
+                .ToList();
+
+            result.TotalFoldersInFilesystem = folders.Count;
+            result.Difference = result.TotalFoldersInFilesystem - result.TotalGamesInDatabase;
+
+            // Get all games from database with their expected folder names
+            var games = await _context.Games
+                .Where(g => g.UserId == userId)
+                .Select(g => new { g.Id, g.Name })
+                .ToListAsync();
+
+            var gameToFolderMap = games.ToDictionary(
+                g => g.Id,
+                g => MakeSafeFolderName(g.Name)
+            );
+
+            var expectedFolders = gameToFolderMap.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // Find orphan folders (folders without corresponding game)
+            foreach (var folder in folders)
+            {
+                if (!expectedFolders.Contains(folder!))
+                {
+                    result.OrphanFolders.Add(new OrphanFolder
+                    {
+                        FolderName = folder!,
+                        FullPath = Path.Combine(userPath, folder!)
+                    });
+                }
+            }
+
+            // Find potential duplicates (similar folder names that could be the same game)
+            var folderGroups = folders
+                .GroupBy(f => NormalizeFolderName(f!))
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            foreach (var group in folderGroups)
+            {
+                var matchingGame = games.FirstOrDefault(g =>
+                    NormalizeFolderName(MakeSafeFolderName(g.Name)) == group.Key);
+
+                result.PotentialDuplicates.Add(new PotentialDuplicate
+                {
+                    GameName = matchingGame?.Name ?? "Unknown",
+                    FolderNames = group.ToList()!,
+                    Reason = "Similar folder names detected (different special characters)"
+                });
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error analyzing folders for user {UserId}", userId);
+            throw;
+        }
+    }
+
+    private static string NormalizeFolderName(string folderName)
+    {
+        // Remove all special characters for comparison
+        return new string(folderName
+            .Normalize(NormalizationForm.FormD)
+            .Where(c => char.IsLetterOrDigit(c))
+            .ToArray())
+            .ToLowerInvariant();
+    }
 }

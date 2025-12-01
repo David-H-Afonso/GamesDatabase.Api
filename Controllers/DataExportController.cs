@@ -9,6 +9,7 @@ using CsvHelper.Configuration;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.Models;
 using GamesDatabase.Api.Configuration;
+using GamesDatabase.Api.Services;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -20,17 +21,20 @@ public class DataExportController : BaseApiController
     private readonly ExportSettings _exportSettings;
     private readonly ILogger<DataExportController> _logger;
     private readonly IConfiguration _configuration;
+    private readonly INetworkSyncService _networkSyncService;
 
     public DataExportController(
         GamesDbContext context,
         IOptions<ExportSettings> exportSettings,
         ILogger<DataExportController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        INetworkSyncService networkSyncService)
     {
         _context = context;
         _exportSettings = exportSettings.Value;
         _logger = logger;
         _configuration = configuration;
+        _networkSyncService = networkSyncService;
     }
 
     [HttpPost("update-image-urls")]
@@ -174,6 +178,35 @@ public class DataExportController : BaseApiController
         }
 
         return Ok(result);
+    }
+
+    [HttpGet("analyze-folders")]
+    [Authorize]
+    public async Task<ActionResult<FolderAnalysisResult>> AnalyzeFolders()
+    {
+        // Only allow from localhost or specific local IP
+        if (!IsLocalRequest())
+        {
+            return StatusCode(403, new { message = "Folder analysis is only available on localhost or 192.168.0.32" });
+        }
+
+        try
+        {
+            var userId = GetCurrentUserIdOrDefault(1);
+            var result = await _networkSyncService.AnalyzeFoldersAsync(userId);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error analyzing folders");
+            return StatusCode(500, new { message = "Error analyzing folders", error = ex.Message });
+        }
+    }
+
+    private bool IsLocalRequest()
+    {
+        var host = Request.Host.Host.ToLowerInvariant();
+        return host == "localhost" || host == "127.0.0.1" || host == "192.168.0.32";
     }
 
     private static string MakeSafeFolderName(string name)
