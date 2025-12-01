@@ -98,7 +98,7 @@ public class DataExportController : BaseApiController
 
                 bool updated = false;
                 bool alreadyCorrect = true;
-                var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+                var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".ico" };
 
                 // Check for logo
                 string? logoUrl = null;
