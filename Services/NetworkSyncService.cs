@@ -5,6 +5,7 @@ using CsvHelper;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.Models;
+using GamesDatabase.Api.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -321,7 +322,7 @@ public class NetworkSyncService : INetworkSyncService
                 continue;
             }
 
-            var folderName = MakeSafeFolderName(game.Name);
+            var folderName = FolderNameHelper.MakeSafeFolderName(game.Name);
             if (string.IsNullOrWhiteSpace(folderName))
             {
                 folderName = "Unknown_Game";
@@ -952,53 +953,6 @@ public class NetworkSyncService : INetworkSyncService
         }
     }
 
-    private static string MakeSafeFolderName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            return string.Empty;
-
-        // First, normalize Unicode characters and remove accents/diacritics
-        var normalizedString = name.Normalize(System.Text.NormalizationForm.FormD);
-        var stringBuilder = new System.Text.StringBuilder();
-
-        foreach (var c in normalizedString)
-        {
-            var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
-            // Keep only letters, digits, spaces, and some safe punctuation (including underscore)
-            if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
-            {
-                if (char.IsLetterOrDigit(c) || c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')')
-                {
-                    stringBuilder.Append(c);
-                }
-            }
-        }
-
-        var safeName = stringBuilder.ToString().Normalize(System.Text.NormalizationForm.FormC);
-
-        // Remove any remaining invalid filename characters
-        var invalidChars = Path.GetInvalidFileNameChars();
-        foreach (var invalidChar in invalidChars)
-        {
-            safeName = safeName.Replace(invalidChar, '_');
-        }
-
-        // Replace spaces with underscores
-        safeName = safeName.Replace(" ", "_");
-
-        // Remove multiple consecutive underscores
-        safeName = System.Text.RegularExpressions.Regex.Replace(safeName, "_+", "_");
-
-        // Remove leading/trailing underscores
-        safeName = safeName.Trim('_');
-
-        // Limit length to avoid Windows MAX_PATH issues
-        if (safeName.Length > 200)
-            safeName = safeName.Substring(0, 200).TrimEnd('_');
-
-        return safeName;
-    }
-
     private static string GetExtensionFromUrl(string url)
     {
         try
@@ -1091,7 +1045,7 @@ public class NetworkSyncService : INetworkSyncService
 
             var gameToFolderMap = games.ToDictionary(
                 g => g.Id,
-                g => MakeSafeFolderName(g.Name)
+                g => FolderNameHelper.MakeSafeFolderName(g.Name)
             );
 
             var expectedFolders = gameToFolderMap.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1118,14 +1072,12 @@ public class NetworkSyncService : INetworkSyncService
             foreach (var group in folderGroups)
             {
                 var matchingGame = games.FirstOrDefault(g =>
-                    NormalizeFolderName(MakeSafeFolderName(g.Name)) == group.Key);
-
-                result.PotentialDuplicates.Add(new PotentialDuplicate
-                {
-                    GameName = matchingGame?.Name ?? "Unknown",
-                    FolderNames = group.ToList()!,
-                    Reason = "Similar folder names detected (different special characters)"
-                });
+                    NormalizeFolderName(FolderNameHelper.MakeSafeFolderName(g.Name)) == group.Key); result.PotentialDuplicates.Add(new PotentialDuplicate
+                    {
+                        GameName = matchingGame?.Name ?? "Unknown",
+                        FolderNames = group.ToList()!,
+                        Reason = "Similar folder names detected (different special characters)"
+                    });
             }
 
             return result;
