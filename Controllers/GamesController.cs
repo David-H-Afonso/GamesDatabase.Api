@@ -648,6 +648,18 @@ public class GamesController : BaseApiController
                 updated = true;
             }
 
+            if (bulkUpdate.PlayedStatusId.HasValue)
+            {
+                game.PlayedStatusId = bulkUpdate.PlayedStatusId.Value;
+                updated = true;
+            }
+
+            if (bulkUpdate.IsCheaperByKey.HasValue)
+            {
+                game.IsCheaperByKey = bulkUpdate.IsCheaperByKey.Value;
+                updated = true;
+            }
+
             if (bulkUpdate.PlayWithIds != null)
             {
                 // Remove existing PlayWith mappings

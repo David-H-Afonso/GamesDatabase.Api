@@ -89,6 +89,8 @@ public class BulkUpdateGameDto
     public int? StatusId { get; set; }
     public int? PlatformId { get; set; }
     public int[]? PlayWithIds { get; set; }
+    public int? PlayedStatusId { get; set; }
+    public bool? IsCheaperByKey { get; set; }
 }
 
 public class BulkUpdateResult
