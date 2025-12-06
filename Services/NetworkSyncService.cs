@@ -265,10 +265,9 @@ public class NetworkSyncService : INetworkSyncService
             .Select(r => new
             {
                 Name = r.Name,
-                Color = r.Color ?? "",
-                FiltersJson = r.FiltersJson ?? "",
+                Description = r.Description ?? "",
+                FiltersJson = r.FiltersJson ?? "{}",
                 SortingJson = r.SortingJson ?? "",
-                IsDefault = ParseBool(r.IsDefault),
                 IsPublic = ParseBool(r.IsPublic),
                 CreatedBy = r.CreatedBy ?? ""
             })
