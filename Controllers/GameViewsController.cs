@@ -35,7 +35,8 @@ public class GameViewsController : BaseApiController
         }
 
         var views = await query
-            .OrderBy(v => v.Name)
+            .OrderBy(v => v.SortOrder)
+            .ThenBy(v => v.Name)
             .ToListAsync();
 
         var viewDtos = views.Select(v => v.ToSummaryDto()).ToList();
@@ -105,8 +106,14 @@ public class GameViewsController : BaseApiController
                 return BadRequest(validationResult.ErrorMessage);
             }
 
+            // Obtener el máximo SortOrder actual para este usuario
+            var maxSort = await _context.GameViews
+                .Where(v => v.UserId == userId)
+                .MaxAsync(v => (int?)v.SortOrder) ?? 0;
+
             var view = createDto.ToEntity();
             view.UserId = userId;
+            view.SortOrder = maxSort + 1;
 
             _context.GameViews.Add(view);
             await _context.SaveChangesAsync();
@@ -128,6 +135,7 @@ public class GameViewsController : BaseApiController
         try
         {
             var userId = GetCurrentUserIdOrDefault(1);
+
             var view = await _context.GameViews.FirstOrDefaultAsync(v => v.Id == id && v.UserId == userId);
             if (view == null)
             {
@@ -157,6 +165,11 @@ public class GameViewsController : BaseApiController
             }
 
             view.UpdateFromDto(updateDto);
+
+            // Marcar explícitamente FiltersJson como modificado para que EF Core detecte el cambio
+            _context.Entry(view).Property(v => v.FiltersJson).IsModified = true;
+            _context.Entry(view).Property(v => v.SortingJson).IsModified = true;
+
             await _context.SaveChangesAsync();
 
             return Ok(view.ToDto());
@@ -164,6 +177,48 @@ public class GameViewsController : BaseApiController
         catch (Exception ex)
         {
             return StatusCode(500, $"Error interno del servidor: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Reordena las vistas de juegos
+    /// </summary>
+    [HttpPost("reorder")]
+    public async Task<IActionResult> ReorderGameViews([FromBody] ReorderStatusesDto dto)
+    {
+        var userId = GetCurrentUserIdOrDefault(1);
+
+        if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
+            return BadRequest(new { message = "OrderedIds must be provided" });
+
+        var views = await _context.GameViews
+            .Where(v => dto.OrderedIds.Contains(v.Id) && v.UserId == userId)
+            .ToListAsync();
+
+        if (views.Count != dto.OrderedIds.Count)
+        {
+            return NotFound(new { message = "One or more view IDs not found" });
+        }
+
+        using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            for (int i = 0; i < dto.OrderedIds.Count; i++)
+            {
+                var id = dto.OrderedIds[i];
+                var view = views.First(v => v.Id == id);
+                view.SortOrder = i + 1; // 1-based ordering
+            }
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new { message = "Views reordered successfully" });
+        }
+        catch (Exception)
+        {
+            await transaction.RollbackAsync();
+            return StatusCode(500, new { message = "Error reordering views" });
         }
     }
 
@@ -372,11 +427,6 @@ public class GameViewsController : BaseApiController
                     if (operatorsRequiringValue.Contains(filter.Operator) && filter.Value == null)
                     {
                         return new ValidationResult(false, $"El operador {filter.Operator} requiere un valor.");
-                    }
-
-                    if (filter.Operator == Models.FilterOperator.Between && (filter.Value == null || filter.SecondValue == null))
-                    {
-                        return new ValidationResult(false, "El operador Between requiere dos valores.");
                     }
                 }
             }
