@@ -269,7 +269,8 @@ public class NetworkSyncService : INetworkSyncService
                 FiltersJson = r.FiltersJson ?? "{}",
                 SortingJson = r.SortingJson ?? "",
                 IsPublic = ParseBool(r.IsPublic),
-                CreatedBy = r.CreatedBy ?? ""
+                CreatedBy = r.CreatedBy ?? "",
+                SortOrder = ParseInt(r.SortOrder) ?? 999
             })
             .ToList();
         if (await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "Views.json"), views))
