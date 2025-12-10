@@ -19,13 +19,14 @@ namespace GamesDatabase.Api.Migrations
 
             // Inicializar SortOrder basado en el orden alfabético de nombre
             migrationBuilder.Sql(@"
-                UPDATE game_view 
-                SET SortOrder = (
-                    SELECT COUNT(*) + 1 
-                    FROM game_view AS gv2 
-                    WHERE gv2.user_id = game_view.user_id 
-                    AND LOWER(gv2.name) < LOWER(game_view.name)
+                WITH numbered AS (
+                    SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY LOWER(name)) AS rn
+                    FROM game_view
                 )
+                UPDATE game_view
+                SET SortOrder = (
+                    SELECT rn FROM numbered WHERE numbered.id = game_view.id
+                );
             ");
         }
 
