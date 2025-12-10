@@ -249,9 +249,6 @@ public class ViewFilterService : IViewFilterService
 
                 // Crear una expresión que compare las fechas correctamente
                 // Usamos el valor numérico YYYYMMDD para comparación lexicográfica confiable
-                var dateValue = filterDate.Year * 10000 + filterDate.Month * 100 + filterDate.Day;
-                var constDateValue = Expression.Constant(dateValue);
-
                 // La propiedad necesita ser convertida también: extraer año, mes, día
                 // Como no podemos parsear en LINQ to SQL fácilmente, usamos una aproximación:
                 // Comparamos directamente con múltiples formatos comunes normalizados
