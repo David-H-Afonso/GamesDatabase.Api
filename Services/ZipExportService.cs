@@ -180,7 +180,8 @@ public class ZipExportService : IZipExportService
                 FiltersJson = r.FiltersJson ?? "{}",
                 SortingJson = r.SortingJson ?? "",
                 IsPublic = ParseBool(r.IsPublic),
-                CreatedBy = r.CreatedBy ?? ""
+                CreatedBy = r.CreatedBy ?? "",
+                SortOrder = ParseInt(r.SortOrder) ?? 999
             })
             .ToList();
         await AddJsonToZip(archive, "Games Database/Settings/Views.json", views);
