@@ -1,0 +1,40 @@
+name: Backend Build
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'GamesDatabase.Api/**'
+      - '.github/workflows/backend-build.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'GamesDatabase.Api/**'
+      - '.github/workflows/backend-build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      working-directory: ./GamesDatabase.Api
+      run: dotnet restore
+      
+    - name: Build
+      working-directory: ./GamesDatabase.Api
+      run: dotnet build --configuration Release --no-restore
+      
+    - name: Test
+      working-directory: ./GamesDatabase.Api
+      run: dotnet test --no-build --verbosity normal --configuration Release
