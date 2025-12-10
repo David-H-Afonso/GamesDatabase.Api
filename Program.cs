@@ -86,6 +86,8 @@ builder.Services.AddDbContext<GamesDbContext>(options =>
     {
         options.EnableSensitiveDataLogging();
     }
+    // Enable SQL query logging for debugging
+    options.LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information);
 });
 
 builder.Services.AddScoped<IViewFilterService, ViewFilterService>();

@@ -47,11 +47,12 @@ public class GamesController : BaseApiController
 
             if (parameters.ViewId.HasValue)
             {
-                gameView = await _context.GameViews.FindAsync(parameters.ViewId.Value);
+                gameView = await _context.GameViews.AsNoTracking().FirstOrDefaultAsync(v => v.Id == parameters.ViewId.Value);
             }
             else if (!string.IsNullOrEmpty(parameters.ViewName))
             {
                 gameView = await _context.GameViews
+                    .AsNoTracking()
                     .FirstOrDefaultAsync(v => v.Name == parameters.ViewName);
             }
 

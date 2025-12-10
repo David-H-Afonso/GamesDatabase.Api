@@ -28,6 +28,11 @@ public class GameView
     /// </summary>
     public string? SortingJson { get; set; }
 
+    /// <summary>
+    /// Orden de visualización de la vista (1-based)
+    /// </summary>
+    public int SortOrder { get; set; } = 999;
+
     public bool IsPublic { get; set; } = true;
 
     [MaxLength(50)]
@@ -61,7 +66,6 @@ public enum FilterOperator
     GreaterThanOrEqual,
     LessThan,
     LessThanOrEqual,
-    Between,
     In,
     NotIn,
     IsNull,

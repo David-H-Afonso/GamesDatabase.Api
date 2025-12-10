@@ -123,7 +123,6 @@ public class ViewFilterService : IViewFilterService
             FilterOperator.GreaterThanOrEqual => CreateComparisonExpression(propertyExpression, value, Expression.GreaterThanOrEqual),
             FilterOperator.LessThan => CreateComparisonExpression(propertyExpression, value, Expression.LessThan),
             FilterOperator.LessThanOrEqual => CreateComparisonExpression(propertyExpression, value, Expression.LessThanOrEqual),
-            FilterOperator.Between => CreateBetweenExpression(propertyExpression, value, secondValue),
             FilterOperator.In => CreateInExpression(propertyExpression, value),
             FilterOperator.NotIn => Expression.Not(CreateInExpression(propertyExpression, value)),
             FilterOperator.IsNull => CreateIsNullExpression(propertyExpression),
@@ -168,10 +167,12 @@ public class ViewFilterService : IViewFilterService
                 var iso = parsed.ToString("yyyy-MM-dd");
                 var constIso = Expression.Constant(iso, typeof(string));
 
-                // Manejar el caso donde la propiedad puede ser null
+                // Manejar el caso donde la propiedad puede ser null o vacía
                 var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
+                var emptyCheck = Expression.NotEqual(propertyExpression, Expression.Constant("", typeof(string)));
+                var notNullOrEmpty = Expression.AndAlso(nullCheck, emptyCheck);
                 var equalsCheck = Expression.Equal(propertyExpression, constIso);
-                return Expression.AndAlso(nullCheck, equalsCheck);
+                return Expression.AndAlso(notNullOrEmpty, equalsCheck);
             }
         }
 
@@ -237,14 +238,28 @@ public class ViewFilterService : IViewFilterService
             // Try parse value as DateTime to normalize format
             if (DateTime.TryParse(sVal, out var parsed))
             {
-                // Normalize to ISO format for lexicographic comparison
-                var iso = parsed.ToString("yyyy-MM-dd");
-                var constIso = Expression.Constant(iso, typeof(string));
+                // Para comparaciones de fechas en strings, necesitamos normalizar ambos lados
+                // Convertir la fecha del filtro a un valor comparable
+                var filterDate = parsed;
 
-                // Use string.CompareTo for comparison instead of direct operators
-                // This works with EF Core translation
-                var compareToMethod = typeof(string).GetMethod("CompareTo", new[] { typeof(string) })!;
+                // Excluir valores null o cadenas vacías (fechas legacy sin valor)
                 var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null, typeof(string)));
+                var emptyCheck = Expression.NotEqual(propertyExpression, Expression.Constant("", typeof(string)));
+                var notNullOrEmpty = Expression.AndAlso(nullCheck, emptyCheck);
+
+                // Crear una expresión que compare las fechas correctamente
+                // Usamos el valor numérico YYYYMMDD para comparación lexicográfica confiable
+                // La propiedad necesita ser convertida también: extraer año, mes, día
+                // Como no podemos parsear en LINQ to SQL fácilmente, usamos una aproximación:
+                // Comparamos directamente con múltiples formatos comunes normalizados
+
+                // Formato ISO (yyyy-MM-dd) - más confiable para comparación lexicográfica
+                var isoFormat = parsed.ToString("yyyy-MM-dd");
+                var constIso = Expression.Constant(isoFormat, typeof(string));
+
+                // También considerar formato dd/MM/yyyy que podría estar en la DB
+                // Para esto, intentamos comparar con formato ISO primero
+                var compareToMethod = typeof(string).GetMethod("CompareTo", new[] { typeof(string) })!;
                 var compareToCall = Expression.Call(propertyExpression, compareToMethod, constIso);
                 var zero = Expression.Constant(0);
 
@@ -272,7 +287,7 @@ public class ViewFilterService : IViewFilterService
                     comparison = comparisonFunc(propertyExpression, constIso);
                 }
 
-                return Expression.AndAlso(nullCheck, comparison);
+                return Expression.AndAlso(notNullOrEmpty, comparison);
             }
         }
 
@@ -282,39 +297,7 @@ public class ViewFilterService : IViewFilterService
         return comparisonFunc(propertyExpression, constantExpression);
     }
 
-    private Expression CreateBetweenExpression(Expression propertyExpression, object? value, object? secondValue)
-    {
-        if (value == null || secondValue == null)
-        {
-            return Expression.Constant(false);
-        }
-        // If property is string and values look like dates, compare lexicographically on ISO date string
-        if (propertyExpression.Type == typeof(string))
-        {
-            if (value is string s1 && secondValue is string s2 && DateTime.TryParse(s1, out var d1) && DateTime.TryParse(s2, out var d2))
-            {
-                var iso1 = d1.ToString("yyyy-MM-dd");
-                var iso2 = d2.ToString("yyyy-MM-dd");
-                var c1 = Expression.Constant(iso1, typeof(string));
-                var c2 = Expression.Constant(iso2, typeof(string));
 
-                var gte = Expression.GreaterThanOrEqual(propertyExpression, c1);
-                var lte = Expression.LessThanOrEqual(propertyExpression, c2);
-                return Expression.AndAlso(gte, lte);
-            }
-        }
-
-        var convertedValue1 = ConvertValue(value, propertyExpression.Type);
-        var convertedValue2 = ConvertValue(secondValue, propertyExpression.Type);
-
-        var constant1 = Expression.Constant(convertedValue1, propertyExpression.Type);
-        var constant2 = Expression.Constant(convertedValue2, propertyExpression.Type);
-
-        var greaterThanOrEqual = Expression.GreaterThanOrEqual(propertyExpression, constant1);
-        var lessThanOrEqual = Expression.LessThanOrEqual(propertyExpression, constant2);
-
-        return Expression.AndAlso(greaterThanOrEqual, lessThanOrEqual);
-    }
 
     private Expression CreateInExpression(Expression propertyExpression, object? value)
     {
@@ -347,6 +330,15 @@ public class ViewFilterService : IViewFilterService
 
     private Expression CreateIsNullExpression(Expression propertyExpression)
     {
+        // Para campos string (como fechas), considerar tanto null como cadenas vacías
+        if (propertyExpression.Type == typeof(string))
+        {
+            var isNull = Expression.Equal(propertyExpression, Expression.Constant(null, typeof(string)));
+            var isEmpty = Expression.Equal(propertyExpression, Expression.Constant("", typeof(string)));
+            return Expression.OrElse(isNull, isEmpty);
+        }
+
+        // Para otros tipos, solo verificar null
         return Expression.Equal(propertyExpression, Expression.Constant(null));
     }
 

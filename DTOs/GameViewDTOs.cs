@@ -10,6 +10,7 @@ public class GameViewDto
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public int SortOrder { get; set; }
     public ViewConfiguration Configuration { get; set; } = new();
     public bool IsPublic { get; set; }
     public string? CreatedBy { get; set; }
@@ -48,6 +49,7 @@ public class GameViewSummaryDto
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public int SortOrder { get; set; }
     public bool IsPublic { get; set; }
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
