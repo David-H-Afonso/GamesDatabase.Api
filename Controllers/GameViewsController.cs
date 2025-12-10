@@ -14,10 +14,12 @@ namespace GamesDatabase.Api.Controllers;
 public class GameViewsController : BaseApiController
 {
     private readonly GamesDbContext _context;
+    private readonly ILogger<GameViewsController> _logger;
 
-    public GameViewsController(GamesDbContext context)
+    public GameViewsController(GamesDbContext context, ILogger<GameViewsController> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     /// <summary>
@@ -215,8 +217,9 @@ public class GameViewsController : BaseApiController
 
             return Ok(new { message = "Views reordered successfully" });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Error reordering views for user {UserId}", userId);
             await transaction.RollbackAsync();
             return StatusCode(500, new { message = "Error reordering views" });
         }
