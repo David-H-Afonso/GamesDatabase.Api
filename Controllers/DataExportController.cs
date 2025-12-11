@@ -442,6 +442,7 @@ public class DataExportController : BaseApiController
                         existing.Started = record.Started;
                         existing.Finished = record.Finished;
                         existing.Critic = ParseNullableInt(record.Critic);
+                        existing.CriticProvider = record.CriticProvider;
                         existing.Grade = ParseNullableInt(record.Grade);
                         existing.Completion = ParseNullableInt(record.Completion);
                         existing.Story = ParseNullableInt(record.Story);
@@ -480,6 +481,7 @@ public class DataExportController : BaseApiController
                             Started = record.Started,
                             Finished = record.Finished,
                             Critic = ParseNullableInt(record.Critic),
+                            CriticProvider = record.CriticProvider,
                             Grade = ParseNullableInt(record.Grade),
                             Completion = ParseNullableInt(record.Completion),
                             Story = ParseNullableInt(record.Story),
@@ -562,6 +564,7 @@ public class FullExportModel
     public string? Finished { get; set; }
     public string? Score { get; set; }
     public string? Critic { get; set; }
+    public string? CriticProvider { get; set; }
     public string? Grade { get; set; }
     public string? Completion { get; set; }
     public string? Story { get; set; }

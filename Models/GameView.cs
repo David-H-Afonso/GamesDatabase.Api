@@ -98,6 +98,7 @@ public enum FilterField
     Started,
     Finished,
     Comment,
+    CriticProvider,
     CreatedAt,
     UpdatedAt
 }
@@ -125,6 +126,7 @@ public enum SortField
     Released,
     Started,
     Finished,
+    CriticProvider,
     CreatedAt,
     UpdatedAt,
     Id

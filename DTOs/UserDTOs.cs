@@ -37,6 +37,10 @@ public class UpdateUserRequest
     public string? Username { get; set; }
 
     public string? Role { get; set; }
+
+    public bool? UseScoreColors { get; set; }
+
+    public string? ScoreProvider { get; set; }
 }
 
 public class ChangePasswordRequest
@@ -52,6 +56,8 @@ public class UserDto
     public string Role { get; set; } = string.Empty;
     public bool IsDefault { get; set; }
     public bool HasPassword { get; set; }
+    public bool UseScoreColors { get; set; }
+    public string ScoreProvider { get; set; } = "Metacritic";
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

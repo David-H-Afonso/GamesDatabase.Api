@@ -37,6 +37,11 @@ public class GameQueryParameters : QueryParameters
     public bool? ShowIncomplete { get; set; }
 
     /// <summary>
+    /// Filtrar por proveedor de crítica. null = todos, "Default" = solo sin proveedor específico, o nombre del proveedor
+    /// </summary>
+    public string? CriticProvider { get; set; }
+
+    /// <summary>
     /// ID de la vista a aplicar. Si se especifica, se ignorarán otros filtros y ordenamientos
     /// </summary>
     public int? ViewId { get; set; }

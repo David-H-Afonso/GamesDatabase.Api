@@ -25,6 +25,10 @@ public class User
 
     public bool IsDefault { get; set; } = false;
 
+    // User preferences
+    public bool UseScoreColors { get; set; } = false;
+    public string ScoreProvider { get; set; } = "Metacritic";
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

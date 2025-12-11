@@ -7,6 +7,7 @@ public class GameDto
     public string Name { get; set; } = string.Empty;
     public int? Grade { get; set; }
     public int? Critic { get; set; }
+    public string? CriticProvider { get; set; }
     public int? Story { get; set; }
     public int? Completion { get; set; }
     public decimal? Score { get; set; }
@@ -41,6 +42,7 @@ public class GameCreateDto
     public string Name { get; set; } = string.Empty;
     public int? Grade { get; set; }
     public int? Critic { get; set; }
+    public string? CriticProvider { get; set; }
     public int? Story { get; set; }
     public int? Completion { get; set; }
     public int? PlatformId { get; set; }
@@ -64,6 +66,7 @@ public class GameUpdateDto
     public string? Name { get; set; }
     public int? Grade { get; set; }
     public int? Critic { get; set; }
+    public string? CriticProvider { get; set; }
     public int? Story { get; set; }
     public int? Completion { get; set; }
 

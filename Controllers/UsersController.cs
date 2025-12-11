@@ -63,6 +63,8 @@ public class UsersController : ControllerBase
                 Role = u.Role.ToString(),
                 IsDefault = u.IsDefault,
                 HasPassword = u.PasswordHash != null,
+                UseScoreColors = u.UseScoreColors,
+                ScoreProvider = u.ScoreProvider,
                 CreatedAt = u.CreatedAt,
                 UpdatedAt = u.UpdatedAt
             })
@@ -98,6 +100,8 @@ public class UsersController : ControllerBase
             Role = user.Role.ToString(),
             IsDefault = user.IsDefault,
             HasPassword = user.PasswordHash != null,
+            UseScoreColors = user.UseScoreColors,
+            ScoreProvider = user.ScoreProvider,
             CreatedAt = user.CreatedAt,
             UpdatedAt = user.UpdatedAt
         });
@@ -144,6 +148,8 @@ public class UsersController : ControllerBase
             Role = newUser.Role.ToString(),
             IsDefault = newUser.IsDefault,
             HasPassword = newUser.PasswordHash != null,
+            UseScoreColors = newUser.UseScoreColors,
+            ScoreProvider = newUser.ScoreProvider,
             CreatedAt = newUser.CreatedAt,
             UpdatedAt = newUser.UpdatedAt
         });
@@ -158,34 +164,53 @@ public class UsersController : ControllerBase
             return Unauthorized(new { message = "User ID required" });
 
         var currentUser = await _context.Users.FindAsync(currentUserId.Value);
-        if (currentUser == null || currentUser.Role != UserRole.Admin)
+        if (currentUser == null)
+            return NotFound(new { message = "Current user not found" });
+
+        // Users can update their own preferences, admins can update anyone
+        if (currentUser.Role != UserRole.Admin && currentUser.Id != id)
             return Forbid();
 
         var user = await _context.Users.FindAsync(id);
         if (user == null)
             return NotFound(new { message = $"User with ID {id} not found" });
 
-        if (request.Username != null)
+        // Only admin can change username and role
+        if (currentUser.Role == UserRole.Admin)
         {
-            if (await _context.Users.AnyAsync(u => u.Id != id && u.Username.ToLower() == request.Username.ToLower()))
-                return BadRequest(new { message = "Username already exists" });
-
-            user.Username = request.Username;
-        }
-
-        if (request.Role != null)
-        {
-            if (!Enum.TryParse<UserRole>(request.Role, true, out var newRole))
-                return BadRequest(new { message = "Invalid role. Must be 'Admin' or 'Standard'" });
-
-            if (user.Role == UserRole.Admin && newRole != UserRole.Admin)
+            if (request.Username != null)
             {
-                var adminCount = await _context.Users.CountAsync(u => u.Role == UserRole.Admin);
-                if (adminCount <= 1)
-                    return BadRequest(new { message = "Cannot change role. At least one admin must exist" });
+                if (await _context.Users.AnyAsync(u => u.Id != id && u.Username.ToLower() == request.Username.ToLower()))
+                    return BadRequest(new { message = "Username already exists" });
+
+                user.Username = request.Username;
             }
 
-            user.Role = newRole;
+            if (request.Role != null)
+            {
+                if (!Enum.TryParse<UserRole>(request.Role, true, out var newRole))
+                    return BadRequest(new { message = "Invalid role. Must be 'Admin' or 'Standard'" });
+
+                if (user.Role == UserRole.Admin && newRole != UserRole.Admin)
+                {
+                    var adminCount = await _context.Users.CountAsync(u => u.Role == UserRole.Admin);
+                    if (adminCount <= 1)
+                        return BadRequest(new { message = "Cannot change role. At least one admin must exist" });
+                }
+
+                user.Role = newRole;
+            }
+        }
+
+        // Anyone can update their own preferences
+        if (request.UseScoreColors.HasValue)
+        {
+            user.UseScoreColors = request.UseScoreColors.Value;
+        }
+
+        if (request.ScoreProvider != null)
+        {
+            user.ScoreProvider = request.ScoreProvider;
         }
 
         await _context.SaveChangesAsync();
