@@ -11,7 +11,7 @@ namespace GamesDatabase.Api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<bool>(
-                name: "UseScoreColors",
+                name: "use_score_colors",
                 table: "user",
                 type: "INTEGER",
                 nullable: false,
@@ -22,7 +22,7 @@ namespace GamesDatabase.Api.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "UseScoreColors",
+                name: "use_score_colors",
                 table: "user");
         }
     }
