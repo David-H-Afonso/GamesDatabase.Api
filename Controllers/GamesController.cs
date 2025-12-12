@@ -253,16 +253,12 @@ public class GamesController : BaseApiController
 
         if (!string.IsNullOrEmpty(parameters.CriticProvider))
         {
-            if (parameters.CriticProvider.Equals("Default", StringComparison.OrdinalIgnoreCase))
-            {
-                // "Default" means games without a specific provider (null)
-                query = query.Where(g => g.CriticProvider == null);
-            }
-            else
-            {
-                // Filter by specific provider
-                query = query.Where(g => g.CriticProvider == parameters.CriticProvider);
-            }
+            // Use conditional expression to filter by critic provider
+            query = query.Where(g =>
+                parameters.CriticProvider.Equals("Default", StringComparison.OrdinalIgnoreCase)
+                    ? g.CriticProvider == null
+                    : g.CriticProvider == parameters.CriticProvider
+            );
         }
 
         return query;
