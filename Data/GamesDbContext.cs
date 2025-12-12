@@ -125,6 +125,8 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.PasswordHash).HasColumnName("password_hash");
             entity.Property(e => e.Role).HasColumnName("role").HasConversion<int>();
             entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false);
+            entity.Property(e => e.UseScoreColors).HasColumnName("use_score_colors");
+            entity.Property(e => e.ScoreProvider).HasColumnName("score_provider");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 
@@ -140,6 +142,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Name).HasColumnName("name").IsRequired();
             entity.Property(e => e.Grade).HasColumnName("grade");
             entity.Property(e => e.Critic).HasColumnName("critic");
+            entity.Property(e => e.CriticProvider).HasColumnName("critic_provider");
             entity.Property(e => e.Story).HasColumnName("story");
             entity.Property(e => e.Completion).HasColumnName("completion");
             entity.Property(e => e.Score).HasColumnName("score");

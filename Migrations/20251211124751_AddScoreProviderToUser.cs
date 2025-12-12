@@ -11,7 +11,7 @@ namespace GamesDatabase.Api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<string>(
-                name: "ScoreProvider",
+                name: "score_provider",
                 table: "user",
                 type: "TEXT",
                 nullable: false,
@@ -22,7 +22,7 @@ namespace GamesDatabase.Api.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "ScoreProvider",
+                name: "score_provider",
                 table: "user");
         }
     }
