@@ -368,6 +368,7 @@ public class NetworkSyncService : INetworkSyncService
                     Finished = game.Finished ?? "",
                     Score = game.Score ?? "",
                     Critic = game.Critic ?? "",
+                    CriticProvider = game.CriticProvider ?? "",
                     Grade = game.Grade ?? "",
                     Completion = game.Completion ?? "",
                     Story = game.Story ?? "",

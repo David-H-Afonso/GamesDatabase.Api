@@ -3,6 +3,7 @@ using System;
 using GamesDatabase.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GamesDatabase.Api.Migrations
 {
     [DbContext(typeof(GamesDbContext))]
-    partial class GamesDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251211130959_AddCriticProviderToGame")]
+    partial class AddCriticProviderToGame
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -45,8 +48,7 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnName("critic");
 
                     b.Property<string>("CriticProvider")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("critic_provider");
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Finished")
                         .HasColumnType("TEXT")
@@ -511,16 +513,14 @@ namespace GamesDatabase.Api.Migrations
 
                     b.Property<string>("ScoreProvider")
                         .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("score_provider");
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")
                         .HasColumnName("updated_at");
 
                     b.Property<bool>("UseScoreColors")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("use_score_colors");
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Username")
                         .IsRequired()

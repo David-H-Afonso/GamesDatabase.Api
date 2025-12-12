@@ -14,6 +14,7 @@ public static class MappingExtensions
             Name = game.Name,
             Grade = game.Grade,
             Critic = game.Critic,
+            CriticProvider = game.CriticProvider,
             Story = game.Story,
             Completion = game.Completion,
             Score = game.Score,
@@ -45,6 +46,7 @@ public static class MappingExtensions
             Name = dto.Name,
             Grade = dto.Grade,
             Critic = dto.Critic,
+            CriticProvider = dto.CriticProvider,
             Story = dto.Story,
             Completion = dto.Completion,
             // Score se calcula automáticamente
@@ -72,6 +74,7 @@ public static class MappingExtensions
         if (!string.IsNullOrEmpty(dto.Name)) entity.Name = dto.Name;
         if (dto.Grade.HasValue) entity.Grade = dto.Grade.Value;
         if (dto.Critic.HasValue) entity.Critic = dto.Critic.Value;
+        entity.CriticProvider = dto.CriticProvider;
         if (dto.Story.HasValue) entity.Story = dto.Story.Value;
         if (dto.Completion.HasValue) entity.Completion = dto.Completion.Value;
         if (dto.PlatformId.HasValue) entity.PlatformId = dto.PlatformId.Value;

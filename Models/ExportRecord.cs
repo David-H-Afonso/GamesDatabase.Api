@@ -52,6 +52,9 @@ public class ExportRecord
     [Name("Critic")]
     public string? Critic { get; set; }
 
+    [Name("CriticProvider")]
+    public string? CriticProvider { get; set; }
+
     [Name("Grade")]
     public string? Grade { get; set; }
 

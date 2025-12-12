@@ -15,6 +15,8 @@ public class Game
     [Range(0, 100)]
     public int? Critic { get; set; }
 
+    public string? CriticProvider { get; set; }
+
     [Range(0, 100)]
     public int? Story { get; set; }
 

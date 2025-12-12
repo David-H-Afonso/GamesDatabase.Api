@@ -251,6 +251,16 @@ public class GamesController : BaseApiController
             );
         }
 
+        if (!string.IsNullOrEmpty(parameters.CriticProvider))
+        {
+            // Use conditional expression to filter by critic provider
+            query = query.Where(g =>
+                parameters.CriticProvider.Equals("Default", StringComparison.OrdinalIgnoreCase)
+                    ? g.CriticProvider == null
+                    : g.CriticProvider == parameters.CriticProvider
+            );
+        }
+
         return query;
     }
 
@@ -341,6 +351,11 @@ public class GamesController : BaseApiController
         if (gameDto.TryGetProperty("critic", out var criticElement))
         {
             game.Critic = criticElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : criticElement.GetInt32();
+        }
+
+        if (gameDto.TryGetProperty("criticProvider", out var criticProviderElement))
+        {
+            game.CriticProvider = criticProviderElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : criticProviderElement.GetString();
         }
 
         if (gameDto.TryGetProperty("story", out var storyElement))
