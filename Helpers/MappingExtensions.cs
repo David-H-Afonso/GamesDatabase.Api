@@ -74,7 +74,7 @@ public static class MappingExtensions
         if (!string.IsNullOrEmpty(dto.Name)) entity.Name = dto.Name;
         if (dto.Grade.HasValue) entity.Grade = dto.Grade.Value;
         if (dto.Critic.HasValue) entity.Critic = dto.Critic.Value;
-        if (dto.CriticProvider != null) entity.CriticProvider = dto.CriticProvider;
+        entity.CriticProvider = dto.CriticProvider;
         if (dto.Story.HasValue) entity.Story = dto.Story.Value;
         if (dto.Completion.HasValue) entity.Completion = dto.Completion.Value;
         if (dto.PlatformId.HasValue) entity.PlatformId = dto.PlatformId.Value;
