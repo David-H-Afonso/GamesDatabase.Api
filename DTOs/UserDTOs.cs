@@ -41,6 +41,8 @@ public class UpdateUserRequest
     public bool? UseScoreColors { get; set; }
 
     public string? ScoreProvider { get; set; }
+
+    public bool? ShowPriceComparisonIcon { get; set; }
 }
 
 public class ChangePasswordRequest
@@ -58,6 +60,7 @@ public class UserDto
     public bool HasPassword { get; set; }
     public bool UseScoreColors { get; set; }
     public string ScoreProvider { get; set; } = "Metacritic";
+    public bool ShowPriceComparisonIcon { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

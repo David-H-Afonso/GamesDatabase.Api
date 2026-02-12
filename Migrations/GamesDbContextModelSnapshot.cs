@@ -514,6 +514,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("score_provider");
 
+                    b.Property<bool>("ShowPriceComparisonIcon")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("show_price_comparison_icon");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")
                         .HasColumnName("updated_at");

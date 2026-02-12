@@ -28,6 +28,7 @@ public class User
     // User preferences
     public bool UseScoreColors { get; set; } = false;
     public string ScoreProvider { get; set; } = "Metacritic";
+    public bool ShowPriceComparisonIcon { get; set; } = false;
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

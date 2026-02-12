@@ -65,6 +65,7 @@ public class UsersController : ControllerBase
                 HasPassword = u.PasswordHash != null,
                 UseScoreColors = u.UseScoreColors,
                 ScoreProvider = u.ScoreProvider,
+                ShowPriceComparisonIcon = u.ShowPriceComparisonIcon,
                 CreatedAt = u.CreatedAt,
                 UpdatedAt = u.UpdatedAt
             })
@@ -102,6 +103,7 @@ public class UsersController : ControllerBase
             HasPassword = user.PasswordHash != null,
             UseScoreColors = user.UseScoreColors,
             ScoreProvider = user.ScoreProvider,
+            ShowPriceComparisonIcon = user.ShowPriceComparisonIcon,
             CreatedAt = user.CreatedAt,
             UpdatedAt = user.UpdatedAt
         });
@@ -150,6 +152,7 @@ public class UsersController : ControllerBase
             HasPassword = newUser.PasswordHash != null,
             UseScoreColors = newUser.UseScoreColors,
             ScoreProvider = newUser.ScoreProvider,
+            ShowPriceComparisonIcon = newUser.ShowPriceComparisonIcon,
             CreatedAt = newUser.CreatedAt,
             UpdatedAt = newUser.UpdatedAt
         });
@@ -211,6 +214,11 @@ public class UsersController : ControllerBase
         if (request.ScoreProvider != null)
         {
             user.ScoreProvider = request.ScoreProvider;
+        }
+
+        if (request.ShowPriceComparisonIcon.HasValue)
+        {
+            user.ShowPriceComparisonIcon = request.ShowPriceComparisonIcon.Value;
         }
 
         await _context.SaveChangesAsync();

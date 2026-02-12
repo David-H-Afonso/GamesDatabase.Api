@@ -127,6 +127,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false);
             entity.Property(e => e.UseScoreColors).HasColumnName("use_score_colors");
             entity.Property(e => e.ScoreProvider).HasColumnName("score_provider");
+            entity.Property(e => e.ShowPriceComparisonIcon).HasColumnName("show_price_comparison_icon");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 
