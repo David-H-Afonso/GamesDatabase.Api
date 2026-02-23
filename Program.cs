@@ -329,6 +329,11 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// NOTE: UseHttpsRedirection is intentionally omitted.
+// The container only listens on HTTP (ASPNETCORE_URLS=http://+:8080).
+// Enabling it would cause the /health curl check to follow a redirect to an
+// HTTPS port that doesn't exist, making the container permanently unhealthy.
+
 static async Task SeedDefaultDataAsync(GamesDbContext context)
 {
     if (!context.Users.Any())
@@ -389,8 +394,6 @@ static async Task SeedDefaultDataAsync(GamesDbContext context)
         await context.SaveChangesAsync();
     }
 }
-
-app.UseHttpsRedirection();
 
 // Serve static files from network sync path (game images)
 var networkSyncPath = builder.Configuration["NetworkSync:NetworkPath"];
