@@ -16,10 +16,19 @@ public class SelectiveExportRequest
 
 public class GameExportConfig
 {
-    /// <summary>"simple" = all AsStored. "custom" = use Properties.</summary>
+    /// <summary>"simple" = all AsStored. "custom" = use Properties. "customCleared" = clear personal fields, keep rest.</summary>
     public string Mode { get; set; } = "simple";
 
     public Dictionary<string, ExportPropertyOverride>? Properties { get; set; }
+
+    /// <summary>
+    /// Fields that are always cleared when Mode is "customCleared".
+    /// These are the time/personal fields a user typically wants stripped when sharing.
+    /// </summary>
+    public static readonly IReadOnlySet<string> CustomClearedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "started", "finished", "grade", "comment", "status", "playWith"
+    };
 }
 
 public class ExportPropertyOverride
@@ -41,10 +50,19 @@ public class SelectiveImportConfig
 
 public class GameImportConfig
 {
-    /// <summary>"simple" = all AsImported. "custom" = use Properties.</summary>
+    /// <summary>"simple" = all AsImported. "custom" = use Properties. "customCleared" = clean personal fields, keep rest AsImported.</summary>
     public string Mode { get; set; } = "simple";
 
     public Dictionary<string, ImportPropertyOverride>? Properties { get; set; }
+
+    /// <summary>
+    /// Fields that are always cleaned when Mode is "customCleared".
+    /// These are the personal/time fields a user typically wants stripped when receiving a shared list.
+    /// </summary>
+    public static readonly IReadOnlySet<string> CustomClearedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "started", "finished", "grade", "comment", "status", "playWith"
+    };
 }
 
 public class ImportPropertyOverride
