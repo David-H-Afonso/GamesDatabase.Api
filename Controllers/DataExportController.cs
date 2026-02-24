@@ -4,13 +4,17 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using CsvHelper;
 using CsvHelper.Configuration;
+using CsvHelper.Configuration.Attributes;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.Models;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Services;
 using GamesDatabase.Api.Helpers;
+using GamesDatabase.Api.DTOs;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -265,7 +269,7 @@ public class DataExportController : BaseApiController
                 var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                     ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                     : "";
-                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "" });
+                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "" });
             }
             using var memoryStream = new MemoryStream();
             using var writer = new StreamWriter(memoryStream, Encoding.UTF8);
@@ -539,6 +543,310 @@ public class DataExportController : BaseApiController
         }
     }
 
+    // ─── Selective Export ───────────────────────────────────────────────────────
+
+    [HttpPost("selective-games-export")]
+    public async Task<IActionResult> SelectiveExportGames([FromBody] SelectiveExportRequest request)
+    {
+        if (request.GameIds == null || request.GameIds.Count == 0)
+            return BadRequest(new { message = "No game IDs provided" });
+
+        try
+        {
+            var userId = GetCurrentUserIdOrDefault(1);
+            var allRecords = new List<FullExportModel>();
+
+            // Selective export: Game rows only (no catalog rows)
+            // Load requested games
+            var games = await _context.Games
+                .Where(g => g.UserId == userId && request.GameIds.Contains(g.Id))
+                .Include(g => g.Status)
+                .Include(g => g.Platform)
+                .Include(g => g.GamePlayWiths).ThenInclude(gpw => gpw.PlayWith)
+                .Include(g => g.PlayedStatus)
+                .OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+                .ToListAsync();
+
+            foreach (var g in games)
+            {
+                // Determine effective config (per-game overrides global)
+                var effectiveConfig = request.PerGameConfig != null && request.PerGameConfig.TryGetValue(g.Id, out var pgCfg)
+                    ? pgCfg
+                    : request.GlobalConfig;
+
+                var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
+                    ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
+                    : "";
+
+                allRecords.Add(new FullExportModel
+                {
+                    Type = "Game",
+                    Name = g.Name,
+                    Status = ApplyExportString(g.Status?.Name ?? "", "status", effectiveConfig),
+                    Platform = ApplyExportString(g.Platform?.Name ?? "", "platform", effectiveConfig),
+                    PlayWith = ApplyExportString(playWithNames, "playWith", effectiveConfig),
+                    PlayedStatus = ApplyExportString(g.PlayedStatus?.Name ?? "", "playedStatus", effectiveConfig),
+                    Released = ApplyExportString(g.Released ?? "", "released", effectiveConfig),
+                    Started = ApplyExportString(g.Started ?? "", "started", effectiveConfig),
+                    Finished = ApplyExportString(g.Finished ?? "", "finished", effectiveConfig),
+                    Score = g.Score?.ToString() ?? "",
+                    Critic = ApplyExportString(g.Critic?.ToString() ?? "", "critic", effectiveConfig),
+                    CriticProvider = ApplyExportString(g.CriticProvider ?? "", "criticProvider", effectiveConfig),
+                    Grade = ApplyExportString(g.Grade?.ToString() ?? "", "grade", effectiveConfig),
+                    Completion = ApplyExportString(g.Completion?.ToString() ?? "", "completion", effectiveConfig),
+                    Story = ApplyExportString(g.Story?.ToString() ?? "", "story", effectiveConfig),
+                    Comment = ApplyExportString(g.Comment ?? "", "comment", effectiveConfig),
+                    Logo = ApplyExportString(g.Logo ?? "", "logo", effectiveConfig),
+                    Cover = ApplyExportString(g.Cover ?? "", "cover", effectiveConfig),
+                    IsCheaperByKey = ApplyExportString(g.IsCheaperByKey?.ToString() ?? "", "isCheaperByKey", effectiveConfig),
+                    KeyStoreUrl = ApplyExportString(g.KeyStoreUrl ?? "", "keyStoreUrl", effectiveConfig),
+                });
+            }
+
+            using var memoryStream = new MemoryStream();
+            using var writer = new StreamWriter(memoryStream, Encoding.UTF8);
+            using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture) { Delimiter = _exportSettings.CsvDelimiter });
+            await csv.WriteRecordsAsync(allRecords);
+            await writer.FlushAsync();
+
+            var fileName = $"games_selective_export_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+            return File(memoryStream.ToArray(), "text/csv", fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in selective export");
+            return StatusCode(500, new { message = "Error generating selective export" });
+        }
+    }
+
+    private static string? ApplyExportString(string? storedValue, string propertyKey, GameExportConfig config)
+    {
+        if (config.Mode == "simple") return storedValue;
+        if (config.Properties == null) return storedValue;
+        if (config.Properties.TryGetValue(propertyKey, out var propOverride) && propOverride.Mode == "clean")
+            return null;
+        return storedValue;
+    }
+
+    // ─── Selective Import ───────────────────────────────────────────────────────
+
+    [HttpPost("selective-games-import")]
+    public async Task<IActionResult> SelectiveImportGames(
+        [FromForm] IFormFile? csvFile,
+        [FromForm] string? csvText,
+        [FromForm] string? configJson)
+    {
+        if (csvFile == null && string.IsNullOrWhiteSpace(csvText))
+            return BadRequest(new { message = "No CSV source provided. Supply csvFile or csvText." });
+
+        try
+        {
+            var userId = GetCurrentUserIdOrDefault(1);
+
+            // Deserialize config (default = simple)
+            var config = new SelectiveImportConfig();
+            if (!string.IsNullOrWhiteSpace(configJson))
+            {
+                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                config = JsonSerializer.Deserialize<SelectiveImportConfig>(configJson, opts) ?? config;
+            }
+
+            // Parse CSV
+            List<FullExportModel> gameRows;
+            var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+            {
+                Delimiter = _exportSettings.CsvDelimiter,
+                HeaderValidated = null,
+                MissingFieldFound = null
+            };
+
+            if (csvFile != null)
+            {
+                using var stream = csvFile.OpenReadStream();
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                using var csvReader = new CsvReader(reader, csvConfig);
+                gameRows = csvReader.GetRecords<FullExportModel>()
+                    .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
+                    .ToList();
+            }
+            else
+            {
+                using var reader = new StringReader(csvText!);
+                using var csvReader = new CsvReader(reader, csvConfig);
+                gameRows = csvReader.GetRecords<FullExportModel>()
+                    .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
+                    .ToList();
+            }
+
+            // Find Not Fulfilled status (fallback when status is not found or asImported with missing status)
+            var notFulfilledStatus = await _context.GameStatuses
+                .FirstOrDefaultAsync(s => s.UserId == userId && s.StatusType == SpecialStatusType.NotFulfilled && s.IsDefault);
+
+            var result = new SelectiveImportResult();
+
+            foreach (var record in gameRows)
+            {
+                try
+                {
+                    // Determine effective config
+                    var effectiveConfig = config.PerGameConfig != null
+                        && config.PerGameConfig.TryGetValue(record.Name, out var pgCfg)
+                        ? pgCfg
+                        : config.GlobalConfig;
+
+                    // Resolve all property values
+                    var resolvedStatus = ResolveImportString(record.Status, "status", effectiveConfig);
+                    var resolvedPlatform = ResolveImportString(record.Platform, "platform", effectiveConfig);
+                    var resolvedPlayWith = ResolveImportString(record.PlayWith, "playWith", effectiveConfig);
+                    var resolvedPlayedStatus = ResolveImportString(record.PlayedStatus, "playedStatus", effectiveConfig);
+                    var resolvedReleased = ResolveImportString(record.Released, "released", effectiveConfig);
+                    var resolvedStarted = ResolveImportString(record.Started, "started", effectiveConfig);
+                    var resolvedFinished = ResolveImportString(record.Finished, "finished", effectiveConfig);
+                    var resolvedCritic = ResolveImportString(record.Critic, "critic", effectiveConfig);
+                    var resolvedCriticProvider = ResolveImportString(record.CriticProvider, "criticProvider", effectiveConfig);
+                    var resolvedGrade = ResolveImportString(record.Grade, "grade", effectiveConfig);
+                    var resolvedCompletion = ResolveImportString(record.Completion, "completion", effectiveConfig);
+                    var resolvedStory = ResolveImportString(record.Story, "story", effectiveConfig);
+                    var resolvedComment = ResolveImportString(record.Comment, "comment", effectiveConfig);
+                    var resolvedLogo = ResolveImportString(record.Logo, "logo", effectiveConfig);
+                    var resolvedCover = ResolveImportString(record.Cover, "cover", effectiveConfig);
+                    var resolvedIsCheaperByKey = ResolveImportString(record.IsCheaperByKey, "isCheaperByKey", effectiveConfig);
+                    var resolvedKeyStoreUrl = ResolveImportString(record.KeyStoreUrl, "keyStoreUrl", effectiveConfig);
+
+                    // Resolve entity lookups
+                    var status = string.IsNullOrWhiteSpace(resolvedStatus)
+                        ? notFulfilledStatus
+                        : await _context.GameStatuses.FirstOrDefaultAsync(s => s.Name.ToLower() == resolvedStatus.ToLower() && s.UserId == userId)
+                          ?? notFulfilledStatus;
+
+                    if (status == null)
+                    {
+                        result.Errors.Add($"No status found and no Not Fulfilled fallback for '{record.Name}'");
+                        continue;
+                    }
+
+                    var platform = string.IsNullOrWhiteSpace(resolvedPlatform)
+                        ? null
+                        : await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == resolvedPlatform.ToLower() && p.UserId == userId);
+
+                    var playedStatus = string.IsNullOrWhiteSpace(resolvedPlayedStatus)
+                        ? null
+                        : await _context.GamePlayedStatuses.FirstOrDefaultAsync(p => p.Name.ToLower() == resolvedPlayedStatus.ToLower() && p.UserId == userId);
+
+                    var playWithIds = new List<int>();
+                    if (!string.IsNullOrWhiteSpace(resolvedPlayWith))
+                    {
+                        var pwNames = resolvedPlayWith.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        foreach (var pwName in pwNames)
+                        {
+                            var pw = await _context.GamePlayWiths.FirstOrDefaultAsync(p => p.Name.ToLower() == pwName.ToLower() && p.UserId == userId);
+                            if (pw != null) playWithIds.Add(pw.Id);
+                        }
+                    }
+
+                    // Parse isCheaperByKey
+                    bool? isCheaperByKey = null;
+                    if (!string.IsNullOrWhiteSpace(resolvedIsCheaperByKey))
+                        isCheaperByKey = bool.TryParse(resolvedIsCheaperByKey, out var boolVal) ? boolVal : (bool?)null;
+
+                    var existing = await _context.Games
+                        .Include(g => g.GamePlayWiths)
+                        .FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower() && g.UserId == userId);
+
+                    if (existing != null)
+                    {
+                        existing.StatusId = status.Id;
+                        existing.PlatformId = platform?.Id;
+                        existing.PlayedStatusId = playedStatus?.Id;
+                        existing.Released = resolvedReleased;
+                        existing.Started = resolvedStarted;
+                        existing.Finished = resolvedFinished;
+                        existing.Critic = ParseNullableInt(resolvedCritic);
+                        existing.CriticProvider = resolvedCriticProvider;
+                        existing.Grade = ParseNullableInt(resolvedGrade);
+                        existing.Completion = ParseNullableInt(resolvedCompletion);
+                        existing.Story = ParseNullableInt(resolvedStory);
+                        existing.Comment = resolvedComment;
+                        existing.Logo = resolvedLogo;
+                        existing.Cover = resolvedCover;
+                        existing.IsCheaperByKey = isCheaperByKey;
+                        existing.KeyStoreUrl = resolvedKeyStoreUrl;
+                        existing.CalculateScore();
+
+                        foreach (var mapping in existing.GamePlayWiths.ToList())
+                            _context.GamePlayWithMappings.Remove(mapping);
+                        foreach (var pwId in playWithIds)
+                            _context.GamePlayWithMappings.Add(new GamePlayWithMapping { GameId = existing.Id, PlayWithId = pwId });
+
+                        _context.Entry(existing).State = EntityState.Modified;
+                        result.Updated++;
+                    }
+                    else
+                    {
+                        var newGame = new Game
+                        {
+                            UserId = userId,
+                            Name = record.Name,
+                            StatusId = status.Id,
+                            PlatformId = platform?.Id,
+                            PlayedStatusId = playedStatus?.Id,
+                            Released = resolvedReleased,
+                            Started = resolvedStarted,
+                            Finished = resolvedFinished,
+                            Critic = ParseNullableInt(resolvedCritic),
+                            CriticProvider = resolvedCriticProvider,
+                            Grade = ParseNullableInt(resolvedGrade),
+                            Completion = ParseNullableInt(resolvedCompletion),
+                            Story = ParseNullableInt(resolvedStory),
+                            Comment = resolvedComment,
+                            Logo = resolvedLogo,
+                            Cover = resolvedCover,
+                            IsCheaperByKey = isCheaperByKey,
+                            KeyStoreUrl = resolvedKeyStoreUrl,
+                        };
+                        newGame.CalculateScore();
+                        _context.Games.Add(newGame);
+                        await _context.SaveChangesAsync();
+
+                        foreach (var pwId in playWithIds)
+                            _context.GamePlayWithMappings.Add(new GamePlayWithMapping { GameId = newGame.Id, PlayWithId = pwId });
+
+                        result.Imported++;
+                    }
+
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add($"Error processing '{record.Name}': {ex.Message}");
+                    _logger.LogError(ex, "Error in selective import for game: {GameName}", record.Name);
+                    _context.ChangeTracker.Clear();
+                }
+            }
+
+            result.Message = $"Selective import complete. Imported: {result.Imported}, Updated: {result.Updated}, Errors: {result.Errors.Count}";
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in selective import");
+            return StatusCode(500, new { message = "Error during selective import", details = ex.Message });
+        }
+    }
+
+    private static string? ResolveImportString(string? csvValue, string propertyKey, GameImportConfig config)
+    {
+        if (config.Mode == "simple") return csvValue;
+        if (config.Properties == null) return csvValue;
+        if (!config.Properties.TryGetValue(propertyKey, out var propOverride)) return csvValue;
+        return propOverride.Mode switch
+        {
+            "clean" => null,
+            "custom" => propOverride.CustomValue,
+            _ => csvValue,
+        };
+    }
+
     private static int? ParseNullableInt(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -571,6 +879,10 @@ public class FullExportModel
     public string? Comment { get; set; }
     public string? Logo { get; set; }
     public string? Cover { get; set; }
+    [Name("IsCheaperByKey")]
+    public string? IsCheaperByKey { get; set; }
+    [Name("KeyStoreUrl")]
+    public string? KeyStoreUrl { get; set; }
     // View fields
     public string? Description { get; set; }
     public string? FiltersJson { get; set; }
