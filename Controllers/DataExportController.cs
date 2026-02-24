@@ -615,7 +615,7 @@ public class DataExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in selective export");
-            return StatusCode(500, new { message = "Error generating selective export", details = ex.Message });
+            return StatusCode(500, new { message = "Error generating selective export" });
         }
     }
 
