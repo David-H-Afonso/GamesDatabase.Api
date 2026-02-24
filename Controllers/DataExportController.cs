@@ -269,7 +269,7 @@ public class DataExportController : BaseApiController
                 var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                     ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                     : "";
-                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "" });
+                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "" });
             }
             using var memoryStream = new MemoryStream();
             using var writer = new StreamWriter(memoryStream, Encoding.UTF8);
@@ -453,6 +453,8 @@ public class DataExportController : BaseApiController
                         existing.Comment = record.Comment;
                         existing.Logo = record.Logo;
                         existing.Cover = record.Cover;
+                        existing.IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var existingCbk) ? existingCbk : (bool?)null;
+                        existing.KeyStoreUrl = record.KeyStoreUrl;
                         existing.CalculateScore();
 
                         // Update PlayWith relationships
@@ -491,7 +493,9 @@ public class DataExportController : BaseApiController
                             Story = ParseNullableInt(record.Story),
                             Comment = record.Comment,
                             Logo = record.Logo,
-                            Cover = record.Cover
+                            Cover = record.Cover,
+                            IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var newCbk) ? newCbk : (bool?)null,
+                            KeyStoreUrl = record.KeyStoreUrl
                         };
                         newGame.CalculateScore();
                         _context.Games.Add(newGame);
