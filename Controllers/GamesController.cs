@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.DTOs;
 using GamesDatabase.Api.Helpers;
+using GamesDatabase.Api.Models;
 using GamesDatabase.Api.Services;
 using System.Text.Json;
 
@@ -244,7 +245,7 @@ public class GamesController : BaseApiController
         if (parameters.ShowIncomplete == true)
         {
             query = query.Where(g =>
-                g.Status != null && g.Status.Name == "Not Fulfilled" ||
+                g.Status != null && g.Status.StatusType == SpecialStatusType.NotFulfilled ||
                 string.IsNullOrEmpty(g.Cover) ||
                 string.IsNullOrEmpty(g.Logo) ||
                 g.PlatformId == null

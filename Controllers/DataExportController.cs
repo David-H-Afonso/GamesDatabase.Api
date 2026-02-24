@@ -208,6 +208,23 @@ public class DataExportController : BaseApiController
         }
     }
 
+    [HttpGet("analyze-duplicate-games")]
+    [Authorize]
+    public async Task<ActionResult<DatabaseDuplicatesResult>> AnalyzeDuplicateGames()
+    {
+        try
+        {
+            var userId = GetCurrentUserIdOrDefault(1);
+            var result = await _networkSyncService.AnalyzeDatabaseDuplicatesAsync(userId);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error analyzing database duplicates for user {UserId}", GetCurrentUserIdOrDefault(1));
+            return StatusCode(500, new { message = "Error analyzing database duplicates", error = ex.Message });
+        }
+    }
+
     private bool IsLocalRequest()
     {
         var host = Request.Host.Host.ToLowerInvariant();
@@ -626,6 +643,14 @@ public class DataExportController : BaseApiController
     private static string? ApplyExportString(string? storedValue, string propertyKey, GameExportConfig config)
     {
         if (config.Mode == "simple") return storedValue;
+
+        if (config.Mode == "customCleared")
+        {
+            // In customCleared mode: clear personal/time fields, keep everything else as stored
+            return GameExportConfig.CustomClearedFields.Contains(propertyKey) ? null : storedValue;
+        }
+
+        // custom mode: use per-property overrides
         if (config.Properties == null) return storedValue;
         if (config.Properties.TryGetValue(propertyKey, out var propOverride) && propOverride.Mode == "clean")
             return null;
@@ -841,6 +866,13 @@ public class DataExportController : BaseApiController
     private static string? ResolveImportString(string? csvValue, string propertyKey, GameImportConfig config)
     {
         if (config.Mode == "simple") return csvValue;
+
+        if (config.Mode == "customCleared")
+        {
+            // In customCleared mode: clean personal/time fields, keep everything else as imported
+            return GameImportConfig.CustomClearedFields.Contains(propertyKey) ? null : csvValue;
+        }
+
         if (config.Properties == null) return csvValue;
         if (!config.Properties.TryGetValue(propertyKey, out var propOverride)) return csvValue;
         return propOverride.Mode switch

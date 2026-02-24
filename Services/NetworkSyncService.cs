@@ -1015,10 +1015,30 @@ public class NetworkSyncService : INetworkSyncService
 
         try
         {
-            // Get games count from database
-            result.TotalGamesInDatabase = await _context.Games
+            // Load all games once — used for both filesystem analysis and DB duplicate detection.
+            var games = await _context.Games
                 .Where(g => g.UserId == userId)
-                .CountAsync();
+                .Select(g => new { g.Id, g.Name })
+                .ToListAsync();
+
+            result.TotalGamesInDatabase = games.Count;
+
+            // ── DB duplicate detection (always run, regardless of filesystem) ───────
+            var dbDuplicates = new DatabaseDuplicatesResult { TotalGamesInDatabase = games.Count };
+            var dbGroups = games
+                .GroupBy(g => GetNormalizedWordSet(g.Name))
+                .Where(g => g.Count() > 1)
+                .ToList();
+            foreach (var group in dbGroups)
+            {
+                dbDuplicates.DuplicateGroups.Add(new DatabaseDuplicateGroup
+                {
+                    NormalizedKey = group.Key,
+                    Games = group.Select(g => new DatabaseDuplicateEntry { Id = g.Id, Name = g.Name }).ToList(),
+                    Reason = "Games share the same words in their title (case-insensitive, punctuation ignored)"
+                });
+            }
+            result.DatabaseDuplicates = dbDuplicates;
 
             // Get user's games path
             var userPath = Path.Combine(_syncOptions.NetworkPath!, userId.ToString(), "Games");
@@ -1037,12 +1057,6 @@ public class NetworkSyncService : INetworkSyncService
 
             result.TotalFoldersInFilesystem = folders.Count;
             result.Difference = result.TotalFoldersInFilesystem - result.TotalGamesInDatabase;
-
-            // Get all games from database with their expected folder names
-            var games = await _context.Games
-                .Where(g => g.UserId == userId)
-                .Select(g => new { g.Id, g.Name })
-                .ToListAsync();
 
             var gameToFolderMap = games.ToDictionary(
                 g => g.Id,
@@ -1064,21 +1078,25 @@ public class NetworkSyncService : INetworkSyncService
                 }
             }
 
-            // Find potential duplicates (similar folder names that could be the same game)
+            // Find potential duplicates using word-set equality: folders whose names consist
+            // of the same set of significant words (case-insensitive, punctuation ignored).
+            // This correctly flags "God of War" == "GOD OF WAR" while NOT flagging
+            // "Hollow Knight" vs "Hollow Knight Silksong" (different word sets).
             var folderGroups = folders
-                .GroupBy(f => NormalizeFolderName(f!))
+                .GroupBy(f => GetNormalizedWordSet(f!))
                 .Where(g => g.Count() > 1)
                 .ToList();
 
             foreach (var group in folderGroups)
             {
                 var matchingGame = games.FirstOrDefault(g =>
-                    NormalizeFolderName(FolderNameHelper.MakeSafeFolderName(g.Name)) == group.Key); result.PotentialDuplicates.Add(new PotentialDuplicate
-                    {
-                        GameName = matchingGame?.Name ?? "Unknown",
-                        FolderNames = group.ToList()!,
-                        Reason = "Similar folder names detected (different special characters)"
-                    });
+                    GetNormalizedWordSet(FolderNameHelper.MakeSafeFolderName(g.Name)) == group.Key);
+                result.PotentialDuplicates.Add(new PotentialDuplicate
+                {
+                    GameName = matchingGame?.Name ?? group.First() ?? "Unknown",
+                    FolderNames = group.ToList()!,
+                    Reason = "Folders share the same words (different casing or punctuation)"
+                });
             }
 
             return result;
@@ -1090,6 +1108,38 @@ public class NetworkSyncService : INetworkSyncService
         }
     }
 
+    public async Task<DatabaseDuplicatesResult> AnalyzeDatabaseDuplicatesAsync(int userId)
+    {
+        var result = new DatabaseDuplicatesResult();
+
+        var games = await _context.Games
+            .Where(g => g.UserId == userId)
+            .Select(g => new { g.Id, g.Name })
+            .ToListAsync();
+
+        result.TotalGamesInDatabase = games.Count;
+
+        // Group by word-set equality: games whose names consist of the same set of
+        // significant words are considered duplicate candidates.
+        // E.g. "God of War" == "god of war" but "Hollow Knight" != "Hollow Knight: Silksong"
+        var duplicateGroups = games
+            .GroupBy(g => GetNormalizedWordSet(g.Name))
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        foreach (var group in duplicateGroups)
+        {
+            result.DuplicateGroups.Add(new DatabaseDuplicateGroup
+            {
+                NormalizedKey = group.Key,
+                Games = group.Select(g => new DatabaseDuplicateEntry { Id = g.Id, Name = g.Name }).ToList(),
+                Reason = "Games share the same words in their title (case-insensitive, punctuation ignored)"
+            });
+        }
+
+        return result;
+    }
+
     private static string NormalizeFolderName(string folderName)
     {
         // Remove all special characters for comparison
@@ -1098,5 +1148,21 @@ public class NetworkSyncService : INetworkSyncService
             .Where(c => char.IsLetterOrDigit(c))
             .ToArray())
             .ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Returns a canonical key representing the SET of significant words in a name.
+    /// Words are extracted (alphanumeric sequences), lowercased, sorted and joined.
+    /// This allows semantic duplicate detection while avoiding false positives caused
+    /// by subtitle differences ("Hollow Knight" vs "Hollow Knight: Silksong").
+    /// </summary>
+    private static string GetNormalizedWordSet(string name)
+    {
+        var words = System.Text.RegularExpressions.Regex
+            .Matches(name.Normalize(NormalizationForm.FormD).ToLowerInvariant(), @"[a-z0-9]+")
+            .Select(m => m.Value)
+            .OrderBy(w => w)
+            .ToArray();
+        return string.Join("|", words);
     }
 }
