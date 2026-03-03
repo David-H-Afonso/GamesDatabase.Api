@@ -6,14 +6,6 @@ using SixLabors.ImageSharp.Processing;
 
 namespace GamesDatabase.Api.Controllers;
 
-/// <summary>
-/// Serves game images resized to the requested dimensions and encoded as WebP.
-/// Replaces the static-file middleware for /game-images so that all requests to the
-/// existing URL format are automatically optimised (resize + WebP) and disk-cached.
-///
-/// Usage: GET /game-images/{relative-path}?w=700&amp;h=400
-/// Both w and h are optional. If omitted the image is only converted to WebP.
-/// </summary>
 [ApiController]
 [Route("game-images")]
 [AllowAnonymous]
@@ -41,7 +33,6 @@ public class ImageProxyController : ControllerBase
         if (string.IsNullOrWhiteSpace(networkSyncPath))
             return NotFound();
 
-        // ── Security: reject path-traversal attempts ──────────────────────────
         var rootFull = Path.GetFullPath(networkSyncPath);
         var requestedFull = Path.GetFullPath(Path.Combine(networkSyncPath, imagePath));
         if (!requestedFull.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
@@ -53,36 +44,25 @@ public class ImageProxyController : ControllerBase
         if (!System.IO.File.Exists(requestedFull))
             return NotFound();
 
-        // ── Clamp requested dimensions to sane limits ─────────────────────────
         w = w > 0 ? Math.Clamp(w, 1, 2560) : 0;
         h = h > 0 ? Math.Clamp(h, 1, 2560) : 0;
 
-        // ── Build cache path ──────────────────────────────────────────────────
         var cacheDir = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(imagePath) ?? "");
         var cacheFile = $"{Path.GetFileName(imagePath)}_{w}x{h}.webp";
         var cachePath = Path.Combine(cacheDir, cacheFile);
 
-        // ── Serve from disk cache if available ───────────────────────────────
         if (System.IO.File.Exists(cachePath))
         {
             SetCacheHeaders();
             return File(System.IO.File.OpenRead(cachePath), "image/webp");
         }
 
+        // ICO files (Vista+ PNG-compressed frames) fail ImageSharp's default loader;
+        // extract the largest embedded frame first.
         byte[]? rawBytes = null;
-        var ext = Path.GetExtension(requestedFull).ToLowerInvariant();
-
-        if (ext == ".ico")
-        {
+        if (Path.GetExtension(requestedFull).Equals(".ico", StringComparison.OrdinalIgnoreCase))
             rawBytes = await ExtractLargestIcoFrameAsync(requestedFull, ct);
-        }
 
-        // ── Process image into a MemoryStream ─────────────────────────────────
-        // IMPORTANT: we write to memory first and serve from there.
-        // Writing to the disk cache is attempted afterwards as a best-effort
-        // operation. If the cache directory isn't writable (e.g. wrong Docker
-        // volume permissions) we still serve the optimised image rather than
-        // falling back to the original.
         try
         {
             Image image;
@@ -99,14 +79,11 @@ public class ImageProxyController : ControllerBase
             {
                 if (w > 0 || h > 0)
                 {
-                    var options = new ResizeOptions
+                    image.Mutate(x => x.Resize(new ResizeOptions
                     {
                         Mode = ResizeMode.Max,
-                        Size = new Size(
-                            w > 0 ? w : int.MaxValue,
-                            h > 0 ? h : int.MaxValue),
-                    };
-                    image.Mutate(x => x.Resize(options));
+                        Size = new Size(w > 0 ? w : int.MaxValue, h > 0 ? h : int.MaxValue),
+                    }));
                 }
 
                 var ms = new MemoryStream();
@@ -121,7 +98,7 @@ public class ImageProxyController : ControllerBase
                 }
                 catch (Exception cacheEx)
                 {
-                    _logger.LogWarning(cacheEx, "Could not write image cache for {Path} (cache disabled for this image)", cachePath);
+                    _logger.LogWarning(cacheEx, "Could not write image cache for {Path}", cachePath);
                 }
 
                 SetCacheHeaders();
@@ -178,13 +155,8 @@ public class ImageProxyController : ControllerBase
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
     private void SetCacheHeaders()
     {
-        // 7-day public cache with ETag revalidation (longer than original 1-day
-        // because the variant is keyed by dimensions and won't change unless
-        // the source image is replaced).
         Response.Headers["Cache-Control"] = "public, max-age=604800, must-revalidate";
     }
 
