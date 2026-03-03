@@ -404,7 +404,13 @@ if (!string.IsNullOrWhiteSpace(networkSyncPath) && Directory.Exists(networkSyncP
         FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(networkSyncPath),
         RequestPath = "/game-images",
         ServeUnknownFileTypes = true,
-        DefaultContentType = "application/octet-stream"
+        DefaultContentType = "application/octet-stream",
+        OnPrepareResponse = ctx =>
+        {
+            // 1-day cache + ETag revalidation.
+            // Using "immutable" would prevent re-fetching when you replace an image with the same filename.
+            ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=86400, must-revalidate";
+        }
     });
     app.Logger.LogInformation("Serving game images from {Path} at /game-images", networkSyncPath);
 }
