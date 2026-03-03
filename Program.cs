@@ -395,25 +395,9 @@ static async Task SeedDefaultDataAsync(GamesDbContext context)
     }
 }
 
-// Serve static files from network sync path (game images)
-var networkSyncPath = builder.Configuration["NetworkSync:NetworkPath"];
-if (!string.IsNullOrWhiteSpace(networkSyncPath) && Directory.Exists(networkSyncPath))
-{
-    app.UseStaticFiles(new StaticFileOptions
-    {
-        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(networkSyncPath),
-        RequestPath = "/game-images",
-        ServeUnknownFileTypes = true,
-        DefaultContentType = "application/octet-stream",
-        OnPrepareResponse = ctx =>
-        {
-            // 1-day cache + ETag revalidation.
-            // Using "immutable" would prevent re-fetching when you replace an image with the same filename.
-            ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=86400, must-revalidate";
-        }
-    });
-    app.Logger.LogInformation("Serving game images from {Path} at /game-images", networkSyncPath);
-}
+// Game images are now served by ImageProxyController at /game-images.
+// It resizes + converts to WebP on demand and disk-caches the result,
+// so we no longer need the static-file middleware for that path.
 
 if (app.Environment.IsDevelopment())
 {
