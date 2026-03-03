@@ -19,8 +19,7 @@ namespace GamesDatabase.Api.Controllers;
 [AllowAnonymous]
 public class ImageProxyController : ControllerBase
 {
-    // Keep one codec config alive for the lifetime of the app
-    private static readonly WebpEncoder _encoder = new() { Quality = 82 };
+    private static readonly WebpEncoder _encoder = new() { Quality = 75 };
 
     private readonly IConfiguration _configuration;
     private readonly ILogger<ImageProxyController> _logger;
@@ -70,6 +69,14 @@ public class ImageProxyController : ControllerBase
             return File(System.IO.File.OpenRead(cachePath), "image/webp");
         }
 
+        byte[]? rawBytes = null;
+        var ext = Path.GetExtension(requestedFull).ToLowerInvariant();
+
+        if (ext == ".ico")
+        {
+            rawBytes = await ExtractLargestIcoFrameAsync(requestedFull, ct);
+        }
+
         // ── Process image into a MemoryStream ─────────────────────────────────
         // IMPORTANT: we write to memory first and serve from there.
         // Writing to the disk cache is attempted afterwards as a best-effort
@@ -78,38 +85,48 @@ public class ImageProxyController : ControllerBase
         // falling back to the original.
         try
         {
-            using var image = await Image.LoadAsync(requestedFull, ct);
-
-            if (w > 0 || h > 0)
+            Image image;
+            if (rawBytes != null)
             {
-                var options = new ResizeOptions
+                image = await Image.LoadAsync(new MemoryStream(rawBytes), ct);
+            }
+            else
+            {
+                image = await Image.LoadAsync(requestedFull, ct);
+            }
+
+            using (image)
+            {
+                if (w > 0 || h > 0)
                 {
-                    Mode = ResizeMode.Max,
-                    Size = new Size(
-                        w > 0 ? w : int.MaxValue,
-                        h > 0 ? h : int.MaxValue),
-                };
-                image.Mutate(x => x.Resize(options));
-            }
+                    var options = new ResizeOptions
+                    {
+                        Mode = ResizeMode.Max,
+                        Size = new Size(
+                            w > 0 ? w : int.MaxValue,
+                            h > 0 ? h : int.MaxValue),
+                    };
+                    image.Mutate(x => x.Resize(options));
+                }
 
-            var ms = new MemoryStream();
-            await image.SaveAsync(ms, _encoder, ct);
-            ms.Position = 0;
-
-            // Best-effort disk cache write — never let this crash the response
-            try
-            {
-                Directory.CreateDirectory(cacheDir);
-                await System.IO.File.WriteAllBytesAsync(cachePath, ms.ToArray(), ct);
+                var ms = new MemoryStream();
+                await image.SaveAsync(ms, _encoder, ct);
                 ms.Position = 0;
-            }
-            catch (Exception cacheEx)
-            {
-                _logger.LogWarning(cacheEx, "Could not write image cache for {Path} (cache disabled for this image)", cachePath);
-            }
 
-            SetCacheHeaders();
-            return File(ms, "image/webp");
+                try
+                {
+                    Directory.CreateDirectory(cacheDir);
+                    await System.IO.File.WriteAllBytesAsync(cachePath, ms.ToArray(), ct);
+                    ms.Position = 0;
+                }
+                catch (Exception cacheEx)
+                {
+                    _logger.LogWarning(cacheEx, "Could not write image cache for {Path} (cache disabled for this image)", cachePath);
+                }
+
+                SetCacheHeaders();
+                return File(ms, "image/webp");
+            }
         }
         catch (Exception ex)
         {
@@ -117,6 +134,47 @@ public class ImageProxyController : ControllerBase
             SetCacheHeaders();
             var mimeType = GetMimeType(requestedFull);
             return PhysicalFile(requestedFull, mimeType);
+        }
+    }
+
+    private static async Task<byte[]?> ExtractLargestIcoFrameAsync(string path, CancellationToken ct)
+    {
+        try
+        {
+            var bytes = await System.IO.File.ReadAllBytesAsync(path, ct);
+            if (bytes.Length < 22) return null;
+
+            if (bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 1 || bytes[3] != 0)
+                return null;
+
+            int count = bytes[4] | (bytes[5] << 8);
+            if (count <= 0 || count > 256) return null;
+
+            byte[]? bestFrame = null;
+            int bestSize = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                int entry = 6 + i * 16;
+                if (entry + 16 > bytes.Length) break;
+
+                int size = BitConverter.ToInt32(bytes, entry + 8);
+                int offset = BitConverter.ToInt32(bytes, entry + 12);
+
+                if (size <= 0 || offset < 0 || offset + size > bytes.Length) continue;
+
+                if (size > bestSize)
+                {
+                    bestSize = size;
+                    bestFrame = bytes[offset..(offset + size)];
+                }
+            }
+
+            return bestFrame;
+        }
+        catch
+        {
+            return null;
         }
     }
 
