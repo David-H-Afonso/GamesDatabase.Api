@@ -114,6 +114,7 @@ public class ImageProxyController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Image optimisation failed for {Path}; falling back to original", imagePath);
+            SetCacheHeaders();
             var mimeType = GetMimeType(requestedFull);
             return PhysicalFile(requestedFull, mimeType);
         }
