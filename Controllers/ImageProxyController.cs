@@ -59,7 +59,7 @@ public class ImageProxyController : ControllerBase
         h = h > 0 ? Math.Clamp(h, 1, 2560) : 0;
 
         // ── Build cache path ──────────────────────────────────────────────────
-        var cacheDir  = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(imagePath) ?? "");
+        var cacheDir = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(imagePath) ?? "");
         var cacheFile = $"{Path.GetFileName(imagePath)}_{w}x{h}.webp";
         var cachePath = Path.Combine(cacheDir, cacheFile);
 
@@ -133,11 +133,11 @@ public class ImageProxyController : ControllerBase
         Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".jpg" or ".jpeg" => "image/jpeg",
-            ".png"            => "image/png",
-            ".gif"            => "image/gif",
-            ".webp"           => "image/webp",
-            ".ico"            => "image/x-icon",
-            ".bmp"            => "image/bmp",
-            _                 => "application/octet-stream",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".ico" => "image/x-icon",
+            ".bmp" => "image/bmp",
+            _ => "application/octet-stream",
         };
 }
