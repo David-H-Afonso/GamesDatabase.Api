@@ -47,14 +47,32 @@ public class ImageProxyController : ControllerBase
         w = w > 0 ? Math.Clamp(w, 1, 2560) : 0;
         h = h > 0 ? Math.Clamp(h, 1, 2560) : 0;
 
+        // ETag is derived from the source file's modification time + requested dimensions,
+        // so it changes automatically whenever the image file itself is replaced.
+        var sourceLastModified = System.IO.File.GetLastWriteTimeUtc(requestedFull);
+        var eTag = $"\"{sourceLastModified.Ticks}-{w}-{h}\"";
+
+        // Respond with 304 if the browser already has the current version.
+        var ifNoneMatch = Request.Headers["If-None-Match"].FirstOrDefault();
+        if (ifNoneMatch == eTag)
+            return StatusCode(304);
+
         var cacheDir = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(imagePath) ?? "");
         var cacheFile = $"{Path.GetFileName(imagePath)}_{w}x{h}.webp";
         var cachePath = Path.Combine(cacheDir, cacheFile);
 
         if (System.IO.File.Exists(cachePath))
         {
-            SetCacheHeaders();
-            return File(System.IO.File.OpenRead(cachePath), "image/webp");
+            // Invalidate the disk cache if the source file has been replaced.
+            var cacheWriteTime = System.IO.File.GetLastWriteTimeUtc(cachePath);
+            if (sourceLastModified <= cacheWriteTime)
+            {
+                SetCacheHeaders(eTag, sourceLastModified);
+                return File(System.IO.File.OpenRead(cachePath), "image/webp");
+            }
+
+            // Source is newer → delete stale cached entry and regenerate below.
+            try { System.IO.File.Delete(cachePath); } catch { }
         }
 
         // ICO files (Vista+ PNG-compressed frames) fail ImageSharp's default loader;
@@ -101,14 +119,14 @@ public class ImageProxyController : ControllerBase
                     _logger.LogWarning(cacheEx, "Could not write image cache for {Path}", cachePath);
                 }
 
-                SetCacheHeaders();
+                SetCacheHeaders(eTag, sourceLastModified);
                 return File(ms, "image/webp");
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Image optimisation failed for {Path}; falling back to original", imagePath);
-            SetCacheHeaders();
+            SetCacheHeaders(eTag, sourceLastModified);
             var mimeType = GetMimeType(requestedFull);
             return PhysicalFile(requestedFull, mimeType);
         }
@@ -155,9 +173,11 @@ public class ImageProxyController : ControllerBase
         }
     }
 
-    private void SetCacheHeaders()
+    private void SetCacheHeaders(string eTag, DateTime lastModified)
     {
         Response.Headers["Cache-Control"] = "public, max-age=604800, must-revalidate";
+        Response.Headers["ETag"] = eTag;
+        Response.Headers["Last-Modified"] = lastModified.ToString("R");
     }
 
     private static string GetMimeType(string path) =>
