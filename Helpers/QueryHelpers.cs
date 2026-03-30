@@ -23,8 +23,11 @@ public class GameQueryParameters : QueryParameters
     public int? MinGrade { get; set; }
     public int? MaxGrade { get; set; }
     public string? Released { get; set; }
+    public int? ReleasedYear { get; set; }
     public string? Started { get; set; }
+    public int? StartedYear { get; set; }
     public string? Finished { get; set; }
+    public int? FinishedYear { get; set; }
 
     /// <summary>
     /// Filtrar por juegos más baratos por clave. true = solo más baratos por clave, false = solo más baratos en tienda oficial, null = todos

@@ -227,14 +227,32 @@ public class GamesController : BaseApiController
             query = query.Where(g => g.Released != null && g.Released.Contains(parameters.Released));
         }
 
+        if (parameters.ReleasedYear.HasValue)
+        {
+            var yearPrefix = parameters.ReleasedYear.Value.ToString();
+            query = query.Where(g => g.Released != null && g.Released.StartsWith(yearPrefix));
+        }
+
         if (!string.IsNullOrEmpty(parameters.Started))
         {
             query = query.Where(g => g.Started != null && g.Started.Contains(parameters.Started));
         }
 
+        if (parameters.StartedYear.HasValue)
+        {
+            var yearPrefix = parameters.StartedYear.Value.ToString();
+            query = query.Where(g => g.Started != null && g.Started.StartsWith(yearPrefix));
+        }
+
         if (!string.IsNullOrEmpty(parameters.Finished))
         {
             query = query.Where(g => g.Finished != null && g.Finished.Contains(parameters.Finished));
+        }
+
+        if (parameters.FinishedYear.HasValue)
+        {
+            var yearPrefix = parameters.FinishedYear.Value.ToString();
+            query = query.Where(g => g.Finished != null && g.Finished.StartsWith(yearPrefix));
         }
 
         if (parameters.IsCheaperByKey.HasValue)
