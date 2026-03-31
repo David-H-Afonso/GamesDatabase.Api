@@ -47,10 +47,11 @@ public class ImageProxyController : ControllerBase
         w = w > 0 ? Math.Clamp(w, 1, 2560) : 0;
         h = h > 0 ? Math.Clamp(h, 1, 2560) : 0;
 
-        // ETag is derived from the source file's modification time + requested dimensions,
-        // so it changes automatically whenever the image file itself is replaced.
-        var sourceLastModified = System.IO.File.GetLastWriteTimeUtc(requestedFull);
-        var eTag = $"\"{sourceLastModified.Ticks}-{w}-{h}\"";
+        // ETag is derived from the source file's modification time, size and requested
+        // dimensions. Including the file size catches uploads that preserve timestamps.
+        var sourceInfo = new System.IO.FileInfo(requestedFull);
+        var sourceLastModified = sourceInfo.LastWriteTimeUtc;
+        var eTag = $"\"{sourceLastModified.Ticks}-{sourceInfo.Length}-{w}-{h}\"";
 
         // Respond with 304 if the browser already has the current version.
         var ifNoneMatch = Request.Headers["If-None-Match"].FirstOrDefault();
@@ -58,21 +59,23 @@ public class ImageProxyController : ControllerBase
             return StatusCode(304);
 
         var cacheDir = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(imagePath) ?? "");
-        var cacheFile = $"{Path.GetFileName(imagePath)}_{w}x{h}.webp";
+        // Include ticks + file size in the cache filename so a replaced file (even with
+        // preserved timestamp) always gets a fresh cache entry without timestamp comparisons.
+        var cacheFile = $"{Path.GetFileNameWithoutExtension(imagePath)}_{sourceLastModified.Ticks}_{sourceInfo.Length}_{w}x{h}.webp";
         var cachePath = Path.Combine(cacheDir, cacheFile);
 
         if (System.IO.File.Exists(cachePath))
         {
-            // Invalidate the disk cache if the source file has been replaced.
-            var cacheWriteTime = System.IO.File.GetLastWriteTimeUtc(cachePath);
-            if (sourceLastModified <= cacheWriteTime)
-            {
-                SetCacheHeaders(eTag, sourceLastModified);
-                return File(System.IO.File.OpenRead(cachePath), "image/webp");
-            }
+            SetCacheHeaders(eTag, sourceLastModified);
+            return File(System.IO.File.OpenRead(cachePath), "image/webp");
+        }
 
-            // Source is newer → delete stale cached entry and regenerate below.
-            try { System.IO.File.Delete(cachePath); } catch { }
+        // Delete any stale cache entries for this image (different ticks/size).
+        if (Directory.Exists(cacheDir))
+        {
+            var baseName = Path.GetFileNameWithoutExtension(imagePath) + "_";
+            foreach (var stale in Directory.EnumerateFiles(cacheDir, $"{baseName}*.webp"))
+                try { System.IO.File.Delete(stale); } catch { }
         }
 
         // ICO files (Vista+ PNG-compressed frames) fail ImageSharp's default loader;
