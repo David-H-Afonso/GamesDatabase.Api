@@ -863,6 +863,37 @@ public class DataExportController : BaseApiController
         }
     }
 
+    [HttpPost("clear-image-cache")]
+    [Authorize]
+    public IActionResult ClearImageCache()
+    {
+        var host = Request.Host.Host;
+        var isLocalHost = host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                          host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                          host.Equals("192.168.0.32", StringComparison.OrdinalIgnoreCase);
+
+        if (!isLocalHost)
+            return StatusCode(403, new { message = "Image cache clear is only available on local installations" });
+
+        var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
+        if (string.IsNullOrWhiteSpace(networkSyncPath))
+            return StatusCode(500, new { message = "NetworkSync:NetworkPath is not configured" });
+
+        var cacheDir = Path.Combine(Path.GetFullPath(networkSyncPath), "_proxy_cache");
+        if (!Directory.Exists(cacheDir))
+            return Ok(new { deletedFiles = 0, message = "Cache directory does not exist, nothing to clear." });
+
+        var deleted = 0;
+        foreach (var file in Directory.EnumerateFiles(cacheDir, "*.webp", SearchOption.AllDirectories))
+        {
+            try { System.IO.File.Delete(file); deleted++; }
+            catch { /* ignore locked files */ }
+        }
+
+        _logger.LogInformation("Image proxy cache cleared: {Count} files deleted", deleted);
+        return Ok(new { deletedFiles = deleted, message = $"Cache limpiado: {deleted} archivos eliminados." });
+    }
+
     private static string? ResolveImportString(string? csvValue, string propertyKey, GameImportConfig config)
     {
         if (config.Mode == "simple") return csvValue;
