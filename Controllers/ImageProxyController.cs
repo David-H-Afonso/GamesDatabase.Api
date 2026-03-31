@@ -175,7 +175,7 @@ public class ImageProxyController : ControllerBase
 
     private void SetCacheHeaders(string eTag, DateTime lastModified)
     {
-        Response.Headers["Cache-Control"] = "public, max-age=604800, must-revalidate";
+        Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
         Response.Headers["ETag"] = eTag;
         Response.Headers["Last-Modified"] = lastModified.ToString("R");
     }
