@@ -178,10 +178,13 @@ public class ImageProxyController : ControllerBase
 
     private void SetCacheHeaders(string eTag, DateTime lastModified)
     {
-        // "no-cache" = always validate with the server via ETag before serving from cache.
-        // With ETag the browser gets a 304 (headers only, no body retransfer) for unchanged
-        // images, so performance is unaffected while image replacements are seen immediately.
-        Response.Headers["Cache-Control"] = "public, no-cache";
+        // max-age=60: browser serves from cache with zero requests for the first minute
+        //             (covers the typical "go to details and come back" session pattern).
+        // stale-while-revalidate=604800: after 60 s the cached image is served instantly
+        //             without blocking render, while a background conditional GET (If-None-Match)
+        //             refreshes the cache entry. Changed images appear on the very next visit
+        //             after the background revalidation completes — no 200-request waterfall.
+        Response.Headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=604800";
         Response.Headers["ETag"] = eTag;
         Response.Headers["Last-Modified"] = lastModified.ToString("R");
     }
