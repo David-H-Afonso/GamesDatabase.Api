@@ -17,13 +17,16 @@ public class GamesController : BaseApiController
 {
     private readonly GamesDbContext _context;
     private readonly IViewFilterService _viewFilterService;
+    private readonly IGameHistoryService _historyService;
 
     public GamesController(
         GamesDbContext context,
-        IViewFilterService viewFilterService)
+        IViewFilterService viewFilterService,
+        IGameHistoryService historyService)
     {
         _context = context;
         _viewFilterService = viewFilterService;
+        _historyService = historyService;
     }
 
     [HttpGet]
@@ -280,6 +283,46 @@ public class GamesController : BaseApiController
             );
         }
 
+        // ─── Filtros de rejugadas ─────────────────────────────────────────────
+        var hasReplayFilter =
+            !string.IsNullOrEmpty(parameters.ReplayStartedFrom) ||
+            !string.IsNullOrEmpty(parameters.ReplayStartedTo) ||
+            !string.IsNullOrEmpty(parameters.ReplayFinishedFrom) ||
+            !string.IsNullOrEmpty(parameters.ReplayFinishedTo) ||
+            parameters.ReplayTypeId.HasValue ||
+            parameters.ReplayGradeMin.HasValue ||
+            parameters.ReplayGradeMax.HasValue;
+
+        if (hasReplayFilter)
+        {
+            var matchAll = string.Equals(parameters.ReplayMatchMode, "all", StringComparison.OrdinalIgnoreCase);
+
+            if (matchAll)
+            {
+                query = query.Where(g => g.GameReplays.Any() && g.GameReplays.All(r =>
+                    (string.IsNullOrEmpty(parameters.ReplayStartedFrom) || string.Compare(r.Started, parameters.ReplayStartedFrom, StringComparison.Ordinal) >= 0) &&
+                    (string.IsNullOrEmpty(parameters.ReplayStartedTo) || string.Compare(r.Started, parameters.ReplayStartedTo, StringComparison.Ordinal) <= 0) &&
+                    (string.IsNullOrEmpty(parameters.ReplayFinishedFrom) || string.Compare(r.Finished, parameters.ReplayFinishedFrom, StringComparison.Ordinal) >= 0) &&
+                    (string.IsNullOrEmpty(parameters.ReplayFinishedTo) || string.Compare(r.Finished, parameters.ReplayFinishedTo, StringComparison.Ordinal) <= 0) &&
+                    (!parameters.ReplayTypeId.HasValue || r.ReplayTypeId == parameters.ReplayTypeId.Value) &&
+                    (!parameters.ReplayGradeMin.HasValue || (r.Grade.HasValue && r.Grade >= parameters.ReplayGradeMin.Value)) &&
+                    (!parameters.ReplayGradeMax.HasValue || (r.Grade.HasValue && r.Grade <= parameters.ReplayGradeMax.Value))
+                ));
+            }
+            else
+            {
+                query = query.Where(g => g.GameReplays.Any(r =>
+                    (string.IsNullOrEmpty(parameters.ReplayStartedFrom) || string.Compare(r.Started, parameters.ReplayStartedFrom, StringComparison.Ordinal) >= 0) &&
+                    (string.IsNullOrEmpty(parameters.ReplayStartedTo) || string.Compare(r.Started, parameters.ReplayStartedTo, StringComparison.Ordinal) <= 0) &&
+                    (string.IsNullOrEmpty(parameters.ReplayFinishedFrom) || string.Compare(r.Finished, parameters.ReplayFinishedFrom, StringComparison.Ordinal) >= 0) &&
+                    (string.IsNullOrEmpty(parameters.ReplayFinishedTo) || string.Compare(r.Finished, parameters.ReplayFinishedTo, StringComparison.Ordinal) <= 0) &&
+                    (!parameters.ReplayTypeId.HasValue || r.ReplayTypeId == parameters.ReplayTypeId.Value) &&
+                    (!parameters.ReplayGradeMin.HasValue || (r.Grade.HasValue && r.Grade >= parameters.ReplayGradeMin.Value)) &&
+                    (!parameters.ReplayGradeMax.HasValue || (r.Grade.HasValue && r.Grade <= parameters.ReplayGradeMax.Value))
+                ));
+            }
+        }
+
         return query;
     }
 
@@ -345,10 +388,77 @@ public class GamesController : BaseApiController
         var userId = GetCurrentUserIdOrDefault(1);
 
         var game = await _context.Games
+            .Include(g => g.Status)
+            .Include(g => g.Platform)
+            .Include(g => g.PlayedStatus)
             .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
 
         if (game == null)
             return NotFound();
+
+        // Capturar nombres legibles ANTES de aplicar cambios (para historial)
+        var oldStatusName = game.Status?.Name;
+        var oldPlatformName = game.Platform?.Name;
+        var oldPlayedStatusName = game.PlayedStatus?.Name;
+
+        string? newStatusName = oldStatusName;
+        string? newPlatformName = oldPlatformName;
+        string? newPlayedStatusName = oldPlayedStatusName;
+
+        if (gameDto.TryGetProperty("statusId", out var statusIdForHistory) && statusIdForHistory.ValueKind != System.Text.Json.JsonValueKind.Null)
+        {
+            var newStatusId = statusIdForHistory.GetInt32();
+            if (newStatusId != game.StatusId)
+            {
+                var newStatus = await _context.GameStatuses.FirstOrDefaultAsync(s => s.Id == newStatusId && s.UserId == userId);
+                newStatusName = newStatus?.Name;
+            }
+        }
+
+        if (gameDto.TryGetProperty("platformId", out var platformIdForHistory))
+        {
+            var newPlatformId = platformIdForHistory.ValueKind == System.Text.Json.JsonValueKind.Null ? (int?)null : platformIdForHistory.GetInt32();
+            if (newPlatformId != game.PlatformId)
+            {
+                newPlatformName = newPlatformId.HasValue
+                    ? (await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Id == newPlatformId.Value && p.UserId == userId))?.Name
+                    : null;
+            }
+        }
+
+        if (gameDto.TryGetProperty("playedStatusId", out var playedStatusIdForHistory))
+        {
+            var newPlayedStatusId = playedStatusIdForHistory.ValueKind == System.Text.Json.JsonValueKind.Null ? (int?)null : playedStatusIdForHistory.GetInt32();
+            if (newPlayedStatusId != game.PlayedStatusId)
+            {
+                newPlayedStatusName = newPlayedStatusId.HasValue
+                    ? (await _context.GamePlayedStatuses.FirstOrDefaultAsync(ps => ps.Id == newPlayedStatusId.Value && ps.UserId == userId))?.Name
+                    : null;
+            }
+        }
+
+        // Snapshot inmutable para el historial (antes de mutar game)
+        var snapshot = new Models.Game
+        {
+            Id = game.Id,
+            Name = game.Name,
+            StatusId = game.StatusId,
+            Grade = game.Grade,
+            Critic = game.Critic,
+            CriticProvider = game.CriticProvider,
+            Story = game.Story,
+            Completion = game.Completion,
+            PlatformId = game.PlatformId,
+            Released = game.Released,
+            Started = game.Started,
+            Finished = game.Finished,
+            Comment = game.Comment,
+            PlayedStatusId = game.PlayedStatusId,
+            Logo = game.Logo,
+            Cover = game.Cover,
+            IsCheaperByKey = game.IsCheaperByKey,
+            KeyStoreUrl = game.KeyStoreUrl
+        };
 
         // Actualizar solo los campos que están presentes en el JSON
         if (gameDto.TryGetProperty("statusId", out var statusIdElement) && statusIdElement.ValueKind != System.Text.Json.JsonValueKind.Null)
@@ -503,6 +613,12 @@ public class GamesController : BaseApiController
             }
         }
 
+        await _historyService.RecordUpdatedAsync(
+            snapshot, gameDto, userId,
+            oldStatusName, newStatusName,
+            oldPlatformName, newPlatformName,
+            oldPlayedStatusName, newPlayedStatusName);
+
         return NoContent();
     }
 
@@ -580,6 +696,8 @@ public class GamesController : BaseApiController
                 .LoadAsync();
         }
 
+        await _historyService.RecordCreatedAsync(game, userId);
+
         return CreatedAtAction("GetGame", new { id = game.Id }, game.ToDto());
     }
 
@@ -593,6 +711,8 @@ public class GamesController : BaseApiController
 
         if (game == null)
             return NotFound();
+
+        await _historyService.RecordDeletedAsync(game, userId);
 
         _context.Games.Remove(game);
         await _context.SaveChangesAsync();

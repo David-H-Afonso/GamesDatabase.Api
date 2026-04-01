@@ -45,4 +45,10 @@ public class User
     public virtual ICollection<GamePlayedStatus> PlayedStatuses { get; set; } = new List<GamePlayedStatus>();
     [JsonIgnore]
     public virtual ICollection<GameView> Views { get; set; } = new List<GameView>();
+    [JsonIgnore]
+    public virtual ICollection<GameReplayType> ReplayTypes { get; set; } = new List<GameReplayType>();
+    [JsonIgnore]
+    public virtual ICollection<GameReplay> Replays { get; set; } = new List<GameReplay>();
+    [JsonIgnore]
+    public virtual ICollection<GameHistoryEntry> HistoryEntries { get; set; } = new List<GameHistoryEntry>();
 }

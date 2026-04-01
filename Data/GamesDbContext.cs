@@ -27,7 +27,7 @@ public class GamesDbContext : DbContext
     private void UpdateTimestamps()
     {
         var entities = ChangeTracker.Entries()
-            .Where(e => e.Entity is Game or GameView or User);
+            .Where(e => e.Entity is Game or GameView or User or GameReplay);
 
         foreach (var entry in entities)
         {
@@ -47,6 +47,11 @@ public class GamesDbContext : DbContext
                 {
                     user.CreatedAt = DateTime.UtcNow;
                     user.UpdatedAt = DateTime.UtcNow;
+                }
+                else if (entry.Entity is GameReplay replay && entry.State == EntityState.Added)
+                {
+                    replay.CreatedAt = DateTime.UtcNow;
+                    replay.UpdatedAt = DateTime.UtcNow;
                 }
             }
             else if (entry.State == EntityState.Modified)
@@ -88,6 +93,11 @@ public class GamesDbContext : DbContext
                     user.UpdatedAt = DateTime.UtcNow;
                     entry.Property("CreatedAt").IsModified = false;
                 }
+                else if (entry.Entity is GameReplay replayModified)
+                {
+                    replayModified.UpdatedAt = DateTime.UtcNow;
+                    entry.Property("CreatedAt").IsModified = false;
+                }
             }
         }
     }
@@ -101,6 +111,9 @@ public class GamesDbContext : DbContext
     public DbSet<GamePlayWithMapping> GamePlayWithMappings { get; set; }
     public DbSet<GameExportCache> GameExportCaches { get; set; }
     public DbSet<GameViewExportCache> GameViewExportCaches { get; set; }
+    public DbSet<GameReplayType> GameReplayTypes { get; set; }
+    public DbSet<GameReplay> GameReplays { get; set; }
+    public DbSet<GameHistoryEntry> GameHistoryEntries { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -115,6 +128,9 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<GameView>().ToTable("game_view");
         modelBuilder.Entity<GamePlayWithMapping>().ToTable("game_play_with_mapping");
         modelBuilder.Entity<GameExportCache>().ToTable("game_export_cache");
+        modelBuilder.Entity<GameReplayType>().ToTable("game_replay_type");
+        modelBuilder.Entity<GameReplay>().ToTable("game_replay");
+        modelBuilder.Entity<GameHistoryEntry>().ToTable("game_history_entry");
 
         // Configure User entity
         modelBuilder.Entity<User>(entity =>
@@ -346,6 +362,99 @@ public class GamesDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => e.GameId).IsUnique();
+        });
+
+        // Configure GameReplayType entity
+        modelBuilder.Entity<GameReplayType>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name").IsRequired();
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
+            entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
+            entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false);
+            entity.Property(e => e.ReplayType)
+                .HasColumnName("replay_type")
+                .HasConversion<int>();
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.ReplayTypes)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
+
+            // Garantiza que solo haya un tipo especial Replay por usuario
+            entity.HasIndex(e => new { e.UserId, e.ReplayType, e.IsDefault })
+                .HasFilter("is_default = 1")
+                .IsUnique();
+        });
+
+        // Configure GameReplay entity
+        modelBuilder.Entity<GameReplay>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.GameId).HasColumnName("game_id").IsRequired();
+            entity.Property(e => e.ReplayTypeId).HasColumnName("replay_type_id").IsRequired();
+            entity.Property(e => e.Started).HasColumnName("started");
+            entity.Property(e => e.Finished).HasColumnName("finished");
+            entity.Property(e => e.Grade).HasColumnName("grade");
+            entity.Property(e => e.Notes).HasColumnName("notes");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasOne(e => e.Game)
+                .WithMany(g => g.GameReplays)
+                .HasForeignKey(e => e.GameId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ReplayType)
+                .WithMany(rt => rt.Replays)
+                .HasForeignKey(e => e.ReplayTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Replays)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.GameId);
+            entity.HasIndex(e => e.UserId);
+        });
+
+        // Configure GameHistoryEntry entity
+        modelBuilder.Entity<GameHistoryEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.GameId).HasColumnName("game_id"); // nullable
+            entity.Property(e => e.GameName).HasColumnName("game_name").IsRequired();
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.Field).HasColumnName("field").IsRequired();
+            entity.Property(e => e.OldValue).HasColumnName("old_value");
+            entity.Property(e => e.NewValue).HasColumnName("new_value");
+            entity.Property(e => e.Description).HasColumnName("description").IsRequired();
+            entity.Property(e => e.ActionType).HasColumnName("action_type").IsRequired();
+            entity.Property(e => e.ChangedAt).HasColumnName("changed_at");
+
+            // ON DELETE SET NULL — historial persiste aunque el juego se borre
+            entity.HasOne(e => e.Game)
+                .WithMany()
+                .HasForeignKey(e => e.GameId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.HistoryEntries)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.GameId);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.ChangedAt);
         });
     }
 }

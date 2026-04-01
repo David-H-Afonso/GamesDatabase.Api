@@ -95,6 +95,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IZipExportService, ZipExportService>();
 builder.Services.AddScoped<INetworkSyncService, NetworkSyncService>();
+builder.Services.AddScoped<IGameHistoryService, GameHistoryService>();
 builder.Services.AddHttpContextAccessor();
 
 // Configure HttpClient for CSV exports (longer timeout)
@@ -390,6 +391,17 @@ static async Task SeedDefaultDataAsync(GamesDbContext context)
             new GamePlayedStatus { Name = "Abandoned", Color = "#a60808", SortOrder = 5, UserId = adminUser.Id }
         };
         context.GamePlayedStatuses.AddRange(playedStatuses);
+
+        var replayTypes = new[]
+        {
+            new GameReplayType { Name = "Rejugado", Color = "#61afef", SortOrder = 1, IsDefault = true, ReplayType = SpecialReplayType.Replay, UserId = adminUser.Id },
+            new GameReplayType { Name = "DLC", Color = "#c678dd", SortOrder = 2, UserId = adminUser.Id },
+            new GameReplayType { Name = "Expansión", Color = "#98c379", SortOrder = 3, UserId = adminUser.Id },
+            new GameReplayType { Name = "NG+", Color = "#e5c07b", SortOrder = 4, UserId = adminUser.Id },
+            new GameReplayType { Name = "100%", Color = "#e06c75", SortOrder = 5, UserId = adminUser.Id },
+            new GameReplayType { Name = "Logros", Color = "#56b6c2", SortOrder = 6, UserId = adminUser.Id }
+        };
+        context.GameReplayTypes.AddRange(replayTypes);
 
         await context.SaveChangesAsync();
     }
