@@ -178,7 +178,10 @@ public class ImageProxyController : ControllerBase
 
     private void SetCacheHeaders(string eTag, DateTime lastModified)
     {
-        Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+        // "no-cache" = always validate with the server via ETag before serving from cache.
+        // With ETag the browser gets a 304 (headers only, no body retransfer) for unchanged
+        // images, so performance is unaffected while image replacements are seen immediately.
+        Response.Headers["Cache-Control"] = "public, no-cache";
         Response.Headers["ETag"] = eTag;
         Response.Headers["Last-Modified"] = lastModified.ToString("R");
     }
