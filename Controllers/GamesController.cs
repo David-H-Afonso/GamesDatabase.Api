@@ -51,13 +51,13 @@ public class GamesController : BaseApiController
 
             if (parameters.ViewId.HasValue)
             {
-                gameView = await _context.GameViews.AsNoTracking().FirstOrDefaultAsync(v => v.Id == parameters.ViewId.Value);
+                gameView = await _context.GameViews.AsNoTracking().FirstOrDefaultAsync(v => v.Id == parameters.ViewId.Value && v.UserId == userId);
             }
             else if (!string.IsNullOrEmpty(parameters.ViewName))
             {
                 gameView = await _context.GameViews
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(v => v.Name == parameters.ViewName);
+                    .FirstOrDefaultAsync(v => v.Name == parameters.ViewName && v.UserId == userId);
             }
 
             if (gameView == null)
@@ -67,14 +67,24 @@ public class GamesController : BaseApiController
 
             try
             {
-                // FiltersJson historically stores an array of ViewFilter objects.
-                // Try to deserialize as List<ViewFilter> first and wrap into a ViewConfiguration.
                 if (!string.IsNullOrEmpty(gameView.FiltersJson))
                 {
-                    try
+                    // Detect format by first non-whitespace character:
+                    // '{' → ViewConfiguration (new format, may have empty filterGroups)
+                    // '[' → legacy flat array of ViewFilter
+                    var trimmed = gameView.FiltersJson.TrimStart();
+                    if (trimmed.StartsWith("{"))
+                    {
+                        var fullConfig = JsonSerializer.Deserialize<Models.ViewConfiguration>(gameView.FiltersJson);
+                        if (fullConfig != null)
+                        {
+                            viewConfiguration = fullConfig;
+                        }
+                    }
+                    else if (trimmed.StartsWith("["))
                     {
                         var filters = JsonSerializer.Deserialize<List<Models.ViewFilter>>(gameView.FiltersJson);
-                        if (filters != null)
+                        if (filters != null && filters.Any())
                         {
                             viewConfiguration = new Models.ViewConfiguration
                             {
@@ -84,16 +94,6 @@ public class GamesController : BaseApiController
                                 }
                             };
                         }
-                        else
-                        {
-                            // If that fails, try to deserialize as full ViewConfiguration
-                            viewConfiguration = JsonSerializer.Deserialize<Models.ViewConfiguration>(gameView.FiltersJson);
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // Fallback: try to deserialize as full configuration
-                        viewConfiguration = JsonSerializer.Deserialize<Models.ViewConfiguration>(gameView.FiltersJson);
                     }
                 }
 

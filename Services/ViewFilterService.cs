@@ -171,6 +171,7 @@ public class ViewFilterService : IViewFilterService
             FilterOperator.On => CreateEqualsExpression(propertyExpression, value), // Fecha exacta
             FilterOperator.Before => CreateComparisonExpression(propertyExpression, value, Expression.LessThanOrEqual), // Antes o igual
             FilterOperator.After => CreateComparisonExpression(propertyExpression, value, Expression.GreaterThanOrEqual), // Después o igual
+            FilterOperator.Between => CreateBetweenExpression(propertyExpression, value, secondValue),
             _ => throw new ArgumentException($"Operador de filtro no soportado: {filterOperator}")
         };
     }
@@ -336,6 +337,19 @@ public class ViewFilterService : IViewFilterService
     }
 
 
+
+    private Expression CreateBetweenExpression(Expression propertyExpression, object? minValue, object? maxValue)
+    {
+        if (minValue == null || maxValue == null)
+        {
+            return Expression.Constant(false);
+        }
+
+        var gteExpression = CreateComparisonExpression(propertyExpression, minValue, Expression.GreaterThanOrEqual);
+        var lteExpression = CreateComparisonExpression(propertyExpression, maxValue, Expression.LessThanOrEqual);
+
+        return Expression.AndAlso(gteExpression, lteExpression);
+    }
 
     private Expression CreateInExpression(Expression propertyExpression, object? value)
     {
