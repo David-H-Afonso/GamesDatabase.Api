@@ -100,7 +100,11 @@ public enum FilterField
     Comment,
     CriticProvider,
     CreatedAt,
-    UpdatedAt
+    UpdatedAt,
+    ReplayStarted,
+    ReplayFinished,
+    ReplayGrade,
+    ReplayTypeId
 }
 
 /// <summary>

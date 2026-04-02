@@ -68,6 +68,31 @@ public class GameReplayTypesController : BaseApiController
         return Ok(items.Select(t => t.ToDto()));
     }
 
+    [HttpGet("special")]
+    public async Task<ActionResult<GameReplayTypeDto>> GetSpecialGameReplayType()
+    {
+        var userId = GetCurrentUserIdOrDefault(1);
+        var item = await _context.GameReplayTypes
+            .FirstOrDefaultAsync(t => t.ReplayType == SpecialReplayType.Replay && t.UserId == userId);
+
+        if (item == null)
+        {
+            item = new GameReplayType
+            {
+                Name = "Rejugado",
+                Color = "#61afef",
+                SortOrder = 1,
+                IsDefault = true,
+                ReplayType = SpecialReplayType.Replay,
+                UserId = userId
+            };
+            _context.GameReplayTypes.Add(item);
+            await _context.SaveChangesAsync();
+        }
+
+        return Ok(item.ToDto());
+    }
+
     [HttpGet("{id}")]
     public async Task<ActionResult<GameReplayTypeDto>> GetGameReplayType(int id)
     {

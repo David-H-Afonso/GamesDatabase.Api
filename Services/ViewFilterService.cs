@@ -31,8 +31,16 @@ public class ViewFilterService : IViewFilterService
                 // Combinar filtros dentro del grupo
                 foreach (var filter in group.Filters)
                 {
-                    Expression propertyExpression = GetPropertyExpression(parameter, filter.Field);
-                    Expression filterExpression = CreateFilterExpression(propertyExpression, filter.Operator, filter.Value, filter.SecondValue);
+                    Expression filterExpression;
+                    if (IsReplayField(filter.Field))
+                    {
+                        filterExpression = CreateReplayFilterExpression(parameter, filter);
+                    }
+                    else
+                    {
+                        Expression propertyExpression = GetPropertyExpression(parameter, filter.Field);
+                        filterExpression = CreateFilterExpression(propertyExpression, filter.Operator, filter.Value, filter.SecondValue);
+                    }
 
                     if (groupExpression == null)
                     {
@@ -85,6 +93,35 @@ public class ViewFilterService : IViewFilterService
 
         var lambda = Expression.Lambda<Func<Game, bool>>(filterExpression, parameter);
         return query.Where(lambda);
+    }
+
+    private static bool IsReplayField(FilterField field) =>
+        field is FilterField.ReplayStarted or FilterField.ReplayFinished
+            or FilterField.ReplayGrade or FilterField.ReplayTypeId;
+
+    private Expression CreateReplayFilterExpression(ParameterExpression gameParam, ViewFilter filter)
+    {
+        var replayParam = Expression.Parameter(typeof(GameReplay), "r");
+
+        Expression replayProperty = filter.Field switch
+        {
+            FilterField.ReplayStarted => Expression.Property(replayParam, nameof(GameReplay.Started)),
+            FilterField.ReplayFinished => Expression.Property(replayParam, nameof(GameReplay.Finished)),
+            FilterField.ReplayGrade => Expression.Property(replayParam, nameof(GameReplay.Grade)),
+            FilterField.ReplayTypeId => Expression.Property(replayParam, nameof(GameReplay.ReplayTypeId)),
+            _ => throw new ArgumentException($"Campo de replay no soportado: {filter.Field}")
+        };
+
+        Expression predicateExpression = CreateFilterExpression(replayProperty, filter.Operator, filter.Value, filter.SecondValue);
+        var predicateLambda = Expression.Lambda<Func<GameReplay, bool>>(predicateExpression, replayParam);
+
+        var gameReplaysNav = Expression.Property(gameParam, nameof(Game.GameReplays));
+        var anyMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m => m.Name == "Any" && m.GetParameters().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay));
+
+        return Expression.Call(anyMethod, gameReplaysNav, predicateLambda);
     }
 
     private Expression GetPropertyExpression(ParameterExpression parameter, FilterField field)

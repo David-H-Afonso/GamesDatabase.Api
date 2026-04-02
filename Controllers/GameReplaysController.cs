@@ -9,7 +9,7 @@ using GamesDatabase.Api.Helpers;
 namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/games/{gameId}/replays")]
 [Authorize]
 public class GameReplaysController : BaseApiController
 {
@@ -21,7 +21,7 @@ public class GameReplaysController : BaseApiController
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<GameReplayDto>>> GetReplaysForGame([FromQuery] int gameId)
+    public async Task<ActionResult<IEnumerable<GameReplayDto>>> GetReplaysForGame(int gameId)
     {
         var userId = GetCurrentUserIdOrDefault(1);
 
@@ -39,11 +39,11 @@ public class GameReplaysController : BaseApiController
     }
 
     [HttpGet("{id}")]
-    public async Task<ActionResult<GameReplayDto>> GetGameReplay(int id)
+    public async Task<ActionResult<GameReplayDto>> GetGameReplay(int gameId, int id)
     {
         var userId = GetCurrentUserIdOrDefault(1);
         var replay = await _context.GameReplays
-            .Where(r => r.Id == id && r.UserId == userId)
+            .Where(r => r.Id == id && r.GameId == gameId && r.UserId == userId)
             .Include(r => r.ReplayType)
             .FirstOrDefaultAsync();
 
@@ -51,11 +51,11 @@ public class GameReplaysController : BaseApiController
     }
 
     [HttpPost]
-    public async Task<ActionResult<GameReplayDto>> PostGameReplay(GameReplayCreateDto createDto)
+    public async Task<ActionResult<GameReplayDto>> PostGameReplay(int gameId, GameReplayCreateDto createDto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
 
-        var gameExists = await _context.Games.AnyAsync(g => g.Id == createDto.GameId && g.UserId == userId);
+        var gameExists = await _context.Games.AnyAsync(g => g.Id == gameId && g.UserId == userId);
         if (!gameExists)
             return BadRequest(new { message = "Juego no encontrado" });
 
@@ -79,7 +79,7 @@ public class GameReplaysController : BaseApiController
 
         var replay = new GameReplay
         {
-            GameId = createDto.GameId,
+            GameId = gameId,
             ReplayTypeId = replayTypeId,
             Started = createDto.Started,
             Finished = createDto.Finished,
@@ -93,15 +93,15 @@ public class GameReplaysController : BaseApiController
 
         await _context.Entry(replay).Reference(r => r.ReplayType).LoadAsync();
 
-        return CreatedAtAction(nameof(GetGameReplay), new { id = replay.Id }, replay.ToDto());
+        return CreatedAtAction(nameof(GetGameReplay), new { gameId, id = replay.Id }, replay.ToDto());
     }
 
     [HttpPut("{id}")]
-    public async Task<IActionResult> PutGameReplay(int id, GameReplayUpdateDto updateDto)
+    public async Task<IActionResult> PutGameReplay(int gameId, int id, GameReplayUpdateDto updateDto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
         var replay = await _context.GameReplays
-            .FirstOrDefaultAsync(r => r.Id == id && r.UserId == userId);
+            .FirstOrDefaultAsync(r => r.Id == id && r.GameId == gameId && r.UserId == userId);
 
         if (replay == null)
             return NotFound();
@@ -125,11 +125,11 @@ public class GameReplaysController : BaseApiController
     }
 
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteGameReplay(int id)
+    public async Task<IActionResult> DeleteGameReplay(int gameId, int id)
     {
         var userId = GetCurrentUserIdOrDefault(1);
         var replay = await _context.GameReplays
-            .FirstOrDefaultAsync(r => r.Id == id && r.UserId == userId);
+            .FirstOrDefaultAsync(r => r.Id == id && r.GameId == gameId && r.UserId == userId);
 
         if (replay == null)
             return NotFound();

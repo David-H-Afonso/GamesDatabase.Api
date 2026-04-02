@@ -351,6 +351,18 @@ public class UsersController : ControllerBase
             _context.GamePlayedStatuses.AddRange(playedStatuses);
         }
 
+        if (!await _context.GameReplayTypes.AnyAsync(rt => rt.UserId == userId))
+        {
+            _context.GameReplayTypes.AddRange(
+                new GameReplayType { Name = "Rejugado", Color = "#61afef", SortOrder = 1, IsDefault = true, ReplayType = SpecialReplayType.Replay, UserId = userId },
+                new GameReplayType { Name = "DLC", Color = "#c678dd", SortOrder = 2, UserId = userId },
+                new GameReplayType { Name = "Expansión", Color = "#98c379", SortOrder = 3, UserId = userId },
+                new GameReplayType { Name = "NG+", Color = "#e5c07b", SortOrder = 4, UserId = userId },
+                new GameReplayType { Name = "100%", Color = "#e06c75", SortOrder = 5, UserId = userId },
+                new GameReplayType { Name = "Logros", Color = "#56b6c2", SortOrder = 6, UserId = userId }
+            );
+        }
+
         await _context.SaveChangesAsync();
     }
 

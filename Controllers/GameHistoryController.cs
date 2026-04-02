@@ -9,7 +9,7 @@ using GamesDatabase.Api.Models;
 namespace GamesDatabase.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api")]
 [Authorize]
 public class GameHistoryController : BaseApiController
 {
@@ -23,7 +23,7 @@ public class GameHistoryController : BaseApiController
     /// <summary>
     /// Historial de un juego concreto.
     /// </summary>
-    [HttpGet("games/{gameId}")]
+    [HttpGet("games/{gameId}/history")]
     public async Task<ActionResult<PagedResult<GameHistoryEntryDto>>> GetGameHistory(
         int gameId,
         [FromQuery] int page = 1,
@@ -56,7 +56,7 @@ public class GameHistoryController : BaseApiController
     /// Auditoría global: todos los cambios del usuario autenticado en todos sus juegos.
     /// Incluye entradas de juegos ya eliminados (GameId = null, GameName persiste).
     /// </summary>
-    [HttpGet]
+    [HttpGet("games/history")]
     public async Task<ActionResult<PagedResult<GameHistoryEntryDto>>> GetAllHistory(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -102,7 +102,7 @@ public class GameHistoryController : BaseApiController
         });
     }
 
-    [HttpDelete("games/{gameId}/entries/{entryId}")]
+    [HttpDelete("games/{gameId}/history/{entryId}")]
     public async Task<IActionResult> DeleteHistoryEntry(int gameId, int entryId)
     {
         var userId = GetCurrentUserIdOrDefault(1);
@@ -118,7 +118,7 @@ public class GameHistoryController : BaseApiController
         return NoContent();
     }
 
-    [HttpDelete("games/{gameId}")]
+    [HttpDelete("games/{gameId}/history")]
     public async Task<IActionResult> DeleteAllGameHistory(int gameId)
     {
         var userId = GetCurrentUserIdOrDefault(1);
@@ -139,7 +139,7 @@ public class GameHistoryController : BaseApiController
     /// <summary>
     /// Admin: historial global de todos los usuarios. Solo accesible con rol Admin.
     /// </summary>
-    [HttpGet("admin")]
+    [HttpGet("admin/history")]
     public async Task<ActionResult<PagedResult<GameHistoryEntryDto>>> GetAdminHistory(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,

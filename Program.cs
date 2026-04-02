@@ -323,6 +323,7 @@ using (var scope = app.Services.CreateScope())
     {
         context.Database.Migrate();
         await SeedDefaultDataAsync(context);
+        await SeedMissingReplayTypesAsync(context);
     }
     catch (Exception)
     {
@@ -405,6 +406,28 @@ static async Task SeedDefaultDataAsync(GamesDbContext context)
 
         await context.SaveChangesAsync();
     }
+}
+
+static async Task SeedMissingReplayTypesAsync(GamesDbContext context)
+{
+    var usersWithoutReplayTypes = await context.Users
+        .Where(u => !context.GameReplayTypes.Any(rt => rt.UserId == u.Id))
+        .ToListAsync();
+
+    foreach (var user in usersWithoutReplayTypes)
+    {
+        context.GameReplayTypes.AddRange(
+            new GameReplayType { Name = "Rejugado", Color = "#61afef", SortOrder = 1, IsDefault = true, ReplayType = SpecialReplayType.Replay, UserId = user.Id },
+            new GameReplayType { Name = "DLC", Color = "#c678dd", SortOrder = 2, UserId = user.Id },
+            new GameReplayType { Name = "Expansión", Color = "#98c379", SortOrder = 3, UserId = user.Id },
+            new GameReplayType { Name = "NG+", Color = "#e5c07b", SortOrder = 4, UserId = user.Id },
+            new GameReplayType { Name = "100%", Color = "#e06c75", SortOrder = 5, UserId = user.Id },
+            new GameReplayType { Name = "Logros", Color = "#56b6c2", SortOrder = 6, UserId = user.Id }
+        );
+    }
+
+    if (usersWithoutReplayTypes.Any())
+        await context.SaveChangesAsync();
 }
 
 // Game images are now served by ImageProxyController at /game-images.

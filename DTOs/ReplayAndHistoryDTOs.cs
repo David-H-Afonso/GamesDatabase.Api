@@ -54,7 +54,6 @@ public class GameReplayDto
 
 public class GameReplayCreateDto
 {
-    public int GameId { get; set; }
     public int? ReplayTypeId { get; set; } // si null, backend usa el tipo especial Replay
     public string? Started { get; set; }
     public string? Finished { get; set; }
