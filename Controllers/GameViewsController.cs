@@ -26,15 +26,10 @@ public class GameViewsController : BaseApiController
     /// Obtiene todas las vistas de juegos con resumen
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<GameViewSummaryDto>>> GetGameViews([FromQuery] bool includePrivate = false)
+    public async Task<ActionResult<IEnumerable<GameViewSummaryDto>>> GetGameViews()
     {
         var userId = GetCurrentUserIdOrDefault(1);
         var query = _context.GameViews.Where(v => v.UserId == userId);
-
-        if (!includePrivate)
-        {
-            query = query.Where(v => v.IsPublic);
-        }
 
         var views = await query
             .OrderBy(v => v.SortOrder)

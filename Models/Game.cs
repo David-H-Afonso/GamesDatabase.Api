@@ -62,6 +62,9 @@ public class Game
     [JsonIgnore]
     public virtual ICollection<GamePlayWithMapping> GamePlayWiths { get; set; } = new List<GamePlayWithMapping>();
 
+    [JsonIgnore]
+    public virtual ICollection<GameReplay> GameReplays { get; set; } = new List<GameReplay>();
+
     /// <summary>
     /// Calcula el score automáticamente basado en la fórmula: 10 * (Critic / 100) * (10 / (Story + 10))
     /// </summary>

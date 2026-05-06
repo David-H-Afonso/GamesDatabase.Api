@@ -288,6 +288,67 @@ public class DataExportController : BaseApiController
                     : "";
                 allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "" });
             }
+
+            // ReplayType catalog
+            var replayTypes = await _context.GameReplayTypes.Where(r => r.UserId == userId).OrderBy(r => r.SortOrder).ThenBy(r => EF.Functions.Collate(r.Name, "NOCASE")).ToListAsync();
+            foreach (var rt in replayTypes)
+            {
+                allRecords.Add(new FullExportModel
+                {
+                    Type = "ReplayType",
+                    Name = rt.Name,
+                    Color = rt.Color,
+                    IsActive = rt.IsActive.ToString(),
+                    SortOrder = rt.SortOrder.ToString(),
+                    IsDefault = rt.IsDefault.ToString(),
+                    StatusType = rt.ReplayType.ToString()   // reuse StatusType column for SpecialReplayType
+                });
+            }
+
+            // Replays (one row per replay, Type="Replay")
+            // Name=GameName, Status=ReplayTypeName, Started/Finished/Grade, Comment=Notes
+            var replays = await _context.GameReplays
+                .Where(r => r.UserId == userId)
+                .Include(r => r.Game)
+                .Include(r => r.ReplayType)
+                .OrderBy(r => r.Game.Name)
+                .ThenBy(r => r.CreatedAt)
+                .ToListAsync();
+            foreach (var r in replays)
+            {
+                allRecords.Add(new FullExportModel
+                {
+                    Type = "Replay",
+                    Name = r.Game?.Name ?? "",
+                    Status = r.ReplayType?.Name ?? "",
+                    Started = r.Started ?? "",
+                    Finished = r.Finished ?? "",
+                    Grade = r.Grade?.ToString() ?? "",
+                    Comment = r.Notes ?? ""
+                });
+            }
+
+            // History entries (Type="History")
+            // Name=GameName, Status=ActionType, Started=ChangedAt, HistoryField, HistoryOldValue, HistoryNewValue
+            var historyEntries = await _context.GameHistoryEntries
+                .Where(h => h.UserId == userId)
+                .OrderBy(h => h.GameName)
+                .ThenBy(h => h.ChangedAt)
+                .ToListAsync();
+            foreach (var h in historyEntries)
+            {
+                allRecords.Add(new FullExportModel
+                {
+                    Type = "History",
+                    Name = h.GameName,
+                    Status = h.ActionType,
+                    Started = h.ChangedAt.ToString("O"),   // ISO 8601 round-trip format
+                    HistoryField = h.Field,
+                    HistoryOldValue = h.OldValue ?? "",
+                    HistoryNewValue = h.NewValue ?? ""
+                });
+            }
+
             using var memoryStream = new MemoryStream();
             using var writer = new StreamWriter(memoryStream, Encoding.UTF8);
             using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture) { Delimiter = _exportSettings.CsvDelimiter });
@@ -311,7 +372,7 @@ public class DataExportController : BaseApiController
         try
         {
             var userId = GetCurrentUserIdOrDefault(1);
-            var results = new { platformsImported = 0, platformsUpdated = 0, statusesImported = 0, statusesUpdated = 0, playWithsImported = 0, playWithsUpdated = 0, playedStatusesImported = 0, playedStatusesUpdated = 0, viewsImported = 0, viewsUpdated = 0, gamesImported = 0, gamesUpdated = 0, errors = new List<string>() };
+            var results = new { platformsImported = 0, platformsUpdated = 0, statusesImported = 0, statusesUpdated = 0, playWithsImported = 0, playWithsUpdated = 0, playedStatusesImported = 0, playedStatusesUpdated = 0, viewsImported = 0, viewsUpdated = 0, gamesImported = 0, gamesUpdated = 0, replayTypesImported = 0, replayTypesUpdated = 0, replaysImported = 0, replaysUpdated = 0, historyImported = 0, errors = new List<string>() };
             using var stream = csvFile.OpenReadStream();
             using var reader = new StreamReader(stream, Encoding.UTF8);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture) { Delimiter = _exportSettings.CsvDelimiter, HeaderValidated = null, MissingFieldFound = null });
@@ -322,6 +383,9 @@ public class DataExportController : BaseApiController
             var playedStatuses = allRecords.Where(r => r.Type == "PlayedStatus").ToList();
             var views = allRecords.Where(r => r.Type == "View").ToList();
             var games = allRecords.Where(r => r.Type == "Game").ToList();
+            var replayTypesRecords = allRecords.Where(r => r.Type == "ReplayType").ToList();
+            var replaysRecords = allRecords.Where(r => r.Type == "Replay").ToList();
+            var historyRecords = allRecords.Where(r => r.Type == "History").ToList();
             foreach (var record in platforms)
             {
                 if (string.IsNullOrWhiteSpace(record.Name)) continue;
@@ -546,7 +610,184 @@ public class DataExportController : BaseApiController
                     _context.ChangeTracker.Clear();
                 }
             }
-            return Ok(new { message = "Importación completa finalizada (modo MERGE)", catalogs = new { platforms = new { imported = results.platformsImported, updated = results.platformsUpdated }, statuses = new { imported = results.statusesImported, updated = results.statusesUpdated }, playWiths = new { imported = results.playWithsImported, updated = results.playWithsUpdated }, playedStatuses = new { imported = results.playedStatusesImported, updated = results.playedStatusesUpdated } }, views = new { imported = results.viewsImported, updated = results.viewsUpdated }, games = new { imported = results.gamesImported, updated = results.gamesUpdated }, errors = results.errors.Count > 0 ? results.errors : null });
+
+            // Import ReplayTypes
+            foreach (var record in replayTypesRecords)
+            {
+                if (string.IsNullOrWhiteSpace(record.Name)) continue;
+                SpecialReplayType specialReplayType = SpecialReplayType.None;
+                if (!string.IsNullOrWhiteSpace(record.StatusType))
+                    Enum.TryParse<SpecialReplayType>(record.StatusType, out specialReplayType);
+
+                GameReplayType? existing = null;
+                if (specialReplayType != SpecialReplayType.None && bool.Parse(record.IsDefault ?? "false"))
+                {
+                    existing = await _context.GameReplayTypes.FirstOrDefaultAsync(rt =>
+                        rt.ReplayType == specialReplayType && rt.IsDefault && rt.UserId == userId);
+                }
+                else
+                {
+                    existing = await _context.GameReplayTypes.FirstOrDefaultAsync(rt =>
+                        rt.Name.ToLower() == record.Name.ToLower() && rt.UserId == userId);
+                }
+
+                if (existing != null)
+                {
+                    existing.Name = record.Name;
+                    existing.Color = record.Color;
+                    existing.IsActive = bool.Parse(record.IsActive ?? "true");
+                    existing.SortOrder = int.Parse(record.SortOrder ?? "0");
+                    existing.IsDefault = bool.Parse(record.IsDefault ?? "false");
+                    existing.ReplayType = specialReplayType;
+                    results = results with { replayTypesUpdated = results.replayTypesUpdated + 1 };
+                }
+                else
+                {
+                    _context.GameReplayTypes.Add(new GameReplayType
+                    {
+                        UserId = userId,
+                        Name = record.Name,
+                        Color = record.Color,
+                        IsActive = bool.Parse(record.IsActive ?? "true"),
+                        SortOrder = int.Parse(record.SortOrder ?? "0"),
+                        IsDefault = bool.Parse(record.IsDefault ?? "false"),
+                        ReplayType = specialReplayType
+                    });
+                    results = results with { replayTypesImported = results.replayTypesImported + 1 };
+                }
+            }
+            await _context.SaveChangesAsync();
+
+            // Import Replays
+            // Merge strategy: match by GameName + ReplayTypeName + Started (all non-null/non-empty)
+            foreach (var record in replaysRecords)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(record.Name)) continue;
+                    var game = await _context.Games.FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower() && g.UserId == userId);
+                    if (game == null) { results.errors.Add($"Replay: Game '{record.Name}' not found"); continue; }
+
+                    var replayTypeName = record.Status ?? "";
+                    var replayType = string.IsNullOrWhiteSpace(replayTypeName)
+                        ? await _context.GameReplayTypes.FirstOrDefaultAsync(rt => rt.IsDefault && rt.UserId == userId)
+                        : await _context.GameReplayTypes.FirstOrDefaultAsync(rt => rt.Name.ToLower() == replayTypeName.ToLower() && rt.UserId == userId);
+                    if (replayType == null) { results.errors.Add($"Replay: ReplayType '{replayTypeName}' not found for game '{record.Name}'"); continue; }
+
+                    // Try to find an existing replay for merge (match by game + type + started)
+                    GameReplay? existingReplay = null;
+                    if (!string.IsNullOrWhiteSpace(record.Started))
+                    {
+                        existingReplay = await _context.GameReplays.FirstOrDefaultAsync(r =>
+                            r.GameId == game.Id && r.ReplayTypeId == replayType.Id &&
+                            r.Started == record.Started && r.UserId == userId);
+                    }
+
+                    if (existingReplay != null)
+                    {
+                        existingReplay.Finished = string.IsNullOrWhiteSpace(record.Finished) ? null : record.Finished;
+                        existingReplay.Grade = ParseNullableInt(record.Grade);
+                        existingReplay.Notes = string.IsNullOrWhiteSpace(record.Comment) ? null : record.Comment;
+                        existingReplay.UpdatedAt = DateTime.UtcNow;
+                        results = results with { replaysUpdated = results.replaysUpdated + 1 };
+                    }
+                    else
+                    {
+                        _context.GameReplays.Add(new GameReplay
+                        {
+                            UserId = userId,
+                            GameId = game.Id,
+                            ReplayTypeId = replayType.Id,
+                            Started = string.IsNullOrWhiteSpace(record.Started) ? null : record.Started,
+                            Finished = string.IsNullOrWhiteSpace(record.Finished) ? null : record.Finished,
+                            Grade = ParseNullableInt(record.Grade),
+                            Notes = string.IsNullOrWhiteSpace(record.Comment) ? null : record.Comment,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                        results = results with { replaysImported = results.replaysImported + 1 };
+                    }
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    results.errors.Add($"Error processing replay for '{record.Name}': {ex.Message}");
+                    _logger.LogError(ex, "Error processing replay for game: {GameName}", record.Name);
+                    _context.ChangeTracker.Clear();
+                }
+            }
+
+            // Import History entries
+            // Merge strategy: skip if exact match exists (GameName + ActionType + Field + OldValue + NewValue + ChangedAt)
+            foreach (var record in historyRecords)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(record.Name)) continue;
+                    if (!DateTime.TryParse(record.Started, null, System.Globalization.DateTimeStyles.RoundtripKind, out var changedAt))
+                        continue; // Skip if date is invalid
+
+                    var actionType = record.Status ?? "Updated";
+                    var field = record.HistoryField ?? "";
+                    var oldValue = string.IsNullOrWhiteSpace(record.HistoryOldValue) ? null : record.HistoryOldValue;
+                    var newValue = string.IsNullOrWhiteSpace(record.HistoryNewValue) ? null : record.HistoryNewValue;
+
+                    // Check if this exact entry already exists
+                    var exists = await _context.GameHistoryEntries.AnyAsync(h =>
+                        h.GameName == record.Name && h.UserId == userId &&
+                        h.ActionType == actionType && h.Field == field &&
+                        h.OldValue == oldValue && h.NewValue == newValue &&
+                        h.ChangedAt == changedAt);
+
+                    if (!exists)
+                    {
+                        // Try to find the game (may be null if deleted)
+                        var game = await _context.Games.FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower() && g.UserId == userId);
+                        _context.GameHistoryEntries.Add(new GameHistoryEntry
+                        {
+                            UserId = userId,
+                            GameId = game?.Id,
+                            GameName = record.Name,
+                            ActionType = actionType,
+                            Field = field,
+                            OldValue = oldValue,
+                            NewValue = newValue,
+                            Description = $"{field}: {oldValue} → {newValue}",
+                            ChangedAt = changedAt
+                        });
+                        results = results with { historyImported = results.historyImported + 1 };
+                    }
+
+                    // Batch saves every 50 entries to avoid memory issues
+                    if (results.historyImported % 50 == 0)
+                        await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    results.errors.Add($"Error processing history for '{record.Name}': {ex.Message}");
+                    _logger.LogError(ex, "Error processing history for game: {GameName}", record.Name);
+                    _context.ChangeTracker.Clear();
+                }
+            }
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Importación completa finalizada (modo MERGE)",
+                catalogs = new
+                {
+                    platforms = new { imported = results.platformsImported, updated = results.platformsUpdated },
+                    statuses = new { imported = results.statusesImported, updated = results.statusesUpdated },
+                    playWiths = new { imported = results.playWithsImported, updated = results.playWithsUpdated },
+                    playedStatuses = new { imported = results.playedStatusesImported, updated = results.playedStatusesUpdated },
+                    replayTypes = new { imported = results.replayTypesImported, updated = results.replayTypesUpdated }
+                },
+                views = new { imported = results.viewsImported, updated = results.viewsUpdated },
+                games = new { imported = results.gamesImported, updated = results.gamesUpdated },
+                replays = new { imported = results.replaysImported, updated = results.replaysUpdated },
+                history = new { imported = results.historyImported },
+                errors = results.errors.Count > 0 ? results.errors : null
+            });
         }
         catch (Exception ex)
         {
@@ -956,6 +1197,12 @@ public class FullExportModel
     public string? SortingJson { get; set; }
     public string? IsPublic { get; set; }
     public string? CreatedBy { get; set; }
+    // Replay fields (Type="Replay"): Name=GameName, Status=ReplayTypeName, Started/Finished/Grade/Comment=Notes
+    // ReplayType catalog fields (Type="ReplayType"): Name/Color/IsActive/SortOrder/IsDefault/StatusType=SpecialReplayType
+    // History fields (Type="History")
+    public string? HistoryField { get; set; }
+    public string? HistoryOldValue { get; set; }
+    public string? HistoryNewValue { get; set; }
 }
 
 public class UpdateImageUrlsResult

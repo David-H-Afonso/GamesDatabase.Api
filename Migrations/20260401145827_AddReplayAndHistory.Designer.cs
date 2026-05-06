@@ -3,6 +3,7 @@ using System;
 using GamesDatabase.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,83 +11,14 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GamesDatabase.Api.Migrations
 {
     [DbContext(typeof(GamesDbContext))]
-    partial class GamesDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260401145827_AddReplayAndHistory")]
+    partial class AddReplayAndHistory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
-
-            modelBuilder.Entity("GamesDatabase.Api.Models.BackupSchedule", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("id");
-
-                    b.Property<int>("BackupHour")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(3)
-                        .HasColumnName("backup_hour");
-
-                    b.Property<int>("BackupMinute")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(0)
-                        .HasColumnName("backup_minute");
-
-                    b.Property<string>("BackupType")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasDefaultValue("full")
-                        .HasColumnName("backup_type");
-
-                    b.Property<string>("DestinationPath")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasDefaultValue("/backups")
-                        .HasColumnName("destination_path");
-
-                    b.Property<bool>("IsEnabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_enabled");
-
-                    b.Property<DateTime?>("LastRunAt")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("last_run_at");
-
-                    b.Property<string>("LastRunMessage")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("last_run_message");
-
-                    b.Property<string>("LastRunStatus")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasDefaultValue("never")
-                        .HasColumnName("last_run_status");
-
-                    b.Property<int>("RetentionCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(7)
-                        .HasColumnName("retention_count");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("backup_schedule", (string)null);
-                });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.Game", b =>
                 {
@@ -778,17 +710,6 @@ namespace GamesDatabase.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("user", (string)null);
-                });
-
-            modelBuilder.Entity("GamesDatabase.Api.Models.BackupSchedule", b =>
-                {
-                    b.HasOne("GamesDatabase.Api.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Models.Game", b =>

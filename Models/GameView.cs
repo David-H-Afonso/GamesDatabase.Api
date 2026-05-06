@@ -75,7 +75,8 @@ public enum FilterOperator
     // Operadores específicos para fechas
     On,        // Fecha exacta (igual que Equals pero más semántico)
     Before,    // Antes de esta fecha (incluyendo la fecha) - equivale a LessThanOrEqual
-    After      // Después de esta fecha (incluyendo la fecha) - equivale a GreaterThanOrEqual
+    After,     // Después de esta fecha (incluyendo la fecha) - equivale a GreaterThanOrEqual
+    Between    // Entre dos valores (usa Value y SecondValue)
 }
 
 /// <summary>
@@ -100,7 +101,11 @@ public enum FilterField
     Comment,
     CriticProvider,
     CreatedAt,
-    UpdatedAt
+    UpdatedAt,
+    ReplayStarted,
+    ReplayFinished,
+    ReplayGrade,
+    ReplayTypeId
 }
 
 /// <summary>

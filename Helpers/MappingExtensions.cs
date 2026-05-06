@@ -156,4 +156,53 @@ public static class MappingExtensions
             Color = playedStatus.Color
         };
     }
+
+    public static GameReplayTypeDto ToDto(this GameReplayType replayType)
+    {
+        return new GameReplayTypeDto
+        {
+            Id = replayType.Id,
+            Name = replayType.Name,
+            SortOrder = replayType.SortOrder,
+            IsActive = replayType.IsActive,
+            Color = replayType.Color,
+            IsDefault = replayType.IsDefault,
+            ReplayType = replayType.ReplayType.ToString(),
+            IsSpecialType = replayType.IsSpecialType
+        };
+    }
+
+    public static GameReplayDto ToDto(this GameReplay replay)
+    {
+        return new GameReplayDto
+        {
+            Id = replay.Id,
+            GameId = replay.GameId,
+            ReplayTypeId = replay.ReplayTypeId,
+            ReplayTypeName = replay.ReplayType?.Name,
+            ReplayTypeColor = replay.ReplayType?.Color,
+            Started = replay.Started,
+            Finished = replay.Finished,
+            Grade = replay.Grade,
+            Notes = replay.Notes,
+            CreatedAt = replay.CreatedAt,
+            UpdatedAt = replay.UpdatedAt
+        };
+    }
+
+    public static GameHistoryEntryDto ToDto(this GameHistoryEntry entry)
+    {
+        return new GameHistoryEntryDto
+        {
+            Id = entry.Id,
+            GameId = entry.GameId,
+            GameName = entry.GameName,
+            Field = entry.Field,
+            OldValue = entry.OldValue,
+            NewValue = entry.NewValue,
+            Description = entry.Description,
+            ActionType = entry.ActionType,
+            ChangedAt = entry.ChangedAt
+        };
+    }
 }

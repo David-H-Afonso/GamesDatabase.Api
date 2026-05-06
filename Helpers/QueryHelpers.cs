@@ -53,6 +53,22 @@ public class GameQueryParameters : QueryParameters
     /// Nombre de la vista a aplicar. Si se especifica, se ignorarán otros filtros y ordenamientos
     /// </summary>
     public string? ViewName { get; set; }
+
+    // ─── Filtros de rejugadas ─────────────────────────────────────────────────
+
+    public string? ReplayStartedFrom { get; set; }
+    public string? ReplayStartedTo { get; set; }
+    public string? ReplayFinishedFrom { get; set; }
+    public string? ReplayFinishedTo { get; set; }
+    public int? ReplayTypeId { get; set; }
+    public int? ReplayGradeMin { get; set; }
+    public int? ReplayGradeMax { get; set; }
+
+    /// <summary>
+    /// "any" (default): alguna rejugada cumple el filtro.
+    /// "all": todas las rejugadas deben cumplir el filtro.
+    /// </summary>
+    public string? ReplayMatchMode { get; set; }
 }
 
 public class PagedResult<T>
