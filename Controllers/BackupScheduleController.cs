@@ -35,6 +35,8 @@ public class BackupScheduleController : BaseApiController
         string BackupType,
         string DestinationPath,
         int RetentionCount,
+        string FileNamePrefix,
+        string FileNameSuffix,
         DateTime? LastRunAt,
         string LastRunStatus,
         string? LastRunMessage
@@ -46,7 +48,9 @@ public class BackupScheduleController : BaseApiController
         int BackupMinute,
         string BackupType,
         string DestinationPath,
-        int RetentionCount
+        int RetentionCount,
+        string FileNamePrefix,
+        string FileNameSuffix
     );
 
     // ── GET current config ────────────────────────────────────────────────────
@@ -58,7 +62,7 @@ public class BackupScheduleController : BaseApiController
         var userId = GetCurrentUserIdOrDefault(1);
         var schedule = await _context.BackupSchedules.FirstOrDefaultAsync(s => s.UserId == userId);
         if (schedule == null)
-            return Ok(new BackupScheduleDto(false, 3, 0, "full", "/backups", 7, null, "never", null));
+            return Ok(new BackupScheduleDto(false, 3, 0, "full", "/backups", 7, "", "", null, "never", null));
 
         return Ok(ToDto(schedule));
     }
@@ -96,6 +100,8 @@ public class BackupScheduleController : BaseApiController
         schedule.BackupType = req.BackupType;
         schedule.DestinationPath = req.DestinationPath;
         schedule.RetentionCount = req.RetentionCount;
+        schedule.FileNamePrefix = req.FileNamePrefix ?? "";
+        schedule.FileNameSuffix = req.FileNameSuffix ?? "";
 
         await _context.SaveChangesAsync();
         _logger.LogInformation("Backup schedule updated for user {UserId}: enabled={Enabled} at {H:D2}:{M:D2} UTC",
@@ -125,7 +131,9 @@ public class BackupScheduleController : BaseApiController
                 BackupMinute = 0,
                 BackupType = "full",
                 DestinationPath = "/backups",
-                RetentionCount = 7
+                RetentionCount = 7,
+                FileNamePrefix = "",
+                FileNameSuffix = ""
             };
             _context.BackupSchedules.Add(schedule);
             await _context.SaveChangesAsync();
@@ -164,7 +172,8 @@ public class BackupScheduleController : BaseApiController
 
     private static BackupScheduleDto ToDto(BackupSchedule s) => new(
         s.IsEnabled, s.BackupHour, s.BackupMinute, s.BackupType,
-        s.DestinationPath, s.RetentionCount, s.LastRunAt, s.LastRunStatus, s.LastRunMessage);
+        s.DestinationPath, s.RetentionCount, s.FileNamePrefix, s.FileNameSuffix,
+        s.LastRunAt, s.LastRunStatus, s.LastRunMessage);
 
     private void RequireAdmin()
     {

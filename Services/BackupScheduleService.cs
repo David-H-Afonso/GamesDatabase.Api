@@ -195,7 +195,10 @@ public class BackupScheduleService : BackgroundService
                 allRecords.Add(new FullExportModel { Type = "History", Name = h.GameName, Status = h.ActionType, Started = h.ChangedAt.ToString("O"), HistoryField = h.Field, HistoryOldValue = h.OldValue ?? "", HistoryNewValue = h.NewValue ?? "" });
 
             // ── Write CSV ────────────────────────────────────────────────────────
-            var fileName = $"backup_{schedule.BackupType}_{now:yyyyMMdd_HHmmss}.csv";
+            var date = now.ToString("yyyyMMdd");
+            var prefix = string.IsNullOrWhiteSpace(schedule.FileNamePrefix) ? "" : $"{schedule.FileNamePrefix.Trim()}-";
+            var suffix = string.IsNullOrWhiteSpace(schedule.FileNameSuffix) ? "" : $"-{schedule.FileNameSuffix.Trim()}";
+            var fileName = $"{prefix}{date}-{schedule.BackupType}{suffix}.csv";
             var filePath = Path.Combine(dest, fileName);
 
             using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -210,7 +213,7 @@ public class BackupScheduleService : BackgroundService
             // ── Retention: delete oldest files ───────────────────────────────────
             if (schedule.RetentionCount > 0)
             {
-                var existing = Directory.GetFiles(dest, "backup_*.csv")
+                var existing = Directory.GetFiles(dest, "*.csv")
                     .OrderByDescending(f => f)
                     .Skip(schedule.RetentionCount)
                     .ToList();

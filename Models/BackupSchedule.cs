@@ -28,6 +28,12 @@ public class BackupSchedule
     /// <summary>Keep the last N backup files. Older ones are deleted automatically (0 = keep all).</summary>
     public int RetentionCount { get; set; } = 7;
 
+    /// <summary>Optional filename prefix (e.g. "1-admin").</summary>
+    public string FileNamePrefix { get; set; } = "";
+
+    /// <summary>Optional filename suffix appended before the extension.</summary>
+    public string FileNameSuffix { get; set; } = "";
+
     // ── Last run info ──────────────────────────────────────────────────────────
     public DateTime? LastRunAt { get; set; }
     /// <summary>"never" | "running" | "success" | "failed"</summary>
