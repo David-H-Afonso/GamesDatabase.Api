@@ -50,6 +50,20 @@ namespace GamesDatabase.Api.Migrations
                         .HasDefaultValue("/backups")
                         .HasColumnName("destination_path");
 
+                    b.Property<string>("FileNamePrefix")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("")
+                        .HasColumnName("file_name_prefix");
+
+                    b.Property<string>("FileNameSuffix")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("")
+                        .HasColumnName("file_name_suffix");
+
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
