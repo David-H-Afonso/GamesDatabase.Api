@@ -98,6 +98,10 @@ builder.Services.AddScoped<INetworkSyncService, NetworkSyncService>();
 builder.Services.AddScoped<IGameHistoryService, GameHistoryService>();
 builder.Services.AddHttpContextAccessor();
 
+// Scheduled backup background service
+builder.Services.AddSingleton<BackupScheduleService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupScheduleService>());
+
 // Configure HttpClient for CSV exports (longer timeout)
 builder.Services.AddHttpClient("TrustAllCerts")
     .ConfigurePrimaryHttpMessageHandler(() =>

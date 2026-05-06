@@ -114,6 +114,7 @@ public class GamesDbContext : DbContext
     public DbSet<GameReplayType> GameReplayTypes { get; set; }
     public DbSet<GameReplay> GameReplays { get; set; }
     public DbSet<GameHistoryEntry> GameHistoryEntries { get; set; }
+    public DbSet<BackupSchedule> BackupSchedules { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -131,6 +132,7 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<GameReplayType>().ToTable("game_replay_type");
         modelBuilder.Entity<GameReplay>().ToTable("game_replay");
         modelBuilder.Entity<GameHistoryEntry>().ToTable("game_history_entry");
+        modelBuilder.Entity<BackupSchedule>().ToTable("backup_schedule");
 
         // Configure User entity
         modelBuilder.Entity<User>(entity =>
@@ -455,6 +457,30 @@ public class GamesDbContext : DbContext
             entity.HasIndex(e => e.GameId);
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ChangedAt);
+        });
+
+        // Configure BackupSchedule entity
+        modelBuilder.Entity<BackupSchedule>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.IsEnabled).HasColumnName("is_enabled").HasDefaultValue(false);
+            entity.Property(e => e.BackupHour).HasColumnName("backup_hour").HasDefaultValue(3);
+            entity.Property(e => e.BackupMinute).HasColumnName("backup_minute").HasDefaultValue(0);
+            entity.Property(e => e.BackupType).HasColumnName("backup_type").HasDefaultValue("full");
+            entity.Property(e => e.DestinationPath).HasColumnName("destination_path").HasDefaultValue("/backups");
+            entity.Property(e => e.RetentionCount).HasColumnName("retention_count").HasDefaultValue(7);
+            entity.Property(e => e.LastRunAt).HasColumnName("last_run_at");
+            entity.Property(e => e.LastRunStatus).HasColumnName("last_run_status").HasDefaultValue("never");
+            entity.Property(e => e.LastRunMessage).HasColumnName("last_run_message");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.UserId);
         });
     }
 }
