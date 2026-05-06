@@ -64,10 +64,16 @@ public class BackupScheduleService : BackgroundService
             if (schedule.BackupHour != now.Hour || schedule.BackupMinute != now.Minute)
                 continue;
 
-            // Skip if already ran within the last 58 minutes (prevents double-fire if timing drifts)
+            // Skip if already ran within the last 2 minutes (prevents double-fire on timer drift
+            // within the same minute tick, while allowing manual runs not to block auto-backups)
             if (schedule.LastRunAt.HasValue &&
-                (now - schedule.LastRunAt.Value).TotalMinutes < 58)
+                (now - schedule.LastRunAt.Value).TotalMinutes < 2)
+            {
+                _logger.LogDebug(
+                    "Skipping scheduled backup for user {UserId}: ran {MinutesAgo:F1} min ago",
+                    schedule.UserId, (now - schedule.LastRunAt.Value).TotalMinutes);
                 continue;
+            }
 
             _logger.LogInformation(
                 "Running scheduled backup for user {UserId}: type={Type} dest={Dest}",
