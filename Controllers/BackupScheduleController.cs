@@ -53,6 +53,12 @@ public class BackupScheduleController : BaseApiController
         string FileNameSuffix
     );
 
+    public record UserBackupScheduleDto(
+        int UserId,
+        string Username,
+        BackupScheduleDto Schedule
+    );
+
     // ── GET current config ────────────────────────────────────────────────────
 
     [HttpGet]
@@ -175,10 +181,140 @@ public class BackupScheduleController : BaseApiController
         s.DestinationPath, s.RetentionCount, s.FileNamePrefix, s.FileNameSuffix,
         s.LastRunAt, s.LastRunStatus, s.LastRunMessage);
 
+    private static BackupScheduleDto DefaultDto() =>
+        new(false, 3, 0, "full", "/backups", 7, "", "", null, "never", null);
+
     private void RequireAdmin()
     {
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
         if (role != "Admin")
             throw new UnauthorizedAccessException("Admin role required");
+    }
+
+    // ── Admin: manage other users' schedules ──────────────────────────────────
+
+    // GET /api/backupschedule/admin/users — list all users with their schedules
+    [HttpGet("admin/users")]
+    public async Task<ActionResult<List<UserBackupScheduleDto>>> GetAllUserSchedules()
+    {
+        RequireAdmin();
+
+        var users = await _context.Users.OrderBy(u => u.Username).ToListAsync();
+        var schedules = await _context.BackupSchedules.ToListAsync();
+        var scheduleMap = schedules.ToDictionary(s => s.UserId);
+
+        var result = users.Select(u => new UserBackupScheduleDto(
+            u.Id,
+            u.Username,
+            scheduleMap.TryGetValue(u.Id, out var s) ? ToDto(s) : DefaultDto()
+        )).ToList();
+
+        return Ok(result);
+    }
+
+    // GET /api/backupschedule/admin/{userId} — get a specific user's schedule
+    [HttpGet("admin/{userId:int}")]
+    public async Task<ActionResult<UserBackupScheduleDto>> GetUserSchedule(int userId)
+    {
+        RequireAdmin();
+
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null) return NotFound(new { message = "User not found" });
+
+        var schedule = await _context.BackupSchedules.FirstOrDefaultAsync(s => s.UserId == userId);
+
+        return Ok(new UserBackupScheduleDto(
+            user.Id,
+            user.Username,
+            schedule != null ? ToDto(schedule) : DefaultDto()
+        ));
+    }
+
+    // PUT /api/backupschedule/admin/{userId} — update a specific user's schedule
+    [HttpPut("admin/{userId:int}")]
+    public async Task<ActionResult<UserBackupScheduleDto>> UpdateUserSchedule(int userId, [FromBody] UpdateBackupScheduleRequest req)
+    {
+        RequireAdmin();
+
+        if (req.BackupHour < 0 || req.BackupHour > 23)
+            return BadRequest(new { message = "BackupHour must be 0–23" });
+        if (req.BackupMinute < 0 || req.BackupMinute > 59)
+            return BadRequest(new { message = "BackupMinute must be 0–59" });
+        if (req.BackupType is not "full" and not "partial")
+            return BadRequest(new { message = "BackupType must be 'full' or 'partial'" });
+        if (string.IsNullOrWhiteSpace(req.DestinationPath))
+            return BadRequest(new { message = "DestinationPath is required" });
+
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null) return NotFound(new { message = "User not found" });
+
+        var schedule = await _context.BackupSchedules.FirstOrDefaultAsync(s => s.UserId == userId);
+        if (schedule == null)
+        {
+            schedule = new BackupSchedule { UserId = userId };
+            _context.BackupSchedules.Add(schedule);
+        }
+
+        schedule.IsEnabled = req.IsEnabled;
+        schedule.BackupHour = req.BackupHour;
+        schedule.BackupMinute = req.BackupMinute;
+        schedule.BackupType = req.BackupType;
+        schedule.DestinationPath = req.DestinationPath;
+        schedule.RetentionCount = req.RetentionCount;
+        schedule.FileNamePrefix = req.FileNamePrefix ?? "";
+        schedule.FileNameSuffix = req.FileNameSuffix ?? "";
+
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("Admin updated backup schedule for user {UserId}", userId);
+
+        return Ok(new UserBackupScheduleDto(user.Id, user.Username, ToDto(schedule)));
+    }
+
+    // POST /api/backupschedule/admin/{userId}/run-now — trigger backup for a specific user
+    [HttpPost("admin/{userId:int}/run-now")]
+    public async Task<IActionResult> RunNowForUser(int userId)
+    {
+        RequireAdmin();
+
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null) return NotFound(new { message = "User not found" });
+
+        var schedule = await _context.BackupSchedules.FirstOrDefaultAsync(s => s.UserId == userId);
+        if (schedule == null)
+        {
+            schedule = new BackupSchedule
+            {
+                UserId = userId,
+                IsEnabled = false,
+                BackupHour = 3,
+                BackupMinute = 0,
+                BackupType = "full",
+                DestinationPath = "/backups",
+                RetentionCount = 7,
+                FileNamePrefix = "",
+                FileNameSuffix = ""
+            };
+            _context.BackupSchedules.Add(schedule);
+            await _context.SaveChangesAsync();
+        }
+
+        var scheduleId = schedule.Id;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = HttpContext.RequestServices.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+                var freshSchedule = await db.BackupSchedules.FindAsync(scheduleId);
+                if (freshSchedule == null) return;
+                await _backupService.RunBackupNowAsync(freshSchedule, db, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in admin run-now for user {UserId}", userId);
+            }
+        });
+
+        return Accepted(new { message = "Backup started in background" });
     }
 }
