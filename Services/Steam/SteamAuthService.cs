@@ -37,7 +37,9 @@ public class SteamAuthService : ISteamAuthService
 
     public string BuildLoginUrl(Guid nonce, string callbackUrl)
     {
-        var returnTo = $"{callbackUrl}?nonce={nonce}";
+        // Use '&' if callbackUrl already contains query params, '?' otherwise
+        var sep = callbackUrl.Contains('?') ? '&' : '?';
+        var returnTo = $"{callbackUrl}{sep}nonce={nonce}";
         var realm = ExtractRealm(callbackUrl);
 
         var sb = new StringBuilder(SteamOpenIdEndpoint);

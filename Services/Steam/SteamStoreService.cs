@@ -149,4 +149,37 @@ public class SteamStoreService : ISteamStoreService
             return null;
         }
     }
+
+    public async Task<List<SteamStoreSearchItemDto>> SearchStoreAsync(string query)
+    {
+        var encodedQuery = Uri.EscapeDataString(query);
+        var url = $"https://store.steampowered.com/api/storesearch/?term={encodedQuery}&l=english&cc=US";
+        try
+        {
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return [];
+
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonSerializer.Deserialize<SteamStoreSearchResponse>(json, _jsonOptions);
+            if (result?.Items == null) return [];
+
+            return result.Items
+                .Select(i => new SteamStoreSearchItemDto
+                {
+                    AppId = i.Id,
+                    Name = i.Name,
+                    CoverUrl = $"https://cdn.akamai.steamstatic.com/steam/apps/{i.Id}/header.jpg",
+                    Price = i.Price?.FinalFormatted,
+                    DiscountPercent = i.Price?.DiscountPercent > 0 ? i.Price.DiscountPercent : null,
+                    OriginalPrice = i.Price?.DiscountPercent > 0 ? i.Price.InitialFormatted : null,
+                    Metascore = int.TryParse(i.Metascore, out var ms) && ms > 0 ? ms : null
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching Steam Store for '{Query}'", query);
+            return [];
+        }
+    }
 }

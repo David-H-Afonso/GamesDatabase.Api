@@ -380,3 +380,60 @@ public class SteamReviewSummaryDto
     public int TotalReviews => TotalPositive + TotalNegative;
     public int ScorePercent => TotalReviews > 0 ? (int)Math.Round(100.0 * TotalPositive / TotalReviews) : 0;
 }
+
+// ─── Store Search ─────────────────────────────────────────────────────────────
+
+public class SteamStoreSearchResponse
+{
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<SteamStoreSearchItemRaw>? Items { get; set; }
+}
+
+public class SteamStoreSearchItemRaw
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("metascore")]
+    public string? Metascore { get; set; }
+
+    [JsonPropertyName("price")]
+    public SteamStoreSearchPriceRaw? Price { get; set; }
+}
+
+public class SteamStoreSearchPriceRaw
+{
+    [JsonPropertyName("final_formatted")]
+    public string? FinalFormatted { get; set; }
+
+    [JsonPropertyName("discount_percent")]
+    public int DiscountPercent { get; set; }
+
+    [JsonPropertyName("initial_formatted")]
+    public string? InitialFormatted { get; set; }
+}
+
+public class SteamStoreSearchItemDto
+{
+    public int AppId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? CoverUrl { get; set; }
+    public string? Price { get; set; }
+    public int? DiscountPercent { get; set; }
+    public string? OriginalPrice { get; set; }
+    public int? Metascore { get; set; }
+}
+
+public class SteamAddStoreGameRequest
+{
+    public int AppId { get; set; }
+}

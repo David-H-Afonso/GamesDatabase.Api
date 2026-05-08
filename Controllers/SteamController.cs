@@ -306,4 +306,26 @@ public class SteamController : BaseApiController
         int union = wa.Union(wb).Count();
         return (int)(100.0 * intersection / union);
     }
+
+    /// <summary>Searches the Steam Store for any game by name (does not require ownership).</summary>
+    [HttpGet("store/search")]
+    public async Task<IActionResult> SearchStore([FromQuery] string q)
+    {
+        if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+            return BadRequest(new { message = "La búsqueda debe tener al menos 2 caracteres" });
+
+        var results = await _steamStore.SearchStoreAsync(q);
+        return Ok(results);
+    }
+
+    /// <summary>Adds a Steam Store game (not necessarily owned) to GDB.</summary>
+    [HttpPost("store/add")]
+    public async Task<IActionResult> AddStoreGame([FromBody] SteamAddStoreGameRequest request)
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var result = await _steamSync.AddStoreGameAsync(userId.Value, request.AppId);
+        return Ok(result);
+    }
 }

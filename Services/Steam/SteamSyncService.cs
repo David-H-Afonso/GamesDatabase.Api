@@ -203,6 +203,63 @@ public class SteamSyncService : ISteamSyncService
         return result;
     }
 
+    public async Task<SteamImportedGameDto> AddStoreGameAsync(int userId, int appId)
+    {
+        // Check if already exists in GDB
+        var existing = await _context.Games
+            .FirstOrDefaultAsync(g => g.UserId == userId && g.SteamAppId == appId);
+        if (existing != null)
+            return new SteamImportedGameDto { AppId = appId, Name = existing.Name, GdbGameId = existing.Id, Action = "exists" };
+
+        // Get default status (prefer NotFulfilled)
+        var defaultStatus = await _context.GameStatuses
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.StatusType == SpecialStatusType.NotFulfilled && s.IsDefault);
+        defaultStatus ??= await _context.GameStatuses.FirstOrDefaultAsync(s => s.UserId == userId);
+        if (defaultStatus == null)
+            return new SteamImportedGameDto { AppId = appId, Name = $"App {appId}", Action = "error" };
+
+        // Fetch store details
+        var appDetails = await _steamStore.GetOrCacheAppDetailsAsync(appId);
+        var gameName = appDetails?.Name ?? $"Steam App {appId}";
+        var coverUrl = appDetails?.HeaderImageUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+
+        // Find Steam platform
+        var steamPlatform = await _context.GamePlatforms
+            .FirstOrDefaultAsync(p => p.UserId == userId && p.Name.ToLower() == "steam");
+
+        // Critic score
+        int? criticScore = appDetails?.MetacriticScore;
+        string? criticProvider = criticScore.HasValue ? "Metacritic" : null;
+        if (!criticScore.HasValue)
+        {
+            var reviews = await _steamStore.GetReviewSummaryAsync(appId);
+            if (reviews != null && reviews.TotalReviews >= 10)
+            {
+                criticScore = reviews.ScorePercent;
+                criticProvider = "SteamDB";
+            }
+        }
+
+        var newGame = new Game
+        {
+            Name = gameName,
+            StatusId = defaultStatus.Id,
+            UserId = userId,
+            SteamAppId = appId,
+            Released = appDetails?.ReleaseDate,
+            Cover = coverUrl,
+            Critic = criticScore,
+            CriticProvider = criticProvider,
+            PlatformId = steamPlatform?.Id
+        };
+
+        newGame.CalculateScore();
+        _context.Games.Add(newGame);
+        await _context.SaveChangesAsync();
+
+        return new SteamImportedGameDto { AppId = appId, Name = gameName, GdbGameId = newGame.Id, Action = "created" };
+    }
+
     private async Task<SteamSyncResult> SyncGameInternalAsync(User user, Game game)
     {
         if (user.SteamId == null || game.SteamAppId == null)
