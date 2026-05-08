@@ -41,6 +41,12 @@ public class Game
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
 
+    // Steam integration
+    public int? SteamAppId { get; set; }
+    public int? SteamPlaytimeForever { get; set; }
+    public int? SteamPlaytime2Weeks { get; set; }
+    public DateTime? SteamLastSynced { get; set; }
+
     // Export tracking
     public bool ModifiedSinceExport { get; set; } = true;
 

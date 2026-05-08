@@ -3,6 +3,7 @@ using GamesDatabase.Api.Data;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Middleware;
 using GamesDatabase.Api.Services;
+using GamesDatabase.Api.Services.Steam;
 using GamesDatabase.Api.Models;
 using GamesDatabase.Api.Helpers;
 
@@ -47,6 +48,14 @@ if (int.TryParse(Environment.GetEnvironmentVariable("JWT_EXPIRATION_MINUTES"), o
     builder.Configuration["JwtSettings:ExpirationMinutes"] = expMinutes.ToString();
 }
 
+// Override Steam settings from environment variables
+builder.Configuration["SteamSettings:ApiKey"] = Environment.GetEnvironmentVariable("STEAM_API_KEY")
+    ?? builder.Configuration["SteamSettings:ApiKey"];
+builder.Configuration["SteamSettings:CallbackBaseUrl"] = Environment.GetEnvironmentVariable("STEAM_CALLBACK_BASE_URL")
+    ?? builder.Configuration["SteamSettings:CallbackBaseUrl"];
+builder.Configuration["SteamSettings:FrontendBaseUrl"] = Environment.GetEnvironmentVariable("STEAM_FRONTEND_BASE_URL")
+    ?? builder.Configuration["SteamSettings:FrontendBaseUrl"];
+
 builder.Services.Configure<CorsSettings>(
     builder.Configuration.GetSection(CorsSettings.SectionName));
 builder.Services.Configure<DatabaseSettings>(
@@ -59,6 +68,8 @@ builder.Services.Configure<DataExportOptions>(
     builder.Configuration.GetSection(DataExportOptions.SectionName));
 builder.Services.Configure<NetworkSyncOptions>(
     builder.Configuration.GetSection(NetworkSyncOptions.SectionName));
+builder.Services.Configure<SteamSettings>(
+    builder.Configuration.GetSection(SteamSettings.SectionName));
 
 // Add services to the container.
 builder.Services.AddControllers()
@@ -97,6 +108,10 @@ builder.Services.AddScoped<IZipExportService, ZipExportService>();
 builder.Services.AddScoped<INetworkSyncService, NetworkSyncService>();
 builder.Services.AddScoped<IGameHistoryService, GameHistoryService>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ISteamApiService, SteamApiService>();
+builder.Services.AddScoped<ISteamStoreService, SteamStoreService>();
+builder.Services.AddScoped<ISteamSyncService, SteamSyncService>();
+builder.Services.AddSingleton<ISteamAuthService, SteamAuthService>();
 
 // Scheduled backup background service
 builder.Services.AddSingleton<BackupScheduleService>();

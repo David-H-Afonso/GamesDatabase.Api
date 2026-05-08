@@ -594,6 +594,11 @@ public class GamesController : BaseApiController
             game.KeyStoreUrl = keyStoreUrl;
         }
 
+        if (gameDto.TryGetProperty("steamAppId", out var steamAppIdElement))
+        {
+            game.SteamAppId = steamAppIdElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : steamAppIdElement.GetInt32();
+        }
+
         // Recalcular el score
         game.CalculateScore();
 

@@ -25,6 +25,12 @@ public class GameDto
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
 
+    // Steam integration
+    public int? SteamAppId { get; set; }
+    public int? SteamPlaytimeForever { get; set; }
+    public int? SteamPlaytime2Weeks { get; set; }
+    public DateTime? SteamLastSynced { get; set; }
+
     // Audit fields
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -58,6 +64,9 @@ public class GameCreateDto
     // Price comparison fields
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
+
+    // Steam integration
+    public int? SteamAppId { get; set; }
 }
 
 public class GameUpdateDto
@@ -83,6 +92,9 @@ public class GameUpdateDto
     // Price comparison fields
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
+
+    // Steam integration
+    public int? SteamAppId { get; set; }
 
 }
 

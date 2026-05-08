@@ -46,7 +46,10 @@ public class AuthService : IAuthService
             UserId = user.Id,
             Username = user.Username,
             Role = user.Role.ToString(),
-            Token = token
+            Token = token,
+            SteamId = user.SteamId,
+            SteamNickname = user.SteamNickname,
+            SteamAvatarUrl = user.SteamAvatarUrl
         };
     }
 

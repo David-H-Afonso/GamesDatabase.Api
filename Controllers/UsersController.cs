@@ -66,6 +66,10 @@ public class UsersController : ControllerBase
                 UseScoreColors = u.UseScoreColors,
                 ScoreProvider = u.ScoreProvider,
                 ShowPriceComparisonIcon = u.ShowPriceComparisonIcon,
+                SteamId = u.SteamId,
+                SteamNickname = u.SteamNickname,
+                SteamAvatarUrl = u.SteamAvatarUrl,
+                SteamLinkedAt = u.SteamLinkedAt,
                 CreatedAt = u.CreatedAt,
                 UpdatedAt = u.UpdatedAt
             })
@@ -104,6 +108,10 @@ public class UsersController : ControllerBase
             UseScoreColors = user.UseScoreColors,
             ScoreProvider = user.ScoreProvider,
             ShowPriceComparisonIcon = user.ShowPriceComparisonIcon,
+            SteamId = user.SteamId,
+            SteamNickname = user.SteamNickname,
+            SteamAvatarUrl = user.SteamAvatarUrl,
+            SteamLinkedAt = user.SteamLinkedAt,
             CreatedAt = user.CreatedAt,
             UpdatedAt = user.UpdatedAt
         });

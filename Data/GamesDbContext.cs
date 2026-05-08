@@ -115,6 +115,8 @@ public class GamesDbContext : DbContext
     public DbSet<GameReplay> GameReplays { get; set; }
     public DbSet<GameHistoryEntry> GameHistoryEntries { get; set; }
     public DbSet<BackupSchedule> BackupSchedules { get; set; }
+    public DbSet<SteamAchievement> SteamAchievements { get; set; }
+    public DbSet<SteamAppCache> SteamAppCaches { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -133,6 +135,8 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<GameReplay>().ToTable("game_replay");
         modelBuilder.Entity<GameHistoryEntry>().ToTable("game_history_entry");
         modelBuilder.Entity<BackupSchedule>().ToTable("backup_schedule");
+        modelBuilder.Entity<SteamAchievement>().ToTable("steam_achievement");
+        modelBuilder.Entity<SteamAppCache>().ToTable("steam_app_cache");
 
         // Configure User entity
         modelBuilder.Entity<User>(entity =>
@@ -146,6 +150,10 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.UseScoreColors).HasColumnName("use_score_colors");
             entity.Property(e => e.ScoreProvider).HasColumnName("score_provider");
             entity.Property(e => e.ShowPriceComparisonIcon).HasColumnName("show_price_comparison_icon");
+            entity.Property(e => e.SteamId).HasColumnName("steam_id");
+            entity.Property(e => e.SteamNickname).HasColumnName("steam_nickname");
+            entity.Property(e => e.SteamAvatarUrl).HasColumnName("steam_avatar_url");
+            entity.Property(e => e.SteamLinkedAt).HasColumnName("steam_linked_at");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 
@@ -173,6 +181,10 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.PlayedStatusId).HasColumnName("played_status_id");
             entity.Property(e => e.Logo).HasColumnName("logo");
             entity.Property(e => e.Cover).HasColumnName("cover");
+            entity.Property(e => e.SteamAppId).HasColumnName("steam_app_id");
+            entity.Property(e => e.SteamPlaytimeForever).HasColumnName("steam_playtime_forever");
+            entity.Property(e => e.SteamPlaytime2Weeks).HasColumnName("steam_playtime_2weeks");
+            entity.Property(e => e.SteamLastSynced).HasColumnName("steam_last_synced");
             entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
             entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
@@ -483,6 +495,57 @@ public class GamesDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => e.UserId);
+        });
+
+        // Configure SteamAchievement entity
+        modelBuilder.Entity<SteamAchievement>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.GameId).HasColumnName("game_id");
+            entity.Property(e => e.SteamAppId).HasColumnName("steam_app_id").IsRequired();
+            entity.Property(e => e.ApiName).HasColumnName("api_name").IsRequired().HasMaxLength(200);
+            entity.Property(e => e.DisplayName).HasColumnName("display_name").IsRequired().HasMaxLength(500);
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Achieved).HasColumnName("achieved").HasDefaultValue(false);
+            entity.Property(e => e.UnlockTime).HasColumnName("unlock_time");
+            entity.Property(e => e.IconUrl).HasColumnName("icon_url");
+            entity.Property(e => e.IconGrayUrl).HasColumnName("icon_gray_url");
+            entity.Property(e => e.Hidden).HasColumnName("hidden").HasDefaultValue(false);
+            entity.Property(e => e.LastSynced).HasColumnName("last_synced");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Game)
+                .WithMany()
+                .HasForeignKey(e => e.GameId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.UserId, e.SteamAppId, e.ApiName }).IsUnique();
+            entity.HasIndex(e => e.GameId);
+        });
+
+        // Configure SteamAppCache entity
+        modelBuilder.Entity<SteamAppCache>(entity =>
+        {
+            entity.HasKey(e => e.AppId);
+            entity.Property(e => e.AppId).HasColumnName("app_id");
+            entity.Property(e => e.Name).HasColumnName("name").IsRequired();
+            entity.Property(e => e.Developer).HasColumnName("developer");
+            entity.Property(e => e.Publisher).HasColumnName("publisher");
+            entity.Property(e => e.GenresJson).HasColumnName("genres_json");
+            entity.Property(e => e.CategoriesJson).HasColumnName("categories_json");
+            entity.Property(e => e.ReleaseDate).HasColumnName("release_date");
+            entity.Property(e => e.MetacriticScore).HasColumnName("metacritic_score");
+            entity.Property(e => e.HeaderImageUrl).HasColumnName("header_image_url");
+            entity.Property(e => e.BackgroundImageUrl).HasColumnName("background_image_url");
+            entity.Property(e => e.Price).HasColumnName("price");
+            entity.Property(e => e.IsFree).HasColumnName("is_free").HasDefaultValue(false);
+            entity.Property(e => e.LastFetched).HasColumnName("last_fetched");
         });
     }
 }
