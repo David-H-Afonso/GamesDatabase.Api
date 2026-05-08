@@ -30,6 +30,12 @@ public class User
     public string ScoreProvider { get; set; } = "Metacritic";
     public bool ShowPriceComparisonIcon { get; set; } = false;
 
+    // Steam integration
+    public string? SteamId { get; set; }
+    public string? SteamNickname { get; set; }
+    public string? SteamAvatarUrl { get; set; }
+    public DateTime? SteamLinkedAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

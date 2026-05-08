@@ -29,6 +29,10 @@ public static class MappingExtensions
             Cover = game.Cover,
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
+            SteamAppId = game.SteamAppId,
+            SteamPlaytimeForever = game.SteamPlaytimeForever,
+            SteamPlaytime2Weeks = game.SteamPlaytime2Weeks,
+            SteamLastSynced = game.SteamLastSynced,
             CreatedAt = game.CreatedAt,
             UpdatedAt = game.UpdatedAt,
             StatusName = game.Status?.Name,
@@ -59,7 +63,8 @@ public static class MappingExtensions
             Logo = dto.Logo,
             Cover = dto.Cover,
             IsCheaperByKey = dto.IsCheaperByKey,
-            KeyStoreUrl = dto.KeyStoreUrl
+            KeyStoreUrl = dto.KeyStoreUrl,
+            SteamAppId = dto.SteamAppId
         };
 
         // Calcular el score automáticamente
@@ -90,6 +95,7 @@ public static class MappingExtensions
         entity.IsCheaperByKey = dto.IsCheaperByKey;
 
         if (dto.KeyStoreUrl != null) entity.KeyStoreUrl = dto.KeyStoreUrl;
+        if (dto.SteamAppId.HasValue) entity.SteamAppId = dto.SteamAppId.Value;
 
         entity.CalculateScore();
     }
