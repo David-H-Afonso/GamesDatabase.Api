@@ -257,6 +257,11 @@ public class SteamSyncService : ISteamSyncService
         _context.Games.Add(newGame);
         await _context.SaveChangesAsync();
 
+        // Sync playtime and achievements immediately (also re-links any orphaned achievements from a prior delete)
+        var user = await _context.Users.FindAsync(userId);
+        if (user?.SteamId != null)
+            await SyncGameInternalAsync(user, newGame);
+
         return new SteamImportedGameDto { AppId = appId, Name = gameName, GdbGameId = newGame.Id, Action = "created" };
     }
 
@@ -310,6 +315,8 @@ public class SteamSyncService : ISteamSyncService
 
             if (existingAch.TryGetValue(raw.ApiName, out var existing))
             {
+                // Re-link to the current game (GameId may be NULL if the game was deleted and re-added)
+                existing.GameId = game.Id;
                 existing.Achieved = raw.Achieved == 1;
                 existing.UnlockTime = raw.UnlockTime > 0
                     ? DateTimeOffset.FromUnixTimeSeconds(raw.UnlockTime).UtcDateTime
