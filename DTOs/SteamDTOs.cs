@@ -331,11 +331,11 @@ public class SteamLinkGameRequest
 public class SteamProfileResponse
 {
     public string SteamId { get; set; } = string.Empty;
-    public string Nickname { get; set; } = string.Empty;
-    public string? AvatarUrl { get; set; }
+    public string SteamNickname { get; set; } = string.Empty;
+    public string? SteamAvatarUrl { get; set; }
     public string? ProfileUrl { get; set; }
     public bool IsPublic { get; set; }
-    public DateTime LinkedAt { get; set; }
+    public DateTime SteamLinkedAt { get; set; }
 }
 
 public class SteamAchievementDto

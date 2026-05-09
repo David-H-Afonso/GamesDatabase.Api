@@ -46,9 +46,9 @@ public class SteamController : BaseApiController
         return Ok(new SteamProfileResponse
         {
             SteamId = user.SteamId,
-            Nickname = user.SteamNickname ?? user.SteamId,
-            AvatarUrl = user.SteamAvatarUrl,
-            LinkedAt = user.SteamLinkedAt ?? DateTime.UtcNow
+            SteamNickname = user.SteamNickname ?? user.SteamId,
+            SteamAvatarUrl = user.SteamAvatarUrl,
+            SteamLinkedAt = user.SteamLinkedAt ?? DateTime.UtcNow
         });
     }
 
