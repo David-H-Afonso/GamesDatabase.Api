@@ -348,6 +348,44 @@ using (var scope = app.Services.CreateScope())
         startupLogger.LogError(ex, "Migration failed. Attempting to continue — the column may already exist.");
     }
 
+    // Schema repair: ensure 'released' column exists on game_replay.
+    // Migration 20260509001056 ran as a no-op on the CasaOS production DB so the
+    // column was never created. This repair is idempotent and runs on every startup.
+    try
+    {
+        var conn = (Microsoft.Data.Sqlite.SqliteConnection)context.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            conn.Open();
+
+        bool hasReleasedColumn = false;
+        using (var pragmaCmd = conn.CreateCommand())
+        {
+            pragmaCmd.CommandText = "PRAGMA table_info(game_replay)";
+            using var reader = pragmaCmd.ExecuteReader();
+            while (reader.Read())
+            {
+                // column 1 is the column name in PRAGMA table_info output
+                if (reader.GetString(1) == "released")
+                {
+                    hasReleasedColumn = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasReleasedColumn)
+        {
+            using var alterCmd = conn.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE game_replay ADD COLUMN released TEXT";
+            alterCmd.ExecuteNonQuery();
+            startupLogger.LogInformation("Schema repair: added missing 'released' column to game_replay table.");
+        }
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "Schema repair for 'released' column failed — replays may not work correctly.");
+    }
+
     try
     {
         await SeedDefaultDataAsync(context);
