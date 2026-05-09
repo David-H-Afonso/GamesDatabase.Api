@@ -11,6 +11,7 @@ public class GameReplay
     public string? Finished { get; set; }
     public int? Grade { get; set; }
     public string? Notes { get; set; }
+    public string? Released { get; set; }
 
     public int UserId { get; set; }
     public DateTime CreatedAt { get; set; }

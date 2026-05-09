@@ -85,6 +85,7 @@ public class GameReplaysController : BaseApiController
             Finished = createDto.Finished,
             Grade = createDto.Grade,
             Notes = createDto.Notes,
+            Released = createDto.Released,
             UserId = userId
         };
 
@@ -119,6 +120,7 @@ public class GameReplaysController : BaseApiController
         replay.Finished = updateDto.Finished;
         replay.Grade = updateDto.Grade;
         replay.Notes = updateDto.Notes;
+        replay.Released = updateDto.Released;
 
         await _context.SaveChangesAsync();
         return NoContent();

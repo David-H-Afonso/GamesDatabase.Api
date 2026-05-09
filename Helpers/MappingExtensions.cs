@@ -191,6 +191,7 @@ public static class MappingExtensions
             Finished = replay.Finished,
             Grade = replay.Grade,
             Notes = replay.Notes,
+            Released = replay.Released,
             CreatedAt = replay.CreatedAt,
             UpdatedAt = replay.UpdatedAt
         };

@@ -417,6 +417,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Finished).HasColumnName("finished");
             entity.Property(e => e.Grade).HasColumnName("grade");
             entity.Property(e => e.Notes).HasColumnName("notes");
+            entity.Property(e => e.Released).HasColumnName("released");
             entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");

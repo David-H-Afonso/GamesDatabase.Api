@@ -48,6 +48,7 @@ public class GameReplayDto
     public string? Finished { get; set; }
     public int? Grade { get; set; }
     public string? Notes { get; set; }
+    public string? Released { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
@@ -59,6 +60,7 @@ public class GameReplayCreateDto
     public string? Finished { get; set; }
     public int? Grade { get; set; }
     public string? Notes { get; set; }
+    public string? Released { get; set; }
 }
 
 public class GameReplayUpdateDto
@@ -68,6 +70,7 @@ public class GameReplayUpdateDto
     public string? Finished { get; set; }
     public int? Grade { get; set; }
     public string? Notes { get; set; }
+    public string? Released { get; set; }
 }
 
 // ─── GameHistoryEntry ─────────────────────────────────────────────────────────
