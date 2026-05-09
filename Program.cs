@@ -338,14 +338,24 @@ app.UseMiddleware<ErrorHandlingMiddleware>();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+    var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     try
     {
         context.Database.Migrate();
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "Migration failed. Attempting to continue — the column may already exist.");
+    }
+
+    try
+    {
         await SeedDefaultDataAsync(context);
         await SeedMissingReplayTypesAsync(context);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+        startupLogger.LogError(ex, "Seeding failed.");
         throw;
     }
 }
