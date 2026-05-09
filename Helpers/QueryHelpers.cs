@@ -28,6 +28,7 @@ public class GameQueryParameters : QueryParameters
     public int? StartedYear { get; set; }
     public string? Finished { get; set; }
     public int? FinishedYear { get; set; }
+    public bool? IncludeReplayDates { get; set; }
 
     /// <summary>
     /// Filtrar por juegos más baratos por clave. true = solo más baratos por clave, false = solo más baratos en tienda oficial, null = todos
@@ -63,6 +64,7 @@ public class GameQueryParameters : QueryParameters
     public int? ReplayTypeId { get; set; }
     public int? ReplayGradeMin { get; set; }
     public int? ReplayGradeMax { get; set; }
+    public bool? HasReplays { get; set; }
 
     /// <summary>
     /// "any" (default): alguna rejugada cumple el filtro.

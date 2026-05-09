@@ -79,7 +79,7 @@ public class ViewFilterService : IViewFilterService
         // Aplicar ordenamientos
         if (configuration.Sorting.Any())
         {
-            query = ApplySorting(query, configuration.Sorting);
+            query = ApplySorting(query, configuration);
         }
 
         return query;
@@ -96,7 +96,7 @@ public class ViewFilterService : IViewFilterService
     }
 
     private static bool IsReplayField(FilterField field) =>
-        field is FilterField.ReplayStarted or FilterField.ReplayFinished
+        field is FilterField.ReplayStarted or FilterField.ReplayFinished or FilterField.ReplayReleased
             or FilterField.ReplayGrade or FilterField.ReplayTypeId;
 
     private Expression CreateReplayFilterExpression(ParameterExpression gameParam, ViewFilter filter)
@@ -107,6 +107,7 @@ public class ViewFilterService : IViewFilterService
         {
             FilterField.ReplayStarted => Expression.Property(replayParam, nameof(GameReplay.Started)),
             FilterField.ReplayFinished => Expression.Property(replayParam, nameof(GameReplay.Finished)),
+            FilterField.ReplayReleased => Expression.Property(replayParam, nameof(GameReplay.Released)),
             FilterField.ReplayGrade => Expression.Property(replayParam, nameof(GameReplay.Grade)),
             FilterField.ReplayTypeId => Expression.Property(replayParam, nameof(GameReplay.ReplayTypeId)),
             _ => throw new ArgumentException($"Campo de replay no soportado: {filter.Field}")
@@ -140,9 +141,13 @@ public class ViewFilterService : IViewFilterService
             FilterField.Completion => Expression.Property(parameter, nameof(Game.Completion)),
             FilterField.Score => Expression.Property(parameter, nameof(Game.Score)),
             FilterField.Released => Expression.Property(parameter, nameof(Game.Released)),
+            FilterField.ReleaseDate => Expression.Property(parameter, nameof(Game.Released)),
             FilterField.Started => Expression.Property(parameter, nameof(Game.Started)),
             FilterField.Finished => Expression.Property(parameter, nameof(Game.Finished)),
             FilterField.Comment => Expression.Property(parameter, nameof(Game.Comment)),
+            FilterField.Description => Expression.Property(parameter, nameof(Game.Comment)),
+            FilterField.Logo => Expression.Property(parameter, nameof(Game.Logo)),
+            FilterField.Cover => Expression.Property(parameter, nameof(Game.Cover)),
             FilterField.CreatedAt => Expression.Property(parameter, nameof(Game.CreatedAt)),
             FilterField.UpdatedAt => Expression.Property(parameter, nameof(Game.UpdatedAt)),
             _ => throw new ArgumentException($"Campo de filtro no soportado: {field}")
@@ -165,6 +170,8 @@ public class ViewFilterService : IViewFilterService
             FilterOperator.NotIn => Expression.Not(CreateInExpression(propertyExpression, value)),
             FilterOperator.IsNull => CreateIsNullExpression(propertyExpression),
             FilterOperator.IsNotNull => Expression.Not(CreateIsNullExpression(propertyExpression)),
+            FilterOperator.IsEmpty => CreateIsEmptyExpression(propertyExpression),
+            FilterOperator.IsNotEmpty => Expression.Not(CreateIsEmptyExpression(propertyExpression)),
             FilterOperator.StartsWith => CreateStartsWithExpression(propertyExpression, value),
             FilterOperator.EndsWith => CreateEndsWithExpression(propertyExpression, value),
             // Operadores específicos para fechas
@@ -252,6 +259,18 @@ public class ViewFilterService : IViewFilterService
         var containsCall = Expression.Call(propertyToLower, containsMethod, valueExpression);
 
         return Expression.AndAlso(nullCheck, containsCall);
+    }
+
+    private Expression CreateIsEmptyExpression(Expression propertyExpression)
+    {
+        if (propertyExpression.Type != typeof(string))
+        {
+            return CreateIsNullExpression(propertyExpression);
+        }
+
+        var nullCheck = Expression.Equal(propertyExpression, Expression.Constant(null, typeof(string)));
+        var emptyCheck = Expression.Equal(propertyExpression, Expression.Constant("", typeof(string)));
+        return Expression.OrElse(nullCheck, emptyCheck);
     }
 
     private Expression CreateComparisonExpression(Expression propertyExpression, object? value, Func<Expression, Expression, Expression> comparisonFunc)
@@ -452,10 +471,10 @@ public class ViewFilterService : IViewFilterService
         throw new ArgumentException($"EndsWith no es soportado para el tipo {propertyExpression.Type}");
     }
 
-    private IQueryable<Game> ApplySorting(IQueryable<Game> query, List<ViewSort> sortings)
+    private IQueryable<Game> ApplySorting(IQueryable<Game> query, ViewConfiguration configuration)
     {
         // Ordenar los sortings por Order
-        var orderedSortings = sortings.OrderBy(s => s.Order).ToList();
+        var orderedSortings = configuration.Sorting.OrderBy(s => s.Order).ToList();
 
         IOrderedQueryable<Game>? orderedQuery = null;
 
@@ -467,23 +486,33 @@ public class ViewFilterService : IViewFilterService
             {
                 // Primer ordenamiento
                 orderedQuery = sort.Direction == SortDirection.Ascending
-                    ? query.OrderBy(GetSortExpression(sort.Field))
-                    : query.OrderByDescending(GetSortExpression(sort.Field));
+                    ? query.OrderBy(GetSortExpression(sort.Field, configuration))
+                    : query.OrderByDescending(GetSortExpression(sort.Field, configuration));
             }
             else
             {
                 // Ordenamientos adicionales
                 orderedQuery = sort.Direction == SortDirection.Ascending
-                    ? orderedQuery!.ThenBy(GetSortExpression(sort.Field))
-                    : orderedQuery!.ThenByDescending(GetSortExpression(sort.Field));
+                    ? orderedQuery!.ThenBy(GetSortExpression(sort.Field, configuration))
+                    : orderedQuery!.ThenByDescending(GetSortExpression(sort.Field, configuration));
             }
         }
 
         return orderedQuery ?? query;
     }
 
-    private Expression<Func<Game, object>> GetSortExpression(SortField field)
+    private Expression<Func<Game, object>> GetSortExpression(SortField field, ViewConfiguration configuration)
     {
+        if (field == SortField.EffectiveGrade)
+        {
+            return CreateEffectiveGradeSortExpression(configuration);
+        }
+
+        if (field is SortField.EffectiveReleased or SortField.EffectiveStarted or SortField.EffectiveFinished)
+        {
+            return CreateEffectiveDateSortExpression(field, configuration);
+        }
+
         return field switch
         {
             SortField.Name => g => EF.Functions.Collate(g.Name, "NOCASE"),
@@ -496,20 +525,190 @@ public class ViewFilterService : IViewFilterService
             SortField.PlayedStatusId => g => g.PlayedStatusId ?? 0,
             SortField.PlayedStatus => g => g.PlayedStatus != null ? g.PlayedStatus.SortOrder : 0,
             SortField.Grade => g => g.Grade ?? 0,
+            SortField.EffectiveGrade => g => g.Grade ?? 0,
             SortField.Critic => g => g.Critic ?? 0,
             SortField.CriticProvider => g => g.CriticProvider ?? "",
             SortField.Story => g => g.Story ?? 0,
             SortField.Completion => g => g.Completion ?? 0,
             SortField.Score => g => g.Score.HasValue ? (double)g.Score.Value : 0.0,
             SortField.Released => g => g.Released ?? "",
+            SortField.EffectiveReleased => g => g.Released ?? "",
             SortField.Started => g => g.Started ?? "",
             SortField.Finished => g => g.Finished ?? "",
+            SortField.EffectiveStarted => g => g.Started ?? "",
+            SortField.EffectiveFinished => g => g.Finished ?? "",
             SortField.CreatedAt => g => g.CreatedAt,
             SortField.UpdatedAt => g => g.UpdatedAt,
             SortField.Id => g => g.Id,
             _ => throw new ArgumentException($"Campo de ordenamiento no soportado: {field}")
         };
     }
+
+    private Expression<Func<Game, object>> CreateEffectiveGradeSortExpression(ViewConfiguration configuration)
+    {
+        var gameParam = Expression.Parameter(typeof(Game), "g");
+        var replayParam = Expression.Parameter(typeof(GameReplay), "r");
+
+        var replayPredicate = CreateReplaySortPredicate(replayParam, configuration)
+            ?? Expression.Constant(true);
+
+        var replays = Expression.Property(gameParam, nameof(Game.GameReplays));
+        var whereMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Where" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay));
+        var filteredReplays = Expression.Call(whereMethod, replays, Expression.Lambda<Func<GameReplay, bool>>(replayPredicate, replayParam));
+
+        var selectMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Select" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay), typeof(int?));
+        var gradeProperty = Expression.Property(replayParam, nameof(GameReplay.Grade));
+        var replayGrades = Expression.Call(selectMethod, filteredReplays, Expression.Lambda<Func<GameReplay, int?>>(gradeProperty, replayParam));
+
+        var maxMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m => m.Name == "Max" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(IEnumerable<int?>));
+        var maxReplayGrade = Expression.Call(maxMethod, replayGrades);
+        var gameGrade = Expression.Property(gameParam, nameof(Game.Grade));
+        var replayOrGameGrade = Expression.Coalesce(maxReplayGrade, gameGrade);
+        var effectiveGrade = Expression.Coalesce(replayOrGameGrade, Expression.Constant(0, typeof(int)));
+
+        return Expression.Lambda<Func<Game, object>>(Expression.Convert(effectiveGrade, typeof(object)), gameParam);
+    }
+
+    private Expression<Func<Game, object>> CreateEffectiveDateSortExpression(SortField field, ViewConfiguration configuration)
+    {
+        var gameParam = Expression.Parameter(typeof(Game), "g");
+        var replayParam = Expression.Parameter(typeof(GameReplay), "r");
+
+        var (replayFilterField, replayPropertyName, gamePropertyName) = field switch
+        {
+            SortField.EffectiveReleased => (FilterField.ReplayReleased, nameof(GameReplay.Released), nameof(Game.Released)),
+            SortField.EffectiveStarted => (FilterField.ReplayStarted, nameof(GameReplay.Started), nameof(Game.Started)),
+            SortField.EffectiveFinished => (FilterField.ReplayFinished, nameof(GameReplay.Finished), nameof(Game.Finished)),
+            _ => throw new ArgumentException($"Campo de fecha relevante no soportado: {field}")
+        };
+
+        var replayPredicate = CreateReplaySortPredicate(replayParam, configuration, replayFilterField)
+            ?? Expression.Constant(true);
+
+        var replayDateProperty = Expression.Property(replayParam, replayPropertyName);
+        var hasDate = Expression.AndAlso(
+            Expression.NotEqual(replayDateProperty, Expression.Constant(null, typeof(string))),
+            Expression.NotEqual(replayDateProperty, Expression.Constant("", typeof(string))));
+        var matchingReplayWithDate = Expression.AndAlso(replayPredicate, hasDate);
+
+        var replays = Expression.Property(gameParam, nameof(Game.GameReplays));
+        var whereMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Where" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay));
+        var filteredReplays = Expression.Call(whereMethod, replays, Expression.Lambda<Func<GameReplay, bool>>(matchingReplayWithDate, replayParam));
+
+        var selectMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Select" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay), typeof(string));
+        var replayDates = Expression.Call(selectMethod, filteredReplays, Expression.Lambda<Func<GameReplay, string>>(replayDateProperty, replayParam));
+
+        var maxMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Max" &&
+                m.IsGenericMethodDefinition &&
+                m.GetGenericArguments().Length == 1 &&
+                m.GetParameters().Length == 1)
+            .MakeGenericMethod(typeof(string));
+        var maxReplayDate = Expression.Call(maxMethod, replayDates);
+        var gameDate = Expression.Property(gameParam, gamePropertyName);
+        var gameDateOrEmpty = Expression.Coalesce(gameDate, Expression.Constant("", typeof(string)));
+        var effectiveDate = Expression.Coalesce(maxReplayDate, gameDateOrEmpty);
+
+        return Expression.Lambda<Func<Game, object>>(Expression.Convert(effectiveDate, typeof(object)), gameParam);
+    }
+
+    private Expression? CreateReplaySortPredicate(ParameterExpression replayParam, ViewConfiguration configuration, FilterField? preferredField = null)
+    {
+        Expression? groupsCombined = null;
+        var hasPreferredField = preferredField.HasValue && configuration.FilterGroups
+            .SelectMany(g => g.Filters)
+            .Any(f => f.Field == preferredField.Value);
+
+        foreach (var group in configuration.FilterGroups)
+        {
+            var replayFilters = group.Filters
+                .Where(f => IsReplaySortField(f.Field))
+                .ToList();
+
+            if (!replayFilters.Any()) continue;
+
+            if (preferredField.HasValue)
+            {
+                var groupHasPreferredField = replayFilters.Any(f => f.Field == preferredField.Value);
+                replayFilters = replayFilters
+                    .Where(f =>
+                        (hasPreferredField && groupHasPreferredField && f.Field == preferredField.Value) ||
+                        (hasPreferredField && groupHasPreferredField && group.CombineWith == FilterLogic.And && IsReplayScopeField(f.Field)) ||
+                        (!hasPreferredField && IsReplayScopeField(f.Field)))
+                    .ToList();
+            }
+
+            if (!replayFilters.Any()) continue;
+
+            Expression? groupExpression = null;
+
+            foreach (var filter in replayFilters)
+            {
+                var replayProperty = GetReplayPropertyExpression(replayParam, filter.Field);
+                var filterExpression = CreateFilterExpression(replayProperty, filter.Operator, filter.Value, filter.SecondValue);
+
+                groupExpression = groupExpression == null
+                    ? filterExpression
+                    : group.CombineWith == FilterLogic.Or
+                        ? Expression.OrElse(groupExpression, filterExpression)
+                        : Expression.AndAlso(groupExpression, filterExpression);
+            }
+
+            if (groupExpression == null) continue;
+
+            groupsCombined = groupsCombined == null
+                ? groupExpression
+                : Expression.OrElse(groupsCombined, groupExpression);
+        }
+
+        return groupsCombined;
+    }
+
+    private static Expression GetReplayPropertyExpression(ParameterExpression replayParam, FilterField field) =>
+        field switch
+        {
+            FilterField.ReplayStarted => Expression.Property(replayParam, nameof(GameReplay.Started)),
+            FilterField.ReplayFinished => Expression.Property(replayParam, nameof(GameReplay.Finished)),
+            FilterField.ReplayReleased => Expression.Property(replayParam, nameof(GameReplay.Released)),
+            FilterField.ReplayGrade => Expression.Property(replayParam, nameof(GameReplay.Grade)),
+            FilterField.ReplayTypeId => Expression.Property(replayParam, nameof(GameReplay.ReplayTypeId)),
+            _ => throw new ArgumentException($"Campo de replay no soportado: {field}")
+        };
+
+    private static bool IsReplaySortField(FilterField field) =>
+        field is FilterField.ReplayStarted or FilterField.ReplayFinished
+            or FilterField.ReplayReleased or FilterField.ReplayGrade or FilterField.ReplayTypeId;
+
+    private static bool IsReplayScopeField(FilterField field) =>
+        field is FilterField.ReplayReleased or FilterField.ReplayGrade or FilterField.ReplayTypeId;
 
     private object? ConvertValue(object? value, Type targetType)
     {

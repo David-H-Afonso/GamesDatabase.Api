@@ -157,6 +157,8 @@ public class GamesController : BaseApiController
     private IQueryable<Models.Game> ApplyTraditionalFilters(IQueryable<Models.Game> query, GameQueryParameters parameters)
     {
         // Aplicar filtros
+        var includeReplayDates = parameters.IncludeReplayDates != false;
+
         if (!string.IsNullOrEmpty(parameters.Search))
         {
             var searchLower = parameters.Search.ToLower();
@@ -227,35 +229,59 @@ public class GamesController : BaseApiController
 
         if (!string.IsNullOrEmpty(parameters.Released))
         {
-            query = query.Where(g => g.Released != null && g.Released.Contains(parameters.Released));
+            query = includeReplayDates
+                ? query.Where(g =>
+                    (g.Released != null && g.Released.Contains(parameters.Released)) ||
+                    g.GameReplays.Any(r => r.Released != null && r.Released.Contains(parameters.Released)))
+                : query.Where(g => g.Released != null && g.Released.Contains(parameters.Released));
         }
 
         if (parameters.ReleasedYear.HasValue)
         {
             var yearPrefix = parameters.ReleasedYear.Value.ToString();
-            query = query.Where(g => g.Released != null && g.Released.StartsWith(yearPrefix));
+            query = includeReplayDates
+                ? query.Where(g =>
+                    (g.Released != null && g.Released.StartsWith(yearPrefix)) ||
+                    g.GameReplays.Any(r => r.Released != null && r.Released.StartsWith(yearPrefix)))
+                : query.Where(g => g.Released != null && g.Released.StartsWith(yearPrefix));
         }
 
         if (!string.IsNullOrEmpty(parameters.Started))
         {
-            query = query.Where(g => g.Started != null && g.Started.Contains(parameters.Started));
+            query = includeReplayDates
+                ? query.Where(g =>
+                    (g.Started != null && g.Started.Contains(parameters.Started)) ||
+                    g.GameReplays.Any(r => r.Started != null && r.Started.Contains(parameters.Started)))
+                : query.Where(g => g.Started != null && g.Started.Contains(parameters.Started));
         }
 
         if (parameters.StartedYear.HasValue)
         {
             var yearPrefix = parameters.StartedYear.Value.ToString();
-            query = query.Where(g => g.Started != null && g.Started.StartsWith(yearPrefix));
+            query = includeReplayDates
+                ? query.Where(g =>
+                    (g.Started != null && g.Started.StartsWith(yearPrefix)) ||
+                    g.GameReplays.Any(r => r.Started != null && r.Started.StartsWith(yearPrefix)))
+                : query.Where(g => g.Started != null && g.Started.StartsWith(yearPrefix));
         }
 
         if (!string.IsNullOrEmpty(parameters.Finished))
         {
-            query = query.Where(g => g.Finished != null && g.Finished.Contains(parameters.Finished));
+            query = includeReplayDates
+                ? query.Where(g =>
+                    (g.Finished != null && g.Finished.Contains(parameters.Finished)) ||
+                    g.GameReplays.Any(r => r.Finished != null && r.Finished.Contains(parameters.Finished)))
+                : query.Where(g => g.Finished != null && g.Finished.Contains(parameters.Finished));
         }
 
         if (parameters.FinishedYear.HasValue)
         {
             var yearPrefix = parameters.FinishedYear.Value.ToString();
-            query = query.Where(g => g.Finished != null && g.Finished.StartsWith(yearPrefix));
+            query = includeReplayDates
+                ? query.Where(g =>
+                    (g.Finished != null && g.Finished.StartsWith(yearPrefix)) ||
+                    g.GameReplays.Any(r => r.Finished != null && r.Finished.StartsWith(yearPrefix)))
+                : query.Where(g => g.Finished != null && g.Finished.StartsWith(yearPrefix));
         }
 
         if (parameters.IsCheaperByKey.HasValue)
@@ -281,6 +307,13 @@ public class GamesController : BaseApiController
                     ? g.CriticProvider == null
                     : g.CriticProvider == parameters.CriticProvider
             );
+        }
+
+        if (parameters.HasReplays.HasValue)
+        {
+            query = parameters.HasReplays.Value
+                ? query.Where(g => g.GameReplays.Any())
+                : query.Where(g => !g.GameReplays.Any());
         }
 
         // ─── Filtros de rejugadas ─────────────────────────────────────────────
