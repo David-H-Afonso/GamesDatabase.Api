@@ -1,5 +1,7 @@
 using GamesDatabase.Api.Data;
+using GamesDatabase.Api.DTOs;
 using GamesDatabase.Api.DTOs.Steam;
+using GamesDatabase.Api.Helpers;
 using GamesDatabase.Api.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -68,6 +70,8 @@ public class SteamSyncService : ISteamSyncService
                 gamesUpdated++;
             }
 
+            NormalizeStoredSteamReleaseDate(game);
+
             // Sync achievements
             var achResult = await SyncAchievementsForGameAsync(user.SteamId, game);
             achievementsUpdated += achResult;
@@ -122,6 +126,7 @@ public class SteamSyncService : ISteamSyncService
                     existingGame.SteamPlaytime2Weeks = owned.Playtime2Weeks;
                     existingGame.SteamLastSynced = DateTime.UtcNow;
                 }
+                NormalizeStoredSteamReleaseDate(existingGame);
                 result.Linked++;
                 result.ImportedGames.Add(new SteamImportedGameDto
                 {
@@ -168,24 +173,21 @@ public class SteamSyncService : ISteamSyncService
                 }
             }
 
-            var newGame = new Game
-            {
-                Name = gameName,
-                StatusId = defaultStatus.Id,
-                UserId = userId,
-                SteamAppId = appId,
-                SteamPlaytimeForever = ownedGame?.PlaytimeForever,
-                SteamPlaytime2Weeks = ownedGame?.Playtime2Weeks,
-                SteamLastSynced = DateTime.UtcNow,
-                Released = appDetails?.ReleaseDate,
-                Logo = ownedGame?.IconUrl,
-                Cover = coverUrl,
-                Critic = criticScore,
-                CriticProvider = criticProvider,
-                PlatformId = steamPlatform?.Id
-            };
+            var newGame = CreateSteamGameEntity(
+                userId,
+                defaultStatus.Id,
+                gameName,
+                appId,
+                appDetails,
+                criticScore,
+                criticProvider,
+                steamPlatform?.Id,
+                coverUrl,
+                ownedGame?.IconUrl);
+            newGame.SteamPlaytimeForever = ownedGame?.PlaytimeForever;
+            newGame.SteamPlaytime2Weeks = ownedGame?.Playtime2Weeks;
+            newGame.SteamLastSynced = DateTime.UtcNow;
 
-            newGame.CalculateScore();
             _context.Games.Add(newGame);
             await _context.SaveChangesAsync();
 
@@ -240,20 +242,18 @@ public class SteamSyncService : ISteamSyncService
             }
         }
 
-        var newGame = new Game
-        {
-            Name = gameName,
-            StatusId = defaultStatus.Id,
-            UserId = userId,
-            SteamAppId = appId,
-            Released = appDetails?.ReleaseDate,
-            Cover = coverUrl,
-            Critic = criticScore,
-            CriticProvider = criticProvider,
-            PlatformId = steamPlatform?.Id
-        };
+        var newGame = CreateSteamGameEntity(
+            userId,
+            defaultStatus.Id,
+            gameName,
+            appId,
+            appDetails,
+            criticScore,
+            criticProvider,
+            steamPlatform?.Id,
+            coverUrl,
+            logoUrl: null);
 
-        newGame.CalculateScore();
         _context.Games.Add(newGame);
         await _context.SaveChangesAsync();
 
@@ -263,6 +263,46 @@ public class SteamSyncService : ISteamSyncService
             await SyncGameInternalAsync(user, newGame);
 
         return new SteamImportedGameDto { AppId = appId, Name = gameName, GdbGameId = newGame.Id, Action = "created" };
+    }
+
+    private static Game CreateSteamGameEntity(
+        int userId,
+        int statusId,
+        string gameName,
+        int appId,
+        SteamAppDetailsDto? appDetails,
+        int? criticScore,
+        string? criticProvider,
+        int? platformId,
+        string? coverUrl,
+        string? logoUrl)
+    {
+        var createDto = new GameCreateDto
+        {
+            Name = gameName,
+            StatusId = statusId,
+            Critic = criticScore,
+            CriticProvider = criticProvider,
+            PlatformId = platformId,
+            Released = GameDateNormalizer.NormalizeSteamReleaseDate(appDetails?.ReleaseDate),
+            PlayWithIds = [],
+            Logo = logoUrl,
+            Cover = coverUrl,
+            SteamAppId = appId
+        };
+
+        var game = createDto.ToEntity();
+        game.UserId = userId;
+        return game;
+    }
+
+    private static void NormalizeStoredSteamReleaseDate(Game game)
+    {
+        var normalizedReleaseDate = GameDateNormalizer.NormalizeSteamReleaseDate(game.Released);
+        if (normalizedReleaseDate != null && game.Released != normalizedReleaseDate)
+        {
+            game.Released = normalizedReleaseDate;
+        }
     }
 
     private async Task<SteamSyncResult> SyncGameInternalAsync(User user, Game game)
@@ -279,6 +319,8 @@ public class SteamSyncService : ISteamSyncService
             game.SteamPlaytimeForever = ownedGame.PlaytimeForever;
             game.SteamPlaytime2Weeks = ownedGame.Playtime2Weeks;
         }
+
+        NormalizeStoredSteamReleaseDate(game);
 
         var achCount = await SyncAchievementsForGameAsync(user.SteamId, game);
         game.SteamLastSynced = DateTime.UtcNow;

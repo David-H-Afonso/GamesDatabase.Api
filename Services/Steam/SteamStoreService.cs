@@ -2,6 +2,7 @@ using System.Text.Json;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.DTOs.Steam;
+using GamesDatabase.Api.Helpers;
 using GamesDatabase.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -93,7 +94,7 @@ public class SteamStoreService : ISteamStoreService
                 Publisher = data.Publishers?.FirstOrDefault(),
                 GenresJson = data.Genres != null ? JsonSerializer.Serialize(data.Genres.Select(g => g.Description)) : null,
                 CategoriesJson = data.Categories != null ? JsonSerializer.Serialize(data.Categories.Select(c => c.Description)) : null,
-                ReleaseDate = data.ReleaseDate?.Date,
+                ReleaseDate = GameDateNormalizer.NormalizeSteamReleaseDate(data.ReleaseDate?.Date),
                 MetacriticScore = data.Metacritic?.Score,
                 HeaderImageUrl = data.HeaderImage,
                 BackgroundImageUrl = data.Background,
@@ -117,7 +118,7 @@ public class SteamStoreService : ISteamStoreService
         Publisher = cache.Publisher,
         GenresJson = cache.GenresJson,
         CategoriesJson = cache.CategoriesJson,
-        ReleaseDate = cache.ReleaseDate,
+        ReleaseDate = GameDateNormalizer.NormalizeSteamReleaseDate(cache.ReleaseDate),
         MetacriticScore = cache.MetacriticScore,
         HeaderImageUrl = cache.HeaderImageUrl,
         BackgroundImageUrl = cache.BackgroundImageUrl,
