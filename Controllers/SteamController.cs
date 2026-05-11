@@ -4,6 +4,7 @@ using GamesDatabase.Api.Services.Steam;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -69,6 +70,44 @@ public class SteamController : BaseApiController
         await _context.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    /// <summary>Links a Steam account manually by SteamID64. Useful for desktop builds where OpenID redirects are not available.</summary>
+    [HttpPost("link/manual")]
+    public async Task<IActionResult> LinkSteamManually([FromBody] SteamManualLinkRequest request)
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var steamId = ExtractSteamId(request.SteamId);
+        if (steamId == null)
+            return BadRequest(new { message = "SteamID must be a 17-digit SteamID64 or a Steam profile URL containing it." });
+
+        var user = await _context.Users.FindAsync(userId.Value);
+        if (user == null) return NotFound(new { message = "User not found" });
+
+        var existingLink = await _context.Users.FirstOrDefaultAsync(u => u.SteamId == steamId && u.Id != userId.Value);
+        if (existingLink != null)
+            return BadRequest(new { message = "This Steam account is already linked to another user" });
+
+        var profile = await _steamApi.GetPlayerSummaryAsync(steamId);
+
+        user.SteamId = steamId;
+        user.SteamNickname = !string.IsNullOrWhiteSpace(profile?.Nickname) ? profile.Nickname : steamId;
+        user.SteamAvatarUrl = profile?.AvatarUrl;
+        user.SteamLinkedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new SteamProfileResponse
+        {
+            SteamId = steamId,
+            SteamNickname = user.SteamNickname ?? steamId,
+            SteamAvatarUrl = user.SteamAvatarUrl,
+            ProfileUrl = profile?.ProfileUrl,
+            IsPublic = profile?.IsPublic ?? false,
+            SteamLinkedAt = user.SteamLinkedAt ?? DateTime.UtcNow
+        });
     }
 
     /// <summary>Links an existing GDB game to a Steam AppID.</summary>
@@ -285,6 +324,14 @@ public class SteamController : BaseApiController
         new string(name.ToLowerInvariant()
             .Where(c => char.IsLetterOrDigit(c) || c == ' ')
             .ToArray()).Trim();
+
+    private static string? ExtractSteamId(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var match = Regex.Match(input.Trim(), @"\b\d{17}\b");
+        return match.Success ? match.Value : null;
+    }
 
     private static int NameScore(string a, string b)
     {

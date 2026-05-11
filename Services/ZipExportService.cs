@@ -16,17 +16,20 @@ public class ZipExportService : IZipExportService
 {
     private readonly HttpClient _httpClient;
     private readonly DataExportOptions _options;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly GamesDbContext _context;
     private readonly ILogger<ZipExportService> _logger;
 
     public ZipExportService(
         IHttpClientFactory httpClientFactory,
         IOptions<DataExportOptions> options,
+        IHttpContextAccessor httpContextAccessor,
         GamesDbContext context,
         ILogger<ZipExportService> logger)
     {
         _httpClient = httpClientFactory.CreateClient("TrustAllCerts");
         _options = options.Value;
+        _httpContextAccessor = httpContextAccessor;
         _context = context;
         _logger = logger;
     }
@@ -39,7 +42,8 @@ public class ZipExportService : IZipExportService
         _logger.LogInformation("Starting ZIP export (fullExport: {FullExport})", fullExport);
 
         // 1. Download CSV
-        _logger.LogInformation("Downloading full export CSV from {Url}", _options.FullExportUrl);
+        var fullExportUrl = GetFullExportUrl();
+        _logger.LogInformation("Downloading full export CSV from {Url}", fullExportUrl);
 
         // Add authorization header if provided
         if (!string.IsNullOrWhiteSpace(authorizationHeader))
@@ -48,7 +52,7 @@ public class ZipExportService : IZipExportService
             _httpClient.DefaultRequestHeaders.Add("Authorization", authorizationHeader);
         }
 
-        var csvBytes = await _httpClient.GetByteArrayAsync(_options.FullExportUrl);
+        var csvBytes = await _httpClient.GetByteArrayAsync(fullExportUrl);
         var csvContent = Encoding.UTF8.GetString(csvBytes);
 
         // 2. Parse CSV
@@ -86,6 +90,23 @@ public class ZipExportService : IZipExportService
         );
 
         return stats;
+    }
+
+    private string GetFullExportUrl()
+    {
+        var request = _httpContextAccessor.HttpContext?.Request;
+        if (request == null)
+            return _options.FullExportUrl;
+
+        var scheme = request.Headers.TryGetValue("X-Forwarded-Proto", out var proto) && !string.IsNullOrWhiteSpace(proto)
+            ? proto.ToString().Split(',')[0].Trim()
+            : request.Scheme;
+
+        var host = request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHost) && !string.IsNullOrWhiteSpace(forwardedHost)
+            ? forwardedHost.ToString().Split(',')[0].Trim()
+            : request.Host.ToString();
+
+        return $"{scheme}://{host}{request.PathBase}/api/DataExport/full";
     }
 
     private List<ExportRecord> ParseCsv(string csvContent)

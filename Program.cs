@@ -6,8 +6,15 @@ using GamesDatabase.Api.Services;
 using GamesDatabase.Api.Services.Steam;
 using GamesDatabase.Api.Models;
 using GamesDatabase.Api.Helpers;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Data.Sqlite;
 
 var builder = WebApplication.CreateBuilder(args);
+var isDesktopMode = string.Equals(Environment.GetEnvironmentVariable("GDB_DESKTOP"), "true", StringComparison.OrdinalIgnoreCase);
+
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
 
 // Load environment variables from .env file if it exists (for local development)
 var envFilePath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
@@ -78,6 +85,15 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
         options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     });
+
+var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"];
+if (isDesktopMode && !string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+{
+    Directory.CreateDirectory(dataProtectionKeysPath);
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+        .SetApplicationName("GamesDatabase");
+}
 
 // Configure Entity Framework
 var databaseSettings = builder.Configuration.GetSection(DatabaseSettings.SectionName).Get<DatabaseSettings>() ?? new DatabaseSettings();
@@ -348,42 +364,13 @@ using (var scope = app.Services.CreateScope())
         startupLogger.LogError(ex, "Migration failed. Attempting to continue — the column may already exist.");
     }
 
-    // Schema repair: ensure 'released' column exists on game_replay.
-    // Migration 20260509001056 ran as a no-op on the CasaOS production DB so the
-    // column was never created. This repair is idempotent and runs on every startup.
     try
     {
-        var conn = (Microsoft.Data.Sqlite.SqliteConnection)context.Database.GetDbConnection();
-        if (conn.State != System.Data.ConnectionState.Open)
-            conn.Open();
-
-        bool hasReleasedColumn = false;
-        using (var pragmaCmd = conn.CreateCommand())
-        {
-            pragmaCmd.CommandText = "PRAGMA table_info(game_replay)";
-            using var reader = pragmaCmd.ExecuteReader();
-            while (reader.Read())
-            {
-                // column 1 is the column name in PRAGMA table_info output
-                if (reader.GetString(1) == "released")
-                {
-                    hasReleasedColumn = true;
-                    break;
-                }
-            }
-        }
-
-        if (!hasReleasedColumn)
-        {
-            using var alterCmd = conn.CreateCommand();
-            alterCmd.CommandText = "ALTER TABLE game_replay ADD COLUMN released TEXT";
-            alterCmd.ExecuteNonQuery();
-            startupLogger.LogInformation("Schema repair: added missing 'released' column to game_replay table.");
-        }
+        EnsureCompatibilitySchema(context, startupLogger);
     }
     catch (Exception ex)
     {
-        startupLogger.LogError(ex, "Schema repair for 'released' column failed — replays may not work correctly.");
+        startupLogger.LogError(ex, "Schema repair failed - startup will continue, but some features may not work correctly.");
     }
 
     try
@@ -501,7 +488,7 @@ static async Task SeedMissingReplayTypesAsync(GamesDbContext context)
 // It resizes + converts to WebP on demand and disk-caches the result,
 // so we no longer need the static-file middleware for that path.
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || isDesktopMode)
 {
     app.UseCors("AllowAll");
 }
@@ -525,3 +512,102 @@ app.MapGet("/health", () => Results.Ok(new
 app.MapControllers();
 
 app.Run();
+
+static void EnsureCompatibilitySchema(GamesDbContext context, ILogger logger)
+{
+    var conn = (SqliteConnection)context.Database.GetDbConnection();
+    if (conn.State != System.Data.ConnectionState.Open)
+        conn.Open();
+
+    EnsureColumn(conn, logger, "game_replay", "released", "TEXT NULL");
+
+    EnsureColumn(conn, logger, "user", "steam_avatar_url", "TEXT NULL");
+    EnsureColumn(conn, logger, "user", "steam_id", "TEXT NULL");
+    EnsureColumn(conn, logger, "user", "steam_linked_at", "TEXT NULL");
+    EnsureColumn(conn, logger, "user", "steam_nickname", "TEXT NULL");
+
+    EnsureColumn(conn, logger, "game", "steam_app_id", "INTEGER NULL");
+    EnsureColumn(conn, logger, "game", "steam_last_synced", "TEXT NULL");
+    EnsureColumn(conn, logger, "game", "steam_playtime_2weeks", "INTEGER NULL");
+    EnsureColumn(conn, logger, "game", "steam_playtime_forever", "INTEGER NULL");
+
+    ExecuteRepairSql(conn, logger, """
+        CREATE TABLE IF NOT EXISTS "steam_achievement" (
+            "id" INTEGER NOT NULL CONSTRAINT "PK_steam_achievement" PRIMARY KEY AUTOINCREMENT,
+            "user_id" INTEGER NOT NULL,
+            "game_id" INTEGER NULL,
+            "steam_app_id" INTEGER NOT NULL,
+            "api_name" TEXT NOT NULL,
+            "display_name" TEXT NOT NULL,
+            "description" TEXT NULL,
+            "achieved" INTEGER NOT NULL DEFAULT 0,
+            "unlock_time" TEXT NULL,
+            "icon_url" TEXT NULL,
+            "icon_gray_url" TEXT NULL,
+            "hidden" INTEGER NOT NULL DEFAULT 0,
+            "last_synced" TEXT NOT NULL,
+            CONSTRAINT "FK_steam_achievement_game_game_id" FOREIGN KEY ("game_id") REFERENCES "game" ("id") ON DELETE SET NULL,
+            CONSTRAINT "FK_steam_achievement_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+        );
+        """, "ensured steam_achievement table exists");
+
+    ExecuteRepairSql(conn, logger, """
+        CREATE TABLE IF NOT EXISTS "steam_app_cache" (
+            "app_id" INTEGER NOT NULL CONSTRAINT "PK_steam_app_cache" PRIMARY KEY AUTOINCREMENT,
+            "name" TEXT NOT NULL,
+            "developer" TEXT NULL,
+            "publisher" TEXT NULL,
+            "genres_json" TEXT NULL,
+            "categories_json" TEXT NULL,
+            "release_date" TEXT NULL,
+            "metacritic_score" INTEGER NULL,
+            "header_image_url" TEXT NULL,
+            "background_image_url" TEXT NULL,
+            "price" TEXT NULL,
+            "is_free" INTEGER NOT NULL DEFAULT 0,
+            "last_fetched" TEXT NOT NULL
+        );
+        """, "ensured steam_app_cache table exists");
+
+    ExecuteRepairSql(conn, logger,
+        "CREATE INDEX IF NOT EXISTS \"IX_steam_achievement_game_id\" ON \"steam_achievement\" (\"game_id\");",
+        "ensured steam achievement game index exists");
+    ExecuteRepairSql(conn, logger,
+        "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_steam_achievement_user_id_steam_app_id_api_name\" ON \"steam_achievement\" (\"user_id\", \"steam_app_id\", \"api_name\");",
+        "ensured steam achievement unique index exists");
+}
+
+static void EnsureColumn(SqliteConnection conn, ILogger logger, string table, string column, string definition)
+{
+    if (ColumnExists(conn, table, column))
+        return;
+
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = $"ALTER TABLE {QuoteIdentifier(table)} ADD COLUMN {QuoteIdentifier(column)} {definition}";
+    cmd.ExecuteNonQuery();
+    logger.LogInformation("Schema repair: added missing column {Table}.{Column}.", table, column);
+}
+
+static bool ColumnExists(SqliteConnection conn, string table, string column)
+{
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = $"PRAGMA table_info({QuoteIdentifier(table)})";
+    using var reader = cmd.ExecuteReader();
+    while (reader.Read())
+    {
+        if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            return true;
+    }
+
+    return false;
+}
+
+static void ExecuteRepairSql(SqliteConnection conn, ILogger logger, string sql, string description)
+{
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.ExecuteNonQuery();
+    logger.LogInformation("Schema repair: {Description}.", description);
+}
+
+static string QuoteIdentifier(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";

@@ -334,6 +334,11 @@ public class SteamLinkGameRequest
     public int GameId { get; set; }
 }
 
+public class SteamManualLinkRequest
+{
+    public string SteamId { get; set; } = string.Empty;
+}
+
 // ─── Response DTOs ───────────────────────────────────────────────────────────
 
 public class SteamProfileResponse

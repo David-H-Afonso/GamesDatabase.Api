@@ -30,16 +30,17 @@ public class ExportController : BaseApiController
     /// <param name="full">If true, exports all games regardless of cache. If false, only exports modified games and retries failed images.</param>
     /// <returns>ZIP file containing games, settings, and backup CSV</returns>
     [HttpGet("zip")]
-    public async Task<IActionResult> GetZip([FromQuery] bool full = false)
+    public async Task<IActionResult> GetZip([FromQuery] bool full = false, [FromQuery] bool? fullExport = null)
     {
         try
         {
-            _logger.LogInformation("Starting ZIP export generation (full: {Full})", full);
+            var effectiveFullExport = fullExport ?? full;
+            _logger.LogInformation("Starting ZIP export generation (full: {Full})", effectiveFullExport);
 
             // Get the Authorization header from the current request
             var authHeader = Request.Headers["Authorization"].ToString();
 
-            var result = await _zipExportService.BuildZipAsync(authHeader, full);
+            var result = await _zipExportService.BuildZipAsync(authHeader, effectiveFullExport);
             var fileName = $"games_database_export_{DateTime.UtcNow:yyyy-MM-dd}.zip";
 
             _logger.LogInformation(

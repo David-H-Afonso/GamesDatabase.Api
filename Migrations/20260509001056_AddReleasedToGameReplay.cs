@@ -10,11 +10,9 @@ namespace GamesDatabase.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "released",
-                table: "game_replay",
-                type: "TEXT",
-                nullable: true);
+            // Intentionally no-op. Program.cs runs an idempotent schema repair for
+            // this column because it may already exist in databases where the
+            // original migration failed before EF recorded it as applied.
         }
 
         /// <inheritdoc />

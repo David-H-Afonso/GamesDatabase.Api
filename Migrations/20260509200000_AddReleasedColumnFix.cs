@@ -10,10 +10,9 @@ namespace GamesDatabase.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Use raw SQL with IF NOT EXISTS to safely handle both:
-            // - CasaOS prod where 20260509001056 ran as empty (column missing)
-            // - Local dev where 20260509001056 already added the column
-            migrationBuilder.Sql("ALTER TABLE game_replay ADD COLUMN IF NOT EXISTS released TEXT;");
+            // Intentionally no-op. Program.cs runs an idempotent schema repair for
+            // game_replay.released after migrations, which covers production DBs
+            // where the prior migration was recorded but the column is missing.
         }
 
         /// <inheritdoc />
