@@ -317,7 +317,15 @@ public class SteamImportedGameDto
 public class SteamImportRequest
 {
     public List<int> AppIds { get; set; } = new();
+    public List<SteamImportGameRequest> Games { get; set; } = new();
     public bool CreateMissing { get; set; } = true;
+}
+
+public class SteamImportGameRequest
+{
+    public int AppId { get; set; }
+    public string? LogoUrl { get; set; }
+    public string? CoverUrl { get; set; }
 }
 
 public class SteamLinkGameRequest
@@ -406,6 +414,9 @@ public class SteamStoreSearchItemRaw
     [JsonPropertyName("metascore")]
     public string? Metascore { get; set; }
 
+    [JsonPropertyName("tiny_image")]
+    public string? TinyImage { get; set; }
+
     [JsonPropertyName("price")]
     public SteamStoreSearchPriceRaw? Price { get; set; }
 }
@@ -427,6 +438,7 @@ public class SteamStoreSearchItemDto
     public int AppId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? CoverUrl { get; set; }
+    public string? LogoUrl { get; set; }
     public string? Price { get; set; }
     public int? DiscountPercent { get; set; }
     public string? OriginalPrice { get; set; }
@@ -436,4 +448,6 @@ public class SteamStoreSearchItemDto
 public class SteamAddStoreGameRequest
 {
     public int AppId { get; set; }
+    public string? LogoUrl { get; set; }
+    public string? CoverUrl { get; set; }
 }

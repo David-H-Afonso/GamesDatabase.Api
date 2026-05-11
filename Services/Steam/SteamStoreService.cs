@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.DTOs.Steam;
@@ -20,6 +21,10 @@ public class SteamStoreService : ISteamStoreService
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private static readonly Regex CommunityIconUrlRegex = new(
+        @"https?://[^""'\s<>]+/steamcommunity/public/images/apps/(?<appId>\d+)/(?<hash>[a-f0-9]{32,64})\.jpg",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public SteamStoreService(IHttpClientFactory httpClientFactory, IOptions<SteamSettings> settings, GamesDbContext context, ILogger<SteamStoreService> logger)
     {
@@ -169,7 +174,8 @@ public class SteamStoreService : ISteamStoreService
                 {
                     AppId = i.Id,
                     Name = i.Name,
-                    CoverUrl = $"https://cdn.akamai.steamstatic.com/steam/apps/{i.Id}/header.jpg",
+                    CoverUrl = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{i.Id}/header.jpg",
+                    LogoUrl = i.TinyImage,
                     Price = i.Price?.FinalFormatted,
                     DiscountPercent = i.Price?.DiscountPercent > 0 ? i.Price.DiscountPercent : null,
                     OriginalPrice = i.Price?.DiscountPercent > 0 ? i.Price.InitialFormatted : null,
@@ -182,5 +188,52 @@ public class SteamStoreService : ISteamStoreService
             _logger.LogError(ex, "Error searching Steam Store for '{Query}'", query);
             return [];
         }
+    }
+
+    public async Task<string?> GetCommunityIconUrlAsync(int appId)
+    {
+        var url = $"https://store.steampowered.com/app/{appId}/?l=english";
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("Cookie", "birthtime=568022401; lastagecheckage=1-0-1988; wants_mature_content=1");
+            request.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
+
+            var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return null;
+
+            var html = await response.Content.ReadAsStringAsync();
+            var appIconIndex = html.IndexOf("apphub_AppIcon", StringComparison.OrdinalIgnoreCase);
+            if (appIconIndex >= 0)
+            {
+                var iconHtml = html.Substring(appIconIndex, Math.Min(1200, html.Length - appIconIndex));
+                var appIconUrl = FindCommunityIconUrl(iconHtml, appId);
+                if (appIconUrl != null) return appIconUrl;
+            }
+
+            return FindCommunityIconUrl(html, appId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error fetching Steam community icon for AppID {AppId}", appId);
+            return null;
+        }
+    }
+
+    private static string? FindCommunityIconUrl(string html, int appId)
+    {
+        var matches = CommunityIconUrlRegex.Matches(html);
+
+        foreach (Match match in matches)
+        {
+            if (!match.Success) continue;
+            if (!int.TryParse(match.Groups["appId"].Value, out var matchedAppId)) continue;
+            if (matchedAppId != appId) continue;
+
+            return match.Value.Replace("&amp;", "&");
+        }
+
+        return null;
     }
 }

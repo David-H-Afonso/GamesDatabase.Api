@@ -147,10 +147,10 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
-        if (request.AppIds == null || request.AppIds.Count == 0)
+        if ((request.AppIds == null || request.AppIds.Count == 0) && (request.Games == null || request.Games.Count == 0))
             return BadRequest(new { message = "No AppIDs provided" });
 
-        var result = await _steamSync.ImportLibraryAsync(userId.Value, request.AppIds, request.CreateMissing);
+        var result = await _steamSync.ImportLibraryAsync(userId.Value, request);
         return Ok(result);
     }
 
@@ -325,7 +325,7 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
-        var result = await _steamSync.AddStoreGameAsync(userId.Value, request.AppId);
+        var result = await _steamSync.AddStoreGameAsync(userId.Value, request.AppId, request.LogoUrl, request.CoverUrl);
         return Ok(result);
     }
 }

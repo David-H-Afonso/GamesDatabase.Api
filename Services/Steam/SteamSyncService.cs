@@ -70,6 +70,7 @@ public class SteamSyncService : ISteamSyncService
                 gamesUpdated++;
             }
 
+            await FillMissingSteamImagesAsync(game, playtimeMap.GetValueOrDefault(game.SteamAppId.Value));
             NormalizeStoredSteamReleaseDate(game);
 
             // Sync achievements
@@ -89,11 +90,14 @@ public class SteamSyncService : ISteamSyncService
         };
     }
 
-    public async Task<SteamImportResult> ImportLibraryAsync(int userId, List<int> appIds, bool createMissing)
+    public async Task<SteamImportResult> ImportLibraryAsync(int userId, SteamImportRequest request)
     {
         var user = await _context.Users.FindAsync(userId);
         if (user?.SteamId == null)
             return new SteamImportResult { Success = false, Error = "User has no Steam account linked" };
+
+        var importItems = NormalizeImportItems(request);
+        var appIds = importItems.Keys.ToList();
 
         // Get existing games for this user that have a SteamAppId
         var existingByAppId = await _context.Games
@@ -117,6 +121,8 @@ public class SteamSyncService : ISteamSyncService
 
         foreach (var appId in appIds)
         {
+            var importItem = importItems[appId];
+
             if (existingByAppId.TryGetValue(appId, out var existingGame))
             {
                 // Already linked - update playtime
@@ -126,6 +132,7 @@ public class SteamSyncService : ISteamSyncService
                     existingGame.SteamPlaytime2Weeks = owned.Playtime2Weeks;
                     existingGame.SteamLastSynced = DateTime.UtcNow;
                 }
+                await FillMissingSteamImagesAsync(existingGame, ownedByAppId.GetValueOrDefault(appId), importItem);
                 NormalizeStoredSteamReleaseDate(existingGame);
                 result.Linked++;
                 result.ImportedGames.Add(new SteamImportedGameDto
@@ -138,7 +145,7 @@ public class SteamSyncService : ISteamSyncService
                 continue;
             }
 
-            if (!createMissing)
+            if (!request.CreateMissing)
             {
                 result.Skipped++;
                 result.ImportedGames.Add(new SteamImportedGameDto { AppId = appId, Name = $"App {appId}", Action = "skipped" });
@@ -157,7 +164,7 @@ public class SteamSyncService : ISteamSyncService
             }
 
             // Use header image from store cache, fall back to standard CDN URL
-            var coverUrl = appDetails?.HeaderImageUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+            var coverUrl = appDetails?.HeaderImageUrl ?? importItem.CoverUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
 
             // Determine critic score: prefer Metacritic, fall back to Steam review percentage
             int? criticScore = appDetails?.MetacriticScore;
@@ -173,6 +180,16 @@ public class SteamSyncService : ISteamSyncService
                 }
             }
 
+            string? resolvedLogoUrl = ownedGame?.IconUrl;
+            if (string.IsNullOrWhiteSpace(resolvedLogoUrl))
+            {
+                resolvedLogoUrl = await _steamStore.GetCommunityIconUrlAsync(appId);
+            }
+            if (string.IsNullOrWhiteSpace(resolvedLogoUrl))
+            {
+                resolvedLogoUrl = importItem.LogoUrl;
+            }
+
             var newGame = CreateSteamGameEntity(
                 userId,
                 defaultStatus.Id,
@@ -183,7 +200,7 @@ public class SteamSyncService : ISteamSyncService
                 criticProvider,
                 steamPlatform?.Id,
                 coverUrl,
-                ownedGame?.IconUrl);
+                resolvedLogoUrl ?? GetSteamLogoUrl(appId, coverUrl));
             newGame.SteamPlaytimeForever = ownedGame?.PlaytimeForever;
             newGame.SteamPlaytime2Weeks = ownedGame?.Playtime2Weeks;
             newGame.SteamLastSynced = DateTime.UtcNow;
@@ -205,7 +222,7 @@ public class SteamSyncService : ISteamSyncService
         return result;
     }
 
-    public async Task<SteamImportedGameDto> AddStoreGameAsync(int userId, int appId)
+    public async Task<SteamImportedGameDto> AddStoreGameAsync(int userId, int appId, string? logoUrl = null, string? coverUrl = null)
     {
         // Check if already exists in GDB
         var existing = await _context.Games
@@ -223,7 +240,7 @@ public class SteamSyncService : ISteamSyncService
         // Fetch store details
         var appDetails = await _steamStore.GetOrCacheAppDetailsAsync(appId);
         var gameName = appDetails?.Name ?? $"Steam App {appId}";
-        var coverUrl = appDetails?.HeaderImageUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+        var resolvedCoverUrl = appDetails?.HeaderImageUrl ?? coverUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
 
         // Find Steam platform
         var steamPlatform = await _context.GamePlatforms
@@ -242,6 +259,28 @@ public class SteamSyncService : ISteamSyncService
             }
         }
 
+        string? resolvedLogoUrl = null;
+        if (string.IsNullOrWhiteSpace(resolvedLogoUrl))
+        {
+            var userForIcon = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+            if (!string.IsNullOrWhiteSpace(userForIcon?.SteamId))
+            {
+                var ownedIconUrl = (await _steamApi.GetOwnedGamesAsync(userForIcon.SteamId))
+                    .FirstOrDefault(g => g.AppId == appId)?.IconUrl;
+                if (!string.IsNullOrWhiteSpace(ownedIconUrl))
+                    resolvedLogoUrl = ownedIconUrl;
+            }
+
+            if (string.IsNullOrWhiteSpace(resolvedLogoUrl))
+            {
+                resolvedLogoUrl = await _steamStore.GetCommunityIconUrlAsync(appId);
+            }
+            if (string.IsNullOrWhiteSpace(resolvedLogoUrl))
+            {
+                resolvedLogoUrl = logoUrl;
+            }
+        }
+
         var newGame = CreateSteamGameEntity(
             userId,
             defaultStatus.Id,
@@ -251,8 +290,8 @@ public class SteamSyncService : ISteamSyncService
             criticScore,
             criticProvider,
             steamPlatform?.Id,
-            coverUrl,
-            logoUrl: null);
+            resolvedCoverUrl,
+            logoUrl: resolvedLogoUrl ?? GetSteamLogoUrl(appId, resolvedCoverUrl));
 
         _context.Games.Add(newGame);
         await _context.SaveChangesAsync();
@@ -305,6 +344,84 @@ public class SteamSyncService : ISteamSyncService
         }
     }
 
+    private static string GetSteamLogoUrl(int appId, string? headerImageUrl = null)
+    {
+        if (!string.IsNullOrWhiteSpace(headerImageUrl))
+        {
+            var logoFromHeader = headerImageUrl.Replace("/header.jpg", "/logo.png", StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(logoFromHeader, headerImageUrl, StringComparison.Ordinal))
+                return logoFromHeader;
+        }
+
+        return $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/logo.png";
+    }
+
+    private static bool ShouldReplaceWithCommunityIcon(string? logoUrl)
+    {
+        if (string.IsNullOrWhiteSpace(logoUrl)) return true;
+        if (logoUrl.Contains("steamcommunity/public/images/apps/", StringComparison.OrdinalIgnoreCase)) return false;
+
+        return logoUrl.Contains("store_item_assets/steam/apps/", StringComparison.OrdinalIgnoreCase)
+            || logoUrl.Contains("/steam/apps/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<int, SteamImportGameRequest> NormalizeImportItems(SteamImportRequest request)
+    {
+        var importItems = new Dictionary<int, SteamImportGameRequest>();
+
+        foreach (var game in (request.Games ?? []).Where(game => game.AppId > 0))
+        {
+            importItems[game.AppId] = game;
+        }
+
+        foreach (var appId in (request.AppIds ?? []).Where(appId => appId > 0))
+        {
+            importItems.TryAdd(appId, new SteamImportGameRequest { AppId = appId });
+        }
+
+        return importItems;
+    }
+
+    private async Task FillMissingSteamImagesAsync(Game game, SteamOwnedGameDto? ownedGame = null, SteamImportGameRequest? importItem = null)
+    {
+        if (game.SteamAppId == null) return;
+
+        var shouldResolveLogo = ShouldReplaceWithCommunityIcon(game.Logo);
+
+        if (shouldResolveLogo && !string.IsNullOrWhiteSpace(ownedGame?.IconUrl))
+        {
+            game.Logo = ownedGame.IconUrl;
+            shouldResolveLogo = false;
+        }
+
+        if (shouldResolveLogo)
+        {
+            var communityIconUrl = await _steamStore.GetCommunityIconUrlAsync(game.SteamAppId.Value);
+            if (!string.IsNullOrWhiteSpace(communityIconUrl))
+            {
+                game.Logo = communityIconUrl;
+                shouldResolveLogo = false;
+            }
+        }
+
+        var shouldResolveCover = string.IsNullOrWhiteSpace(game.Cover);
+        if (!shouldResolveCover && !shouldResolveLogo) return;
+
+        var appId = game.SteamAppId.Value;
+        var appDetails = await _steamStore.GetOrCacheAppDetailsAsync(appId);
+        var coverUrl = appDetails?.HeaderImageUrl ?? importItem?.CoverUrl ?? $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/header.jpg";
+
+        if (shouldResolveCover)
+            game.Cover = coverUrl;
+
+        if (shouldResolveLogo)
+        {
+            game.Logo = !string.IsNullOrWhiteSpace(importItem?.LogoUrl)
+                ? importItem.LogoUrl
+                : GetSteamLogoUrl(appId, coverUrl);
+        }
+    }
+
     private async Task<SteamSyncResult> SyncGameInternalAsync(User user, Game game)
     {
         if (user.SteamId == null || game.SteamAppId == null)
@@ -320,6 +437,7 @@ public class SteamSyncService : ISteamSyncService
             game.SteamPlaytime2Weeks = ownedGame.Playtime2Weeks;
         }
 
+        await FillMissingSteamImagesAsync(game, ownedGame);
         NormalizeStoredSteamReleaseDate(game);
 
         var achCount = await SyncAchievementsForGameAsync(user.SteamId, game);
