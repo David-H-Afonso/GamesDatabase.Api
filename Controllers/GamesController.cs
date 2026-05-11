@@ -316,6 +316,25 @@ public class GamesController : BaseApiController
                 : query.Where(g => !g.GameReplays.Any());
         }
 
+        if (parameters.HasSteamApp.HasValue)
+        {
+            query = parameters.HasSteamApp.Value
+                ? query.Where(g => g.SteamAppId.HasValue)
+                : query.Where(g => !g.SteamAppId.HasValue);
+        }
+
+        if (!string.IsNullOrWhiteSpace(parameters.MissingDuration))
+        {
+            query = parameters.MissingDuration.ToLowerInvariant() switch
+            {
+                "story" => query.Where(g => !g.Story.HasValue || g.Story <= 0),
+                "completion" => query.Where(g => !g.Completion.HasValue || g.Completion <= 0),
+                "both" => query.Where(g => (!g.Story.HasValue || g.Story <= 0) && (!g.Completion.HasValue || g.Completion <= 0)),
+                "any" => query.Where(g => (!g.Story.HasValue || g.Story <= 0) || (!g.Completion.HasValue || g.Completion <= 0)),
+                _ => query
+            };
+        }
+
         // ─── Filtros de rejugadas ─────────────────────────────────────────────
         var hasReplayFilter =
             !string.IsNullOrEmpty(parameters.ReplayStartedFrom) ||
@@ -383,6 +402,7 @@ public class GamesController : BaseApiController
                 "finished" => parameters.SortDescending ? query.OrderByDescending(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "createdat" or "created" => parameters.SortDescending ? query.OrderByDescending(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "updatedat" or "updated" or "lastedited" => parameters.SortDescending ? query.OrderByDescending(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
+                "steamplaytime" or "steamplaytimeforever" or "steamhours" => parameters.SortDescending ? query.OrderByDescending(g => g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(g => g.Id) : query.OrderBy(g => g.Id),
                 _ => query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) // Default: ordenar por status ascendente
             };

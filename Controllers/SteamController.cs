@@ -5,6 +5,8 @@ using GamesDatabase.Api.Services.Steam;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace GamesDatabase.Api.Controllers;
@@ -278,7 +280,7 @@ public class SteamController : BaseApiController
 
         var gdbGames = await _context.Games
             .Where(g => g.UserId == userId.Value)
-            .Select(g => new { g.Id, g.Name, g.SteamAppId })
+            .Select(g => new MatchGameCandidate(g.Id, g.Name, g.SteamAppId))
             .ToListAsync();
 
         var linkedAppIds = gdbGames
@@ -295,39 +297,64 @@ public class SteamController : BaseApiController
             .Select(d => MatchKey(d.SteamAppId, d.GameId))
             .ToHashSet();
 
+        var suggestions = unlinkedSteam
+            .Select(sg => FindBestMatchSuggestion(
+                sg.AppId,
+                sg.Name,
+                sg.IconUrl,
+                unlinkedGdb,
+                dismissedPairs))
+            .Where(s => s != null)
+            .Cast<SteamMatchSuggestionDto>()
+            .ToList();
+
+        return Ok(suggestions.OrderByDescending(s => s.Confidence).ToList());
+    }
+
+    /// <summary>Suggests Steam Store apps that might match GDB games without a Steam AppID.</summary>
+    [HttpGet("store-match-suggestions")]
+    public async Task<IActionResult> GetStoreMatchSuggestions()
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var gdbGames = await _context.Games
+            .Where(g => g.UserId == userId.Value && !g.SteamAppId.HasValue)
+            .Select(g => new MatchGameCandidate(g.Id, g.Name, null))
+            .OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+            .ToListAsync();
+
+        var dismissedPairs = (await _context.SteamMatchDismissals
+            .Where(d => d.UserId == userId.Value)
+            .Select(d => new { d.SteamAppId, d.GameId })
+            .ToListAsync())
+            .Select(d => MatchKey(d.SteamAppId, d.GameId))
+            .ToHashSet();
+
         var suggestions = new List<SteamMatchSuggestionDto>();
 
-        foreach (var sg in unlinkedSteam)
+        foreach (var gg in gdbGames)
         {
-            var steamNorm = NormalizeName(sg.Name);
-            SteamMatchSuggestionDto? best = null;
-
-            foreach (var gg in unlinkedGdb)
-            {
-                if (dismissedPairs.Contains(MatchKey(sg.AppId, gg.Id)))
-                    continue;
-
-                var gdbNorm = NormalizeName(gg.Name);
-                var score = NameScore(steamNorm, gdbNorm);
-                if (score >= 50 && (best == null || score > best.Confidence))
-                {
-                    best = new SteamMatchSuggestionDto
-                    {
-                        SteamAppId = sg.AppId,
-                        SteamName = sg.Name,
-                        SteamIconUrl = sg.IconUrl,
-                        GdbGameId = gg.Id,
-                        GdbGameName = gg.Name,
-                        Confidence = score
-                    };
-                }
-            }
+            var storeResults = await _steamStore.SearchStoreAsync(gg.Name);
+            var best = storeResults
+                .Take(10)
+                .Select(storeGame => FindMatchSuggestion(
+                    storeGame.AppId,
+                    storeGame.Name,
+                    storeGame.LogoUrl ?? storeGame.CoverUrl,
+                    gg.Id,
+                    gg.Name,
+                    dismissedPairs))
+                .Where(s => s != null)
+                .Cast<SteamMatchSuggestionDto>()
+                .OrderByDescending(s => s.Confidence)
+                .FirstOrDefault();
 
             if (best != null)
                 suggestions.Add(best);
         }
 
-        return Ok(suggestions.OrderByDescending(s => s.Confidence).ToList());
+        return Ok(suggestions.OrderByDescending(s => s.Confidence).ThenBy(s => s.GdbGameName).ToList());
     }
 
     /// <summary>Stores rejected Steam/GDB suggestion pairs so future searches can offer other matches.</summary>
@@ -388,12 +415,54 @@ public class SteamController : BaseApiController
         return Ok(new { dismissed = created });
     }
 
-    private static string NormalizeName(string name) =>
-        new string(name.ToLowerInvariant()
-            .Where(c => char.IsLetterOrDigit(c) || c == ' ')
-            .ToArray()).Trim();
-
     private static string MatchKey(int steamAppId, int gameId) => $"{steamAppId}:{gameId}";
+
+    private sealed record MatchGameCandidate(int Id, string Name, int? SteamAppId);
+
+    private static SteamMatchSuggestionDto? FindBestMatchSuggestion(
+        int steamAppId,
+        string steamName,
+        string? steamIconUrl,
+        IEnumerable<MatchGameCandidate> gdbGames,
+        HashSet<string> dismissedPairs)
+    {
+        SteamMatchSuggestionDto? best = null;
+
+        foreach (var gg in gdbGames)
+        {
+            var suggestion = FindMatchSuggestion(steamAppId, steamName, steamIconUrl, gg.Id, gg.Name, dismissedPairs);
+            if (suggestion != null && (best == null || suggestion.Confidence > best.Confidence))
+                best = suggestion;
+        }
+
+        return best;
+    }
+
+    private static SteamMatchSuggestionDto? FindMatchSuggestion(
+        int steamAppId,
+        string steamName,
+        string? steamIconUrl,
+        int gdbGameId,
+        string gdbGameName,
+        HashSet<string> dismissedPairs)
+    {
+        if (dismissedPairs.Contains(MatchKey(steamAppId, gdbGameId)))
+            return null;
+
+        var score = NameScore(steamName, gdbGameName);
+        if (score < 50)
+            return null;
+
+        return new SteamMatchSuggestionDto
+        {
+            SteamAppId = steamAppId,
+            SteamName = steamName,
+            SteamIconUrl = steamIconUrl,
+            GdbGameId = gdbGameId,
+            GdbGameName = gdbGameName,
+            Confidence = score
+        };
+    }
 
     private static string? ExtractSteamId(string input)
     {
@@ -405,6 +474,9 @@ public class SteamController : BaseApiController
 
     private static int NameScore(string a, string b)
     {
+        a = NormalizeName(a);
+        b = NormalizeName(b);
+
         if (a == b) return 100;
 
         var wa = new HashSet<string>(a.Split(' ', StringSplitOptions.RemoveEmptyEntries));
@@ -422,6 +494,17 @@ public class SteamController : BaseApiController
         // Jaccard similarity
         int union = wa.Union(wb).Count();
         return (int)(100.0 * intersection / union);
+    }
+
+    private static string NormalizeName(string name)
+    {
+        var normalized = name.ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormD);
+        var chars = normalized
+            .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            .Select(c => char.IsLetterOrDigit(c) ? c : ' ')
+            .ToArray();
+
+        return Regex.Replace(new string(chars), @"\s+", " ").Trim();
     }
 
     /// <summary>Searches the Steam Store for any game by name (does not require ownership).</summary>

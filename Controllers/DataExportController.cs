@@ -286,7 +286,7 @@ public class DataExportController : BaseApiController
                 var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                     ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                     : "";
-                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "" });
+                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "" });
             }
 
             // ReplayType catalog
@@ -536,6 +536,10 @@ public class DataExportController : BaseApiController
                         existing.Cover = record.Cover;
                         existing.IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var existingCbk) ? existingCbk : (bool?)null;
                         existing.KeyStoreUrl = record.KeyStoreUrl;
+                        existing.SteamAppId = ParseNullableInt(record.SteamAppId);
+                        existing.SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever);
+                        existing.SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks);
+                        existing.SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced);
                         existing.CalculateScore();
 
                         // Update PlayWith relationships
@@ -576,7 +580,11 @@ public class DataExportController : BaseApiController
                             Logo = record.Logo,
                             Cover = record.Cover,
                             IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var newCbk) ? newCbk : (bool?)null,
-                            KeyStoreUrl = record.KeyStoreUrl
+                            KeyStoreUrl = record.KeyStoreUrl,
+                            SteamAppId = ParseNullableInt(record.SteamAppId),
+                            SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever),
+                            SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks),
+                            SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced)
                         };
                         newGame.CalculateScore();
                         _context.Games.Add(newGame);
@@ -862,6 +870,10 @@ public class DataExportController : BaseApiController
                     Cover = ApplyExportString(g.Cover ?? "", "cover", effectiveConfig),
                     IsCheaperByKey = ApplyExportString(g.IsCheaperByKey?.ToString() ?? "", "isCheaperByKey", effectiveConfig),
                     KeyStoreUrl = ApplyExportString(g.KeyStoreUrl ?? "", "keyStoreUrl", effectiveConfig),
+                    SteamAppId = ApplyExportString(g.SteamAppId?.ToString() ?? "", "steamAppId", effectiveConfig),
+                    SteamPlaytimeForever = ApplyExportString(g.SteamPlaytimeForever?.ToString() ?? "", "steamPlaytimeForever", effectiveConfig),
+                    SteamPlaytime2Weeks = ApplyExportString(g.SteamPlaytime2Weeks?.ToString() ?? "", "steamPlaytime2Weeks", effectiveConfig),
+                    SteamLastSynced = ApplyExportString(g.SteamLastSynced?.ToString("O") ?? "", "steamLastSynced", effectiveConfig),
                 });
             }
 
@@ -982,6 +994,10 @@ public class DataExportController : BaseApiController
                     var resolvedCover = ResolveImportString(record.Cover, "cover", effectiveConfig);
                     var resolvedIsCheaperByKey = ResolveImportString(record.IsCheaperByKey, "isCheaperByKey", effectiveConfig);
                     var resolvedKeyStoreUrl = ResolveImportString(record.KeyStoreUrl, "keyStoreUrl", effectiveConfig);
+                    var resolvedSteamAppId = ResolveImportString(record.SteamAppId, "steamAppId", effectiveConfig);
+                    var resolvedSteamPlaytimeForever = ResolveImportString(record.SteamPlaytimeForever, "steamPlaytimeForever", effectiveConfig);
+                    var resolvedSteamPlaytime2Weeks = ResolveImportString(record.SteamPlaytime2Weeks, "steamPlaytime2Weeks", effectiveConfig);
+                    var resolvedSteamLastSynced = ResolveImportString(record.SteamLastSynced, "steamLastSynced", effectiveConfig);
 
                     // Resolve entity lookups
                     var status = string.IsNullOrWhiteSpace(resolvedStatus)
@@ -1041,6 +1057,10 @@ public class DataExportController : BaseApiController
                         existing.Cover = resolvedCover;
                         existing.IsCheaperByKey = isCheaperByKey;
                         existing.KeyStoreUrl = resolvedKeyStoreUrl;
+                        existing.SteamAppId = ParseNullableInt(resolvedSteamAppId);
+                        existing.SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever);
+                        existing.SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks);
+                        existing.SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced);
                         existing.CalculateScore();
 
                         foreach (var mapping in existing.GamePlayWiths.ToList())
@@ -1073,6 +1093,10 @@ public class DataExportController : BaseApiController
                             Cover = resolvedCover,
                             IsCheaperByKey = isCheaperByKey,
                             KeyStoreUrl = resolvedKeyStoreUrl,
+                            SteamAppId = ParseNullableInt(resolvedSteamAppId),
+                            SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever),
+                            SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks),
+                            SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced),
                         };
                         newGame.CalculateScore();
                         _context.Games.Add(newGame);
@@ -1160,6 +1184,12 @@ public class DataExportController : BaseApiController
         if (string.IsNullOrWhiteSpace(value)) return null;
         return int.TryParse(value, out var result) ? result : null;
     }
+
+    private static DateTime? ParseNullableDateTime(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var result) ? result : null;
+    }
 }
 
 public class FullExportModel
@@ -1191,6 +1221,14 @@ public class FullExportModel
     public string? IsCheaperByKey { get; set; }
     [Name("KeyStoreUrl")]
     public string? KeyStoreUrl { get; set; }
+    [Name("SteamAppId")]
+    public string? SteamAppId { get; set; }
+    [Name("SteamPlaytimeForever")]
+    public string? SteamPlaytimeForever { get; set; }
+    [Name("SteamPlaytime2Weeks")]
+    public string? SteamPlaytime2Weeks { get; set; }
+    [Name("SteamLastSynced")]
+    public string? SteamLastSynced { get; set; }
     // View fields
     public string? Description { get; set; }
     public string? FiltersJson { get; set; }

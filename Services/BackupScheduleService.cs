@@ -167,7 +167,11 @@ public class BackupScheduleService : BackgroundService
                     Logo = g.Logo ?? "",
                     Cover = g.Cover ?? "",
                     IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "",
-                    KeyStoreUrl = g.KeyStoreUrl ?? ""
+                    KeyStoreUrl = g.KeyStoreUrl ?? "",
+                    SteamAppId = g.SteamAppId?.ToString() ?? "",
+                    SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "",
+                    SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "",
+                    SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? ""
                 });
             }
 

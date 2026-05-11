@@ -73,6 +73,24 @@ public class ExportRecord
     [Name("Cover")]
     public string? Cover { get; set; }
 
+    [Name("IsCheaperByKey")]
+    public string? IsCheaperByKey { get; set; }
+
+    [Name("KeyStoreUrl")]
+    public string? KeyStoreUrl { get; set; }
+
+    [Name("SteamAppId")]
+    public string? SteamAppId { get; set; }
+
+    [Name("SteamPlaytimeForever")]
+    public string? SteamPlaytimeForever { get; set; }
+
+    [Name("SteamPlaytime2Weeks")]
+    public string? SteamPlaytime2Weeks { get; set; }
+
+    [Name("SteamLastSynced")]
+    public string? SteamLastSynced { get; set; }
+
     [Name("Description")]
     public string? Description { get; set; }
 

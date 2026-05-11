@@ -65,6 +65,8 @@ public class GameQueryParameters : QueryParameters
     public int? ReplayGradeMin { get; set; }
     public int? ReplayGradeMax { get; set; }
     public bool? HasReplays { get; set; }
+    public bool? HasSteamApp { get; set; }
+    public string? MissingDuration { get; set; }
 
     /// <summary>
     /// "any" (default): alguna rejugada cumple el filtro.

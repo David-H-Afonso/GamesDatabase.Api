@@ -108,6 +108,8 @@ public enum FilterField
     CriticProvider,
     CreatedAt,
     UpdatedAt,
+    SteamAppId,
+    SteamPlaytimeForever,
     ReplayStarted,
     ReplayFinished,
     ReplayReleased,
@@ -145,6 +147,7 @@ public enum SortField
     CriticProvider,
     CreatedAt,
     UpdatedAt,
+    SteamPlaytimeForever,
     Id
 }
 
