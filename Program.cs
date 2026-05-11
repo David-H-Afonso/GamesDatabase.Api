@@ -85,6 +85,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
         options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     });
+builder.Services.AddMemoryCache();
 
 var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"];
 if (isDesktopMode && !string.IsNullOrWhiteSpace(dataProtectionKeysPath))

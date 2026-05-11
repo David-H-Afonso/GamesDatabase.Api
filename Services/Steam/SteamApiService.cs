@@ -41,6 +41,9 @@ public class SteamApiService : ISteamApiService
                 Name = g.Name ?? $"App {g.AppId}",
                 PlaytimeForever = g.PlaytimeForever,
                 Playtime2Weeks = g.Playtime2Weeks,
+                LastPlayedAt = g.LastPlayedUnixTime.HasValue && g.LastPlayedUnixTime.Value > 0
+                    ? DateTimeOffset.FromUnixTimeSeconds(g.LastPlayedUnixTime.Value).UtcDateTime
+                    : null,
                 IconUrl = !string.IsNullOrEmpty(g.ImgIconUrl)
                     ? $"https://media.steampowered.com/steamcommunity/public/images/apps/{g.AppId}/{g.ImgIconUrl}.jpg"
                     : null

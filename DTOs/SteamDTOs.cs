@@ -33,6 +33,9 @@ public class SteamOwnedGameRaw
     [JsonPropertyName("playtime_2weeks")]
     public int? Playtime2Weeks { get; set; }
 
+    [JsonPropertyName("rtime_last_played")]
+    public long? LastPlayedUnixTime { get; set; }
+
     [JsonPropertyName("img_icon_url")]
     public string? ImgIconUrl { get; set; }
 }
@@ -242,6 +245,7 @@ public class SteamOwnedGameDto
     public string Name { get; set; } = string.Empty;
     public int PlaytimeForever { get; set; }
     public int? Playtime2Weeks { get; set; }
+    public DateTime? LastPlayedAt { get; set; }
     public string? IconUrl { get; set; }
 }
 
@@ -435,6 +439,41 @@ public class SteamStoreSearchItemRaw
 
     [JsonPropertyName("price")]
     public SteamStoreSearchPriceRaw? Price { get; set; }
+}
+
+public class SteamDateSuggestionDto
+{
+    public int GameId { get; set; }
+    public string GameName { get; set; } = string.Empty;
+    public int SteamAppId { get; set; }
+    public string SteamName { get; set; } = string.Empty;
+    public string? SteamIconUrl { get; set; }
+    public int? SteamPlaytimeForever { get; set; }
+    public string? CurrentStarted { get; set; }
+    public string? CurrentFinished { get; set; }
+    public string? ProposedStarted { get; set; }
+    public string? ProposedFinished { get; set; }
+    public string StartedSource { get; set; } = string.Empty;
+    public string FinishedSource { get; set; } = string.Empty;
+    public List<string> Notes { get; set; } = new();
+}
+
+public class SteamApplyDateSuggestionsRequest
+{
+    public List<SteamApplyDateSuggestionItem> Suggestions { get; set; } = new();
+}
+
+public class SteamApplyDateSuggestionItem
+{
+    public int GameId { get; set; }
+    public string? Started { get; set; }
+    public string? Finished { get; set; }
+}
+
+public class SteamApplyDateSuggestionsResponse
+{
+    public int Updated { get; set; }
+    public List<string> Errors { get; set; } = new();
 }
 
 public class SteamStoreSearchPriceRaw

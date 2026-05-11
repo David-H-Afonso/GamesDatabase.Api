@@ -5,6 +5,7 @@ using GamesDatabase.Api.Services.Steam;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -21,19 +22,22 @@ public class SteamController : BaseApiController
     private readonly ISteamStoreService _steamStore;
     private readonly ISteamSyncService _steamSync;
     private readonly ILogger<SteamController> _logger;
+    private readonly IMemoryCache _cache;
 
     public SteamController(
         GamesDbContext context,
         ISteamApiService steamApi,
         ISteamStoreService steamStore,
         ISteamSyncService steamSync,
-        ILogger<SteamController> logger)
+        ILogger<SteamController> logger,
+        IMemoryCache cache)
     {
         _context = context;
         _steamApi = steamApi;
         _steamStore = steamStore;
         _steamSync = steamSync;
         _logger = logger;
+        _cache = cache;
     }
 
     /// <summary>Returns the Steam profile data linked to the current user.</summary>
@@ -129,7 +133,7 @@ public class SteamController : BaseApiController
         var user = await _context.Users.FindAsync(userId.Value);
         if (user?.SteamId != null)
         {
-            var ownedGames = await _steamApi.GetOwnedGamesAsync(user.SteamId);
+            var ownedGames = await GetCachedOwnedGamesAsync(user.SteamId);
             var owned = ownedGames.FirstOrDefault(g => g.AppId == request.AppId);
             if (owned != null)
             {
@@ -154,7 +158,7 @@ public class SteamController : BaseApiController
         if (user?.SteamId == null)
             return BadRequest(new { message = "No Steam account linked" });
 
-        var ownedGames = await _steamApi.GetOwnedGamesAsync(user.SteamId);
+        var ownedGames = await GetCachedOwnedGamesAsync(user.SteamId);
 
         // Load GDB games with SteamAppId for this user
         var gdbGames = await _context.Games
@@ -276,7 +280,7 @@ public class SteamController : BaseApiController
         if (user?.SteamId == null)
             return BadRequest(new { message = "No Steam account linked" });
 
-        var steamGames = await _steamApi.GetOwnedGamesAsync(user.SteamId);
+        var steamGames = await GetCachedOwnedGamesAsync(user.SteamId);
 
         var gdbGames = await _context.Games
             .Where(g => g.UserId == userId.Value)
@@ -320,8 +324,8 @@ public class SteamController : BaseApiController
 
         var gdbGames = await _context.Games
             .Where(g => g.UserId == userId.Value && !g.SteamAppId.HasValue)
-            .Select(g => new MatchGameCandidate(g.Id, g.Name, null))
             .OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+            .Select(g => new MatchGameCandidate(g.Id, g.Name, null))
             .ToListAsync();
 
         var dismissedPairs = (await _context.SteamMatchDismissals
@@ -335,7 +339,17 @@ public class SteamController : BaseApiController
 
         foreach (var gg in gdbGames)
         {
-            var storeResults = await _steamStore.SearchStoreAsync(gg.Name);
+            List<SteamStoreSearchItemDto> storeResults;
+            try
+            {
+                storeResults = await GetCachedStoreSearchAsync(gg.Name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Skipping Steam Store suggestion search for game {GameId} '{GameName}'", gg.Id, gg.Name);
+                continue;
+            }
+
             var best = storeResults
                 .Take(10)
                 .Select(storeGame => FindMatchSuggestion(
@@ -413,6 +427,138 @@ public class SteamController : BaseApiController
             await _context.SaveChangesAsync();
 
         return Ok(new { dismissed = created });
+    }
+
+    /// <summary>Suggests start/finish dates from Steam activity for linked GDB games missing either date.</summary>
+    [HttpGet("date-suggestions")]
+    public async Task<IActionResult> GetDateSuggestions()
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var user = await _context.Users.FindAsync(userId.Value);
+        if (user?.SteamId == null)
+            return BadRequest(new { message = "No Steam account linked" });
+
+        var games = await _context.Games
+            .Where(g => g.UserId == userId.Value && g.SteamAppId.HasValue && (string.IsNullOrWhiteSpace(g.Started) || string.IsNullOrWhiteSpace(g.Finished)))
+            .OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+            .ToListAsync();
+
+        var ownedGames = (await GetCachedOwnedGamesAsync(user.SteamId))
+            .ToDictionary(g => g.AppId, g => g);
+
+        var suggestions = new List<SteamDateSuggestionDto>();
+
+        foreach (var game in games)
+        {
+            var appId = game.SteamAppId!.Value;
+            ownedGames.TryGetValue(appId, out var ownedGame);
+            var appDetails = ownedGame == null ? await _steamStore.GetOrCacheAppDetailsAsync(appId) : null;
+
+            var notes = new List<string>();
+            var proposedFinished = ownedGame?.LastPlayedAt?.ToString("yyyy-MM-dd");
+            var finishedSource = proposedFinished != null ? "lastPlayed" : "none";
+            if (proposedFinished == null)
+                notes.Add("noLastPlayed");
+
+            string? proposedStarted = null;
+            var startedSource = "none";
+            if (string.IsNullOrWhiteSpace(game.Started))
+            {
+                var firstUnlock = await GetFirstAchievementUnlockAsync(userId.Value, user.SteamId, appId);
+                if (firstUnlock.HasValue)
+                {
+                    proposedStarted = firstUnlock.Value.ToString("yyyy-MM-dd");
+                    startedSource = "firstAchievement";
+                }
+                else
+                {
+                    notes.Add("noFirstAchievement");
+                }
+            }
+            else
+            {
+                notes.Add("keptStarted");
+            }
+
+            if (proposedStarted == null && proposedFinished == null)
+                continue;
+
+            suggestions.Add(new SteamDateSuggestionDto
+            {
+                GameId = game.Id,
+                GameName = game.Name,
+                SteamAppId = appId,
+                SteamName = ownedGame?.Name ?? appDetails?.Name ?? game.Name,
+                SteamIconUrl = ownedGame?.IconUrl ?? appDetails?.HeaderImageUrl,
+                SteamPlaytimeForever = ownedGame?.PlaytimeForever,
+                CurrentStarted = game.Started,
+                CurrentFinished = game.Finished,
+                ProposedStarted = proposedStarted,
+                ProposedFinished = proposedFinished,
+                StartedSource = startedSource,
+                FinishedSource = finishedSource,
+                Notes = notes
+            });
+        }
+
+        return Ok(suggestions);
+    }
+
+    [HttpPost("date-suggestions/apply")]
+    public async Task<IActionResult> ApplyDateSuggestions([FromBody] SteamApplyDateSuggestionsRequest request)
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var response = new SteamApplyDateSuggestionsResponse();
+        var requested = request.Suggestions
+            .Where(s => s.GameId > 0 && (!string.IsNullOrWhiteSpace(s.Started) || !string.IsNullOrWhiteSpace(s.Finished)))
+            .GroupBy(s => s.GameId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (requested.Count == 0)
+            return BadRequest(new { message = "No date suggestions provided" });
+
+        var gameIds = requested.Select(s => s.GameId).ToList();
+        var games = await _context.Games
+            .Where(g => g.UserId == userId.Value && gameIds.Contains(g.Id) && g.SteamAppId.HasValue)
+            .ToDictionaryAsync(g => g.Id, g => g);
+
+        foreach (var suggestion in requested)
+        {
+            if (!games.TryGetValue(suggestion.GameId, out var game))
+            {
+                response.Errors.Add($"gameNotFound:{suggestion.GameId}");
+                continue;
+            }
+
+            var updated = false;
+            if (string.IsNullOrWhiteSpace(game.Started) && IsValidDateValue(suggestion.Started))
+            {
+                game.Started = suggestion.Started;
+                updated = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(game.Finished) && IsValidDateValue(suggestion.Finished))
+            {
+                game.Finished = suggestion.Finished;
+                updated = true;
+            }
+
+            if (updated)
+            {
+                game.CalculateScore();
+                response.Updated++;
+            }
+        }
+
+        if (response.Updated > 0)
+            await _context.SaveChangesAsync();
+
+        return Ok(response);
     }
 
     private static string MatchKey(int steamAppId, int gameId) => $"{steamAppId}:{gameId}";
@@ -505,6 +651,67 @@ public class SteamController : BaseApiController
             .ToArray();
 
         return Regex.Replace(new string(chars), @"\s+", " ").Trim();
+    }
+
+    private async Task<DateTime?> GetFirstAchievementUnlockAsync(int userId, string steamId, int appId)
+    {
+        var cacheKey = $"steam:first-achievement:{userId}:{appId}";
+        if (_cache.TryGetValue<DateTime?>(cacheKey, out var cachedUnlock))
+            return cachedUnlock;
+
+        var cached = await _context.SteamAchievements
+            .Where(a => a.UserId == userId && a.SteamAppId == appId && a.Achieved && a.UnlockTime.HasValue)
+            .OrderBy(a => a.UnlockTime)
+            .Select(a => a.UnlockTime)
+            .FirstOrDefaultAsync();
+
+        if (cached.HasValue)
+        {
+            _cache.Set(cacheKey, cached.Value, TimeSpan.FromHours(12));
+            return cached.Value;
+        }
+
+        var achievements = await _steamApi.GetPlayerAchievementsAsync(steamId, appId);
+        if (!achievements.Success)
+        {
+            _cache.Set<DateTime?>(cacheKey, null, TimeSpan.FromHours(2));
+            return null;
+        }
+
+        var firstUnlockUnix = achievements.Achievements
+            .Where(a => a.Achieved == 1 && a.UnlockTime > 0)
+            .Select(a => a.UnlockTime)
+            .DefaultIfEmpty(0)
+            .Min();
+
+        DateTime? firstUnlock = firstUnlockUnix > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(firstUnlockUnix).UtcDateTime
+            : null;
+        _cache.Set(cacheKey, firstUnlock, firstUnlock.HasValue ? TimeSpan.FromHours(12) : TimeSpan.FromHours(2));
+        return firstUnlock;
+    }
+
+    private Task<List<SteamOwnedGameDto>> GetCachedOwnedGamesAsync(string steamId) =>
+        _cache.GetOrCreateAsync($"steam:owned:{steamId}", async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15);
+            return await _steamApi.GetOwnedGamesAsync(steamId);
+        })!;
+
+    private Task<List<SteamStoreSearchItemDto>> GetCachedStoreSearchAsync(string query)
+    {
+        var key = $"steam:store-search:{NormalizeName(query)}";
+        return _cache.GetOrCreateAsync(key, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(12);
+            return await _steamStore.SearchStoreAsync(query);
+        })!;
+    }
+
+    private static bool IsValidDateValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
     }
 
     /// <summary>Searches the Steam Store for any game by name (does not require ownership).</summary>
