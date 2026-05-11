@@ -62,6 +62,8 @@ public class SteamSyncService : ISteamSyncService
         {
             if (game.SteamAppId == null) continue;
 
+            await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
+
             // Update playtime from bulk call
             if (playtimeMap.TryGetValue(game.SteamAppId.Value, out var steamGame))
             {
@@ -125,6 +127,8 @@ public class SteamSyncService : ISteamSyncService
 
             if (existingByAppId.TryGetValue(appId, out var existingGame))
             {
+                await UpdateSteamCriticScoreAsync(existingGame, appId);
+
                 // Already linked - update playtime
                 if (ownedByAppId.TryGetValue(appId, out var owned))
                 {
@@ -166,19 +170,7 @@ public class SteamSyncService : ISteamSyncService
             // Use header image from store cache, fall back to standard CDN URL
             var coverUrl = appDetails?.HeaderImageUrl ?? importItem.CoverUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
 
-            // Determine critic score: prefer Metacritic, fall back to Steam review percentage
-            int? criticScore = appDetails?.MetacriticScore;
-            string? criticProvider = criticScore.HasValue ? "Metacritic" : null;
-
-            if (!criticScore.HasValue)
-            {
-                var reviews = await _steamStore.GetReviewSummaryAsync(appId);
-                if (reviews != null && reviews.TotalReviews >= 10)
-                {
-                    criticScore = reviews.ScorePercent;
-                    criticProvider = "SteamDB";
-                }
-            }
+            var (criticScore, criticProvider) = await ResolveSteamCriticScoreAsync(appId, appDetails);
 
             string? resolvedLogoUrl = ownedGame?.IconUrl;
             if (string.IsNullOrWhiteSpace(resolvedLogoUrl))
@@ -247,17 +239,7 @@ public class SteamSyncService : ISteamSyncService
             .FirstOrDefaultAsync(p => p.UserId == userId && p.Name.ToLower() == "steam");
 
         // Critic score
-        int? criticScore = appDetails?.MetacriticScore;
-        string? criticProvider = criticScore.HasValue ? "Metacritic" : null;
-        if (!criticScore.HasValue)
-        {
-            var reviews = await _steamStore.GetReviewSummaryAsync(appId);
-            if (reviews != null && reviews.TotalReviews >= 10)
-            {
-                criticScore = reviews.ScorePercent;
-                criticProvider = "SteamDB";
-            }
-        }
+        var (criticScore, criticProvider) = await ResolveSteamCriticScoreAsync(appId, appDetails);
 
         string? resolvedLogoUrl = null;
         if (string.IsNullOrWhiteSpace(resolvedLogoUrl))
@@ -427,6 +409,8 @@ public class SteamSyncService : ISteamSyncService
         if (user.SteamId == null || game.SteamAppId == null)
             return new SteamSyncResult { Success = false };
 
+        await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
+
         // Get owned games for playtime
         var ownedGames = await _steamApi.GetOwnedGamesAsync(user.SteamId);
         var ownedGame = ownedGames.FirstOrDefault(g => g.AppId == game.SteamAppId.Value);
@@ -516,5 +500,31 @@ public class SteamSyncService : ISteamSyncService
         }
 
         return count;
+    }
+
+    private async Task UpdateSteamCriticScoreAsync(Game game, int appId, SteamAppDetailsDto? appDetails = null)
+    {
+        var (criticScore, criticProvider) = await ResolveSteamCriticScoreAsync(appId, appDetails);
+        game.Critic = criticScore;
+        game.CriticProvider = criticProvider;
+    }
+
+    private async Task<(int? CriticScore, string? CriticProvider)> ResolveSteamCriticScoreAsync(int appId, SteamAppDetailsDto? appDetails = null)
+    {
+        var resolvedAppDetails = appDetails ?? await _steamStore.GetOrCacheAppDetailsAsync(appId);
+
+        // Always prioritize Metacritic when available.
+        if (resolvedAppDetails?.MetacriticScore is int metacriticScore)
+        {
+            return (metacriticScore, "Metacritic");
+        }
+
+        var reviews = await _steamStore.GetReviewSummaryAsync(appId);
+        if (reviews != null && reviews.TotalReviews >= 10)
+        {
+            return (reviews.ScorePercent, "SteamDB");
+        }
+
+        return (null, null);
     }
 }
