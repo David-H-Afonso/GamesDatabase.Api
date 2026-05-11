@@ -1,5 +1,6 @@
 using GamesDatabase.Api.Data;
 using GamesDatabase.Api.DTOs.Steam;
+using GamesDatabase.Api.Models;
 using GamesDatabase.Api.Services.Steam;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -287,6 +288,12 @@ public class SteamController : BaseApiController
 
         var unlinkedSteam = steamGames.Where(g => !linkedAppIds.Contains(g.AppId)).ToList();
         var unlinkedGdb = gdbGames.Where(g => !g.SteamAppId.HasValue).ToList();
+        var dismissedPairs = (await _context.SteamMatchDismissals
+            .Where(d => d.UserId == userId.Value)
+            .Select(d => new { d.SteamAppId, d.GameId })
+            .ToListAsync())
+            .Select(d => MatchKey(d.SteamAppId, d.GameId))
+            .ToHashSet();
 
         var suggestions = new List<SteamMatchSuggestionDto>();
 
@@ -297,6 +304,9 @@ public class SteamController : BaseApiController
 
             foreach (var gg in unlinkedGdb)
             {
+                if (dismissedPairs.Contains(MatchKey(sg.AppId, gg.Id)))
+                    continue;
+
                 var gdbNorm = NormalizeName(gg.Name);
                 var score = NameScore(steamNorm, gdbNorm);
                 if (score >= 50 && (best == null || score > best.Confidence))
@@ -320,10 +330,70 @@ public class SteamController : BaseApiController
         return Ok(suggestions.OrderByDescending(s => s.Confidence).ToList());
     }
 
+    /// <summary>Stores rejected Steam/GDB suggestion pairs so future searches can offer other matches.</summary>
+    [HttpPost("match-suggestions/dismiss")]
+    public async Task<IActionResult> DismissMatchSuggestions([FromBody] SteamDismissMatchSuggestionsRequest request)
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var requestedPairs = request.Suggestions
+            .Where(s => s.SteamAppId > 0 && s.GdbGameId > 0)
+            .GroupBy(s => new { s.SteamAppId, s.GdbGameId })
+            .Select(g => g.Key)
+            .ToList();
+
+        if (requestedPairs.Count == 0)
+            return BadRequest(new { message = "No suggestions provided" });
+
+        var gameIds = requestedPairs.Select(p => p.GdbGameId).Distinct().ToList();
+        var validGameIds = (await _context.Games
+            .Where(g => g.UserId == userId.Value && gameIds.Contains(g.Id))
+            .Select(g => g.Id)
+            .ToListAsync())
+            .ToHashSet();
+
+        var steamAppIds = requestedPairs.Select(p => p.SteamAppId).Distinct().ToList();
+        var existingPairs = (await _context.SteamMatchDismissals
+            .Where(d => d.UserId == userId.Value && steamAppIds.Contains(d.SteamAppId))
+            .Select(d => new { d.SteamAppId, d.GameId })
+            .ToListAsync())
+            .Select(d => MatchKey(d.SteamAppId, d.GameId))
+            .ToHashSet();
+
+        var created = 0;
+        foreach (var pair in requestedPairs)
+        {
+            if (!validGameIds.Contains(pair.GdbGameId))
+                continue;
+
+            var key = MatchKey(pair.SteamAppId, pair.GdbGameId);
+            if (existingPairs.Contains(key))
+                continue;
+
+            _context.SteamMatchDismissals.Add(new SteamMatchDismissal
+            {
+                UserId = userId.Value,
+                SteamAppId = pair.SteamAppId,
+                GameId = pair.GdbGameId,
+                CreatedAt = DateTime.UtcNow
+            });
+            existingPairs.Add(key);
+            created++;
+        }
+
+        if (created > 0)
+            await _context.SaveChangesAsync();
+
+        return Ok(new { dismissed = created });
+    }
+
     private static string NormalizeName(string name) =>
         new string(name.ToLowerInvariant()
             .Where(c => char.IsLetterOrDigit(c) || c == ' ')
             .ToArray()).Trim();
+
+    private static string MatchKey(int steamAppId, int gameId) => $"{steamAppId}:{gameId}";
 
     private static string? ExtractSteamId(string input)
     {

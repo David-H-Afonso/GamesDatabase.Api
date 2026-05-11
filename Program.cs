@@ -569,12 +569,30 @@ static void EnsureCompatibilitySchema(GamesDbContext context, ILogger logger)
         );
         """, "ensured steam_app_cache table exists");
 
+    ExecuteRepairSql(conn, logger, """
+        CREATE TABLE IF NOT EXISTS "steam_match_dismissal" (
+            "id" INTEGER NOT NULL CONSTRAINT "PK_steam_match_dismissal" PRIMARY KEY AUTOINCREMENT,
+            "user_id" INTEGER NOT NULL,
+            "steam_app_id" INTEGER NOT NULL,
+            "game_id" INTEGER NOT NULL,
+            "created_at" TEXT NOT NULL,
+            CONSTRAINT "FK_steam_match_dismissal_game_game_id" FOREIGN KEY ("game_id") REFERENCES "game" ("id") ON DELETE CASCADE,
+            CONSTRAINT "FK_steam_match_dismissal_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+        );
+        """, "ensured steam_match_dismissal table exists");
+
     ExecuteRepairSql(conn, logger,
         "CREATE INDEX IF NOT EXISTS \"IX_steam_achievement_game_id\" ON \"steam_achievement\" (\"game_id\");",
         "ensured steam achievement game index exists");
     ExecuteRepairSql(conn, logger,
         "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_steam_achievement_user_id_steam_app_id_api_name\" ON \"steam_achievement\" (\"user_id\", \"steam_app_id\", \"api_name\");",
         "ensured steam achievement unique index exists");
+    ExecuteRepairSql(conn, logger,
+        "CREATE INDEX IF NOT EXISTS \"IX_steam_match_dismissal_game_id\" ON \"steam_match_dismissal\" (\"game_id\");",
+        "ensured steam match dismissal game index exists");
+    ExecuteRepairSql(conn, logger,
+        "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_steam_match_dismissal_user_id_steam_app_id_game_id\" ON \"steam_match_dismissal\" (\"user_id\", \"steam_app_id\", \"game_id\");",
+        "ensured steam match dismissal unique index exists");
 }
 
 static void EnsureColumn(SqliteConnection conn, ILogger logger, string table, string column, string definition)

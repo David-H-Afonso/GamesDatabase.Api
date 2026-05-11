@@ -117,6 +117,7 @@ public class GamesDbContext : DbContext
     public DbSet<BackupSchedule> BackupSchedules { get; set; }
     public DbSet<SteamAchievement> SteamAchievements { get; set; }
     public DbSet<SteamAppCache> SteamAppCaches { get; set; }
+    public DbSet<SteamMatchDismissal> SteamMatchDismissals { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -137,6 +138,7 @@ public class GamesDbContext : DbContext
         modelBuilder.Entity<BackupSchedule>().ToTable("backup_schedule");
         modelBuilder.Entity<SteamAchievement>().ToTable("steam_achievement");
         modelBuilder.Entity<SteamAppCache>().ToTable("steam_app_cache");
+        modelBuilder.Entity<SteamMatchDismissal>().ToTable("steam_match_dismissal");
 
         // Configure User entity
         modelBuilder.Entity<User>(entity =>
@@ -547,6 +549,30 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.Price).HasColumnName("price");
             entity.Property(e => e.IsFree).HasColumnName("is_free").HasDefaultValue(false);
             entity.Property(e => e.LastFetched).HasColumnName("last_fetched");
+        });
+
+        // Configure SteamMatchDismissal entity
+        modelBuilder.Entity<SteamMatchDismissal>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.SteamAppId).HasColumnName("steam_app_id").IsRequired();
+            entity.Property(e => e.GameId).HasColumnName("game_id").IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Game)
+                .WithMany()
+                .HasForeignKey(e => e.GameId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.GameId);
+            entity.HasIndex(e => new { e.UserId, e.SteamAppId, e.GameId }).IsUnique();
         });
     }
 }

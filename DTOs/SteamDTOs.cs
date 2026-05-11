@@ -339,6 +339,17 @@ public class SteamManualLinkRequest
     public string SteamId { get; set; } = string.Empty;
 }
 
+public class SteamDismissMatchSuggestionsRequest
+{
+    public List<SteamDismissMatchSuggestionRequestItem> Suggestions { get; set; } = new();
+}
+
+public class SteamDismissMatchSuggestionRequestItem
+{
+    public int SteamAppId { get; set; }
+    public int GdbGameId { get; set; }
+}
+
 // ─── Response DTOs ───────────────────────────────────────────────────────────
 
 public class SteamProfileResponse
