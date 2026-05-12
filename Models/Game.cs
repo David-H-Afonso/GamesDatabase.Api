@@ -46,6 +46,13 @@ public class Game
     public int? SteamPlaytimeForever { get; set; }
     public int? SteamPlaytime2Weeks { get; set; }
     public DateTime? SteamLastSynced { get; set; }
+    public string? SteamFinishedSource { get; set; }
+    public string? SteamFinishedLastValue { get; set; }
+    public DateTime? SteamFinishedSyncedAt { get; set; }
+    public string? SteamFinishedRejectedValue { get; set; }
+
+    // Manual 100% completion (for non-Steam games)
+    public bool IsManuallyCompleted { get; set; } = false;
 
     // Export tracking
     public bool ModifiedSinceExport { get; set; } = true;

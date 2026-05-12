@@ -33,6 +33,11 @@ public static class MappingExtensions
             SteamPlaytimeForever = game.SteamPlaytimeForever,
             SteamPlaytime2Weeks = game.SteamPlaytime2Weeks,
             SteamLastSynced = game.SteamLastSynced,
+            SteamFinishedSource = game.SteamFinishedSource,
+            SteamFinishedLastValue = game.SteamFinishedLastValue,
+            SteamFinishedSyncedAt = game.SteamFinishedSyncedAt,
+            SteamFinishedRejectedValue = game.SteamFinishedRejectedValue,
+            IsManuallyCompleted = game.IsManuallyCompleted,
             CreatedAt = game.CreatedAt,
             UpdatedAt = game.UpdatedAt,
             StatusName = game.Status?.Name,
@@ -64,7 +69,8 @@ public static class MappingExtensions
             Cover = dto.Cover,
             IsCheaperByKey = dto.IsCheaperByKey,
             KeyStoreUrl = dto.KeyStoreUrl,
-            SteamAppId = dto.SteamAppId
+            SteamAppId = dto.SteamAppId,
+            IsManuallyCompleted = dto.IsManuallyCompleted ?? false
         };
 
         // Calcular el score automáticamente
@@ -96,6 +102,7 @@ public static class MappingExtensions
 
         if (dto.KeyStoreUrl != null) entity.KeyStoreUrl = dto.KeyStoreUrl;
         if (dto.SteamAppId.HasValue) entity.SteamAppId = dto.SteamAppId.Value;
+        if (dto.IsManuallyCompleted.HasValue) entity.IsManuallyCompleted = dto.IsManuallyCompleted.Value;
 
         entity.CalculateScore();
     }

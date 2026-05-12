@@ -187,6 +187,11 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.SteamPlaytimeForever).HasColumnName("steam_playtime_forever");
             entity.Property(e => e.SteamPlaytime2Weeks).HasColumnName("steam_playtime_2weeks");
             entity.Property(e => e.SteamLastSynced).HasColumnName("steam_last_synced");
+            entity.Property(e => e.SteamFinishedSource).HasColumnName("steam_finished_source");
+            entity.Property(e => e.SteamFinishedLastValue).HasColumnName("steam_finished_last_value");
+            entity.Property(e => e.SteamFinishedSyncedAt).HasColumnName("steam_finished_synced_at");
+            entity.Property(e => e.SteamFinishedRejectedValue).HasColumnName("steam_finished_rejected_value");
+            entity.Property(e => e.IsManuallyCompleted).HasColumnName("IsManuallyCompleted");
             entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
             entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");

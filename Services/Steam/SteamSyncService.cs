@@ -69,6 +69,7 @@ public class SteamSyncService : ISteamSyncService
             {
                 game.SteamPlaytimeForever = steamGame.PlaytimeForever;
                 game.SteamPlaytime2Weeks = steamGame.Playtime2Weeks;
+                SyncSteamManagedFinishedDate(game, steamGame);
                 gamesUpdated++;
             }
 
@@ -138,6 +139,7 @@ public class SteamSyncService : ISteamSyncService
                 }
                 await FillMissingSteamImagesAsync(existingGame, ownedByAppId.GetValueOrDefault(appId), importItem);
                 NormalizeStoredSteamReleaseDate(existingGame);
+                await TrySyncAchievementsForImportedGameAsync(user.SteamId, existingGame);
                 result.Linked++;
                 result.ImportedGames.Add(new SteamImportedGameDto
                 {
@@ -199,6 +201,7 @@ public class SteamSyncService : ISteamSyncService
 
             _context.Games.Add(newGame);
             await _context.SaveChangesAsync();
+            await TrySyncAchievementsForImportedGameAsync(user.SteamId, newGame);
 
             result.Created++;
             result.ImportedGames.Add(new SteamImportedGameDto
@@ -212,6 +215,19 @@ public class SteamSyncService : ISteamSyncService
 
         await _context.SaveChangesAsync();
         return result;
+    }
+
+    private async Task<int> TrySyncAchievementsForImportedGameAsync(string steamId, Game game)
+    {
+        try
+        {
+            return await SyncAchievementsForGameAsync(steamId, game);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to sync Steam achievements during import for game {GameId} / app {SteamAppId}", game.Id, game.SteamAppId);
+            return 0;
+        }
     }
 
     public async Task<SteamImportedGameDto> AddStoreGameAsync(int userId, int appId, string? logoUrl = null, string? coverUrl = null)
@@ -419,6 +435,7 @@ public class SteamSyncService : ISteamSyncService
         {
             game.SteamPlaytimeForever = ownedGame.PlaytimeForever;
             game.SteamPlaytime2Weeks = ownedGame.Playtime2Weeks;
+            SyncSteamManagedFinishedDate(game, ownedGame);
         }
 
         await FillMissingSteamImagesAsync(game, ownedGame);
@@ -445,7 +462,16 @@ public class SteamSyncService : ISteamSyncService
         if (!playerAch.Success || playerAch.Achievements.Count == 0) return 0;
 
         var schema = await _steamApi.GetGameSchemaAsync(game.SteamAppId.Value);
-        var schemaMap = schema?.Achievements.ToDictionary(a => a.ApiName, a => a) ?? new Dictionary<string, SteamSchemaAchievement>();
+        var schemaMap = schema?.Achievements
+            .GroupBy(a => a.ApiName)
+            .ToDictionary(g => g.Key, g => g.First())
+            ?? new Dictionary<string, SteamSchemaAchievement>();
+        var playerMap = playerAch.Achievements
+            .GroupBy(a => a.ApiName)
+            .ToDictionary(g => g.Key, g => g.First());
+        var achievementApiNames = schemaMap.Count > 0
+            ? schemaMap.Keys.ToList()
+            : playerMap.Keys.ToList();
 
         var userId = game.UserId;
         var existingAch = await _context.SteamAchievements
@@ -453,18 +479,32 @@ public class SteamSyncService : ISteamSyncService
             .ToDictionaryAsync(a => a.ApiName, a => a);
 
         int count = 0;
-        foreach (var raw in playerAch.Achievements)
+        foreach (var apiName in achievementApiNames)
         {
-            schemaMap.TryGetValue(raw.ApiName, out var schemaDef);
+            schemaMap.TryGetValue(apiName, out var schemaDef);
+            playerMap.TryGetValue(apiName, out var raw);
+            var achieved = raw?.Achieved == 1;
+            var unlockTime = raw?.UnlockTime > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(raw.UnlockTime).UtcDateTime
+                : (DateTime?)null;
 
-            if (existingAch.TryGetValue(raw.ApiName, out var existing))
+            if (existingAch.TryGetValue(apiName, out var existing))
             {
+                var changed =
+                    existing.GameId != game.Id ||
+                    existing.Achieved != achieved ||
+                    existing.UnlockTime != unlockTime ||
+                    (schemaDef != null && (
+                        existing.DisplayName != schemaDef.DisplayName ||
+                        existing.Description != schemaDef.Description ||
+                        existing.IconUrl != schemaDef.Icon ||
+                        existing.IconGrayUrl != schemaDef.IconGray ||
+                        existing.Hidden != (schemaDef.Hidden == 1)));
+
                 // Re-link to the current game (GameId may be NULL if the game was deleted and re-added)
                 existing.GameId = game.Id;
-                existing.Achieved = raw.Achieved == 1;
-                existing.UnlockTime = raw.UnlockTime > 0
-                    ? DateTimeOffset.FromUnixTimeSeconds(raw.UnlockTime).UtcDateTime
-                    : null;
+                existing.Achieved = achieved;
+                existing.UnlockTime = unlockTime;
                 existing.LastSynced = DateTime.UtcNow;
                 if (schemaDef != null)
                 {
@@ -474,6 +514,9 @@ public class SteamSyncService : ISteamSyncService
                     existing.IconGrayUrl = schemaDef.IconGray;
                     existing.Hidden = schemaDef.Hidden == 1;
                 }
+
+                if (changed)
+                    count++;
             }
             else
             {
@@ -482,12 +525,10 @@ public class SteamSyncService : ISteamSyncService
                     UserId = userId,
                     GameId = game.Id,
                     SteamAppId = game.SteamAppId.Value,
-                    ApiName = raw.ApiName,
-                    Achieved = raw.Achieved == 1,
-                    UnlockTime = raw.UnlockTime > 0
-                        ? DateTimeOffset.FromUnixTimeSeconds(raw.UnlockTime).UtcDateTime
-                        : null,
-                    DisplayName = schemaDef?.DisplayName ?? raw.ApiName,
+                    ApiName = apiName,
+                    Achieved = achieved,
+                    UnlockTime = unlockTime,
+                    DisplayName = schemaDef?.DisplayName ?? apiName,
                     Description = schemaDef?.Description,
                     IconUrl = schemaDef?.Icon,
                     IconGrayUrl = schemaDef?.IconGray,
@@ -500,6 +541,22 @@ public class SteamSyncService : ISteamSyncService
         }
 
         return count;
+    }
+
+    private static void SyncSteamManagedFinishedDate(Game game, SteamOwnedGameDto ownedGame)
+    {
+        if (game.SteamFinishedSource != "steam" || !ownedGame.LastPlayedAt.HasValue)
+            return;
+
+        var steamFinished = ownedGame.LastPlayedAt.Value.ToString("yyyy-MM-dd");
+        if (game.Finished == steamFinished && game.SteamFinishedLastValue == steamFinished)
+            return;
+
+        game.Finished = steamFinished;
+        game.SteamFinishedLastValue = steamFinished;
+        game.SteamFinishedSyncedAt = DateTime.UtcNow;
+        if (game.SteamFinishedRejectedValue == steamFinished)
+            game.SteamFinishedRejectedValue = null;
     }
 
     private async Task UpdateSteamCriticScoreAsync(Game game, int appId, SteamAppDetailsDto? appDetails = null)

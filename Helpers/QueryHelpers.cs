@@ -66,6 +66,7 @@ public class GameQueryParameters : QueryParameters
     public int? ReplayGradeMax { get; set; }
     public bool? HasReplays { get; set; }
     public bool? HasSteamApp { get; set; }
+    public bool? FullCompletion { get; set; }
     public string? MissingDuration { get; set; }
 
     /// <summary>

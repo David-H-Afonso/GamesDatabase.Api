@@ -33,6 +33,10 @@ public class GamesController : BaseApiController
     public async Task<ActionResult<PagedResult<GameDto>>> GetGames([FromQuery] GameQueryParameters parameters)
     {
         var userId = GetCurrentUserIdOrDefault(1);
+        var requestedViewName = parameters.ViewName?.Trim();
+        requestedViewName = string.Equals(requestedViewName, "default", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : requestedViewName;
 
         var query = _context.Games
             .Where(g => g.UserId == userId)
@@ -45,7 +49,7 @@ public class GamesController : BaseApiController
 
         // Verificar si se debe aplicar una vista
         Models.ViewConfiguration? viewConfiguration = null;
-        if (parameters.ViewId.HasValue || !string.IsNullOrEmpty(parameters.ViewName))
+        if (parameters.ViewId.HasValue || !string.IsNullOrEmpty(requestedViewName))
         {
             Models.GameView? gameView = null;
 
@@ -53,16 +57,16 @@ public class GamesController : BaseApiController
             {
                 gameView = await _context.GameViews.AsNoTracking().FirstOrDefaultAsync(v => v.Id == parameters.ViewId.Value && v.UserId == userId);
             }
-            else if (!string.IsNullOrEmpty(parameters.ViewName))
+            else if (!string.IsNullOrEmpty(requestedViewName))
             {
                 gameView = await _context.GameViews
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(v => v.Name == parameters.ViewName && v.UserId == userId);
+                    .FirstOrDefaultAsync(v => v.Name == requestedViewName && v.UserId == userId);
             }
 
             if (gameView == null)
             {
-                return BadRequest($"Vista no encontrada: {parameters.ViewId?.ToString() ?? parameters.ViewName}");
+                return BadRequest($"Vista no encontrada: {parameters.ViewId?.ToString() ?? requestedViewName}");
             }
 
             try
@@ -127,7 +131,7 @@ public class GamesController : BaseApiController
         else
         {
             // Aplicar filtros tradicionales
-            query = ApplyTraditionalFilters(query, parameters);
+            query = ApplyTraditionalFilters(query, parameters, userId);
 
             // Aplicar ordenado tradicional
             query = ApplyTraditionalSorting(query, parameters);
@@ -141,6 +145,7 @@ public class GamesController : BaseApiController
             .ToListAsync();
 
         var gameDtos = games.Select(g => g.ToDto()).ToList();
+        await FillSteamAchievementStatsAsync(gameDtos, userId);
 
         return Ok(new PagedResult<GameDto>
         {
@@ -154,7 +159,7 @@ public class GamesController : BaseApiController
     /// <summary>
     /// Aplica filtros tradicionales cuando no se usa una vista
     /// </summary>
-    private IQueryable<Models.Game> ApplyTraditionalFilters(IQueryable<Models.Game> query, GameQueryParameters parameters)
+    private IQueryable<Models.Game> ApplyTraditionalFilters(IQueryable<Models.Game> query, GameQueryParameters parameters, int userId)
     {
         // Aplicar filtros
         var includeReplayDates = parameters.IncludeReplayDates != false;
@@ -323,6 +328,16 @@ public class GamesController : BaseApiController
                 : query.Where(g => !g.SteamAppId.HasValue);
         }
 
+        if (parameters.FullCompletion == true)
+        {
+            query = query.Where(g =>
+                g.IsManuallyCompleted ||
+                (
+                    _context.SteamAchievements.Any(a => a.UserId == userId && a.GameId == g.Id) &&
+                    !_context.SteamAchievements.Any(a => a.UserId == userId && a.GameId == g.Id && !a.Achieved)
+                ));
+        }
+
         if (!string.IsNullOrWhiteSpace(parameters.MissingDuration))
         {
             query = parameters.MissingDuration.ToLowerInvariant() switch
@@ -432,7 +447,10 @@ public class GamesController : BaseApiController
         if (game == null)
             return NotFound();
 
-        return Ok(game.ToDto());
+        var gameDto = game.ToDto();
+        await FillSteamAchievementStatsAsync(new[] { gameDto }, userId);
+
+        return Ok(gameDto);
     }
 
     [HttpPut("{id}")]
@@ -510,7 +528,8 @@ public class GamesController : BaseApiController
             Logo = game.Logo,
             Cover = game.Cover,
             IsCheaperByKey = game.IsCheaperByKey,
-            KeyStoreUrl = game.KeyStoreUrl
+            KeyStoreUrl = game.KeyStoreUrl,
+            IsManuallyCompleted = game.IsManuallyCompleted
         };
 
         // Actualizar solo los campos que están presentes en el JSON
@@ -567,7 +586,12 @@ public class GamesController : BaseApiController
 
         if (gameDto.TryGetProperty("finished", out var finishedElement))
         {
-            game.Finished = finishedElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : finishedElement.GetString();
+            var finishedValue = finishedElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : finishedElement.GetString();
+            if (game.Finished != finishedValue)
+            {
+                game.SteamFinishedSource = string.IsNullOrWhiteSpace(finishedValue) ? null : "manual";
+            }
+            game.Finished = finishedValue;
         }
 
         if (gameDto.TryGetProperty("comment", out var commentElement))
@@ -650,6 +674,18 @@ public class GamesController : BaseApiController
         if (gameDto.TryGetProperty("steamAppId", out var steamAppIdElement))
         {
             game.SteamAppId = steamAppIdElement.ValueKind == System.Text.Json.JsonValueKind.Null ? null : steamAppIdElement.GetInt32();
+            if (game.SteamAppId == null)
+            {
+                game.SteamFinishedSource = string.IsNullOrWhiteSpace(game.Finished) ? null : "manual";
+                game.SteamFinishedLastValue = null;
+                game.SteamFinishedSyncedAt = null;
+                game.SteamFinishedRejectedValue = null;
+            }
+        }
+
+        if (gameDto.TryGetProperty("isManuallyCompleted", out var isManuallyCompletedElement))
+        {
+            game.IsManuallyCompleted = isManuallyCompletedElement.ValueKind != System.Text.Json.JsonValueKind.Null && isManuallyCompletedElement.GetBoolean();
         }
 
         // Recalcular el score
@@ -678,6 +714,31 @@ public class GamesController : BaseApiController
             oldPlayedStatusName, newPlayedStatusName);
 
         return NoContent();
+    }
+
+    private async Task FillSteamAchievementStatsAsync(IEnumerable<GameDto> gameDtos, int userId)
+    {
+        var dtoList = gameDtos.ToList();
+        if (dtoList.Count == 0) return;
+
+        var gameIds = dtoList.Select(g => g.Id).ToList();
+        var stats = await _context.SteamAchievements
+            .Where(a => a.UserId == userId && a.GameId.HasValue && gameIds.Contains(a.GameId.Value))
+            .GroupBy(a => a.GameId!.Value)
+            .Select(g => new
+            {
+                GameId = g.Key,
+                Total = g.Count(),
+                Unlocked = g.Count(a => a.Achieved)
+            })
+            .ToDictionaryAsync(g => g.GameId);
+
+        foreach (var dto in dtoList)
+        {
+            if (!stats.TryGetValue(dto.Id, out var stat)) continue;
+            dto.SteamAchievementsTotal = stat.Total;
+            dto.SteamAchievementsUnlocked = stat.Unlocked;
+        }
     }
 
     [HttpPost]

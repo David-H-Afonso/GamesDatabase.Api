@@ -30,6 +30,15 @@ public class GameDto
     public int? SteamPlaytimeForever { get; set; }
     public int? SteamPlaytime2Weeks { get; set; }
     public DateTime? SteamLastSynced { get; set; }
+    public int SteamAchievementsUnlocked { get; set; }
+    public int SteamAchievementsTotal { get; set; }
+    public string? SteamFinishedSource { get; set; }
+    public string? SteamFinishedLastValue { get; set; }
+    public DateTime? SteamFinishedSyncedAt { get; set; }
+    public string? SteamFinishedRejectedValue { get; set; }
+
+    // Manual 100% completion
+    public bool IsManuallyCompleted { get; set; }
 
     // Audit fields
     public DateTime CreatedAt { get; set; }
@@ -67,6 +76,9 @@ public class GameCreateDto
 
     // Steam integration
     public int? SteamAppId { get; set; }
+
+    // Manual 100% completion
+    public bool? IsManuallyCompleted { get; set; }
 }
 
 public class GameUpdateDto
@@ -96,6 +108,8 @@ public class GameUpdateDto
     // Steam integration
     public int? SteamAppId { get; set; }
 
+    // Manual 100% completion
+    public bool? IsManuallyCompleted { get; set; }
 }
 
 public class BulkUpdateGameDto

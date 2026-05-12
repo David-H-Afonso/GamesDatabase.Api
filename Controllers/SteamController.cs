@@ -429,9 +429,9 @@ public class SteamController : BaseApiController
         return Ok(new { dismissed = created });
     }
 
-    /// <summary>Suggests start/finish dates from Steam activity for linked GDB games missing either date.</summary>
+    /// <summary>Suggests start/finish dates from Steam activity for linked GDB games missing dates or with manual conflicts.</summary>
     [HttpGet("date-suggestions")]
-    public async Task<IActionResult> GetDateSuggestions()
+    public async Task<IActionResult> GetDateSuggestions([FromQuery] int? gameId = null, [FromQuery] bool includeStarted = true)
     {
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
@@ -440,8 +440,14 @@ public class SteamController : BaseApiController
         if (user?.SteamId == null)
             return BadRequest(new { message = "No Steam account linked" });
 
-        var games = await _context.Games
-            .Where(g => g.UserId == userId.Value && g.SteamAppId.HasValue && (string.IsNullOrWhiteSpace(g.Started) || string.IsNullOrWhiteSpace(g.Finished)))
+        var gamesQuery = _context.Games
+            .AsNoTracking()
+            .Where(g => g.UserId == userId.Value && g.SteamAppId.HasValue);
+
+        if (gameId.HasValue)
+            gamesQuery = gamesQuery.Where(g => g.Id == gameId.Value);
+
+        var games = await gamesQuery
             .OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
             .ToListAsync();
 
@@ -462,9 +468,17 @@ public class SteamController : BaseApiController
             if (proposedFinished == null)
                 notes.Add("noLastPlayed");
 
+            var hasFinished = !string.IsNullOrWhiteSpace(game.Finished);
+            var isSteamManagedFinished = game.SteamFinishedSource == "steam";
+            var isRejectedFinished = proposedFinished != null && game.SteamFinishedRejectedValue == proposedFinished;
+            var shouldSuggestFinished = proposedFinished != null
+                && !isRejectedFinished
+                && (!hasFinished || (!isSteamManagedFinished && game.Finished != proposedFinished));
+            var isFinishedConflict = shouldSuggestFinished && hasFinished && !isSteamManagedFinished && game.Finished != proposedFinished;
+
             string? proposedStarted = null;
             var startedSource = "none";
-            if (string.IsNullOrWhiteSpace(game.Started))
+            if (includeStarted && string.IsNullOrWhiteSpace(game.Started))
             {
                 var firstUnlock = await GetFirstAchievementUnlockAsync(userId.Value, user.SteamId, appId);
                 if (firstUnlock.HasValue)
@@ -477,12 +491,12 @@ public class SteamController : BaseApiController
                     notes.Add("noFirstAchievement");
                 }
             }
-            else
+            else if (!string.IsNullOrWhiteSpace(game.Started))
             {
                 notes.Add("keptStarted");
             }
 
-            if (proposedStarted == null && proposedFinished == null)
+            if (proposedStarted == null && !shouldSuggestFinished)
                 continue;
 
             suggestions.Add(new SteamDateSuggestionDto
@@ -496,9 +510,11 @@ public class SteamController : BaseApiController
                 CurrentStarted = game.Started,
                 CurrentFinished = game.Finished,
                 ProposedStarted = proposedStarted,
-                ProposedFinished = proposedFinished,
+                ProposedFinished = shouldSuggestFinished ? proposedFinished : null,
                 StartedSource = startedSource,
                 FinishedSource = finishedSource,
+                IsFinishedConflict = isFinishedConflict,
+                IsFinishedSteamManaged = isSteamManagedFinished,
                 Notes = notes
             });
         }
@@ -545,6 +561,21 @@ public class SteamController : BaseApiController
             if (string.IsNullOrWhiteSpace(game.Finished) && IsValidDateValue(suggestion.Finished))
             {
                 game.Finished = suggestion.Finished;
+                game.SteamFinishedSource = "steam";
+                game.SteamFinishedLastValue = suggestion.Finished;
+                game.SteamFinishedSyncedAt = DateTime.UtcNow;
+                if (game.SteamFinishedRejectedValue == suggestion.Finished)
+                    game.SteamFinishedRejectedValue = null;
+                updated = true;
+            }
+            else if (IsValidDateValue(suggestion.Finished) && game.Finished != suggestion.Finished)
+            {
+                game.Finished = suggestion.Finished;
+                game.SteamFinishedSource = "steam";
+                game.SteamFinishedLastValue = suggestion.Finished;
+                game.SteamFinishedSyncedAt = DateTime.UtcNow;
+                if (game.SteamFinishedRejectedValue == suggestion.Finished)
+                    game.SteamFinishedRejectedValue = null;
                 updated = true;
             }
 
@@ -559,6 +590,45 @@ public class SteamController : BaseApiController
             await _context.SaveChangesAsync();
 
         return Ok(response);
+    }
+
+    [HttpPost("date-suggestions/dismiss")]
+    public async Task<IActionResult> DismissDateSuggestions([FromBody] SteamDismissDateSuggestionsRequest request)
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var requested = request.Suggestions
+            .Where(s => s.GameId > 0 && IsValidDateValue(s.Finished))
+            .GroupBy(s => s.GameId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (requested.Count == 0)
+            return BadRequest(new { message = "No date suggestions provided" });
+
+        var gameIds = requested.Select(s => s.GameId).ToList();
+        var games = await _context.Games
+            .Where(g => g.UserId == userId.Value && gameIds.Contains(g.Id) && g.SteamAppId.HasValue)
+            .ToDictionaryAsync(g => g.Id, g => g);
+
+        var dismissed = 0;
+        foreach (var suggestion in requested)
+        {
+            if (!games.TryGetValue(suggestion.GameId, out var game))
+                continue;
+
+            if (game.SteamFinishedRejectedValue == suggestion.Finished)
+                continue;
+
+            game.SteamFinishedRejectedValue = suggestion.Finished;
+            dismissed++;
+        }
+
+        if (dismissed > 0)
+            await _context.SaveChangesAsync();
+
+        return Ok(new { dismissed });
     }
 
     private static string MatchKey(int steamAppId, int gameId) => $"{steamAppId}:{gameId}";

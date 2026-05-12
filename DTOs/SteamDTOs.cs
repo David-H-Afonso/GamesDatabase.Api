@@ -455,6 +455,8 @@ public class SteamDateSuggestionDto
     public string? ProposedFinished { get; set; }
     public string StartedSource { get; set; } = string.Empty;
     public string FinishedSource { get; set; } = string.Empty;
+    public bool IsFinishedConflict { get; set; }
+    public bool IsFinishedSteamManaged { get; set; }
     public List<string> Notes { get; set; } = new();
 }
 
@@ -467,6 +469,17 @@ public class SteamApplyDateSuggestionItem
 {
     public int GameId { get; set; }
     public string? Started { get; set; }
+    public string? Finished { get; set; }
+}
+
+public class SteamDismissDateSuggestionsRequest
+{
+    public List<SteamDismissDateSuggestionItem> Suggestions { get; set; } = new();
+}
+
+public class SteamDismissDateSuggestionItem
+{
+    public int GameId { get; set; }
     public string? Finished { get; set; }
 }
 
