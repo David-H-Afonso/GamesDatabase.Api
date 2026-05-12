@@ -976,6 +976,27 @@ public class DataExportController : BaseApiController
                         ? pgCfg
                         : config.GlobalConfig;
 
+                    if (string.Equals(effectiveConfig.Mode, "priceOnly", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var existingPriceGame = await _context.Games
+                            .FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower() && g.UserId == userId);
+
+                        if (existingPriceGame == null)
+                            continue;
+
+                        var resolvedIsCheaperByKeyOnly = ResolveImportString(record.IsCheaperByKey, "isCheaperByKey", effectiveConfig);
+                        bool? priceOnlyIsCheaperByKey = null;
+                        if (!string.IsNullOrWhiteSpace(resolvedIsCheaperByKeyOnly))
+                            priceOnlyIsCheaperByKey = bool.TryParse(resolvedIsCheaperByKeyOnly, out var boolVal) ? boolVal : (bool?)null;
+
+                        existingPriceGame.IsCheaperByKey = priceOnlyIsCheaperByKey;
+                        existingPriceGame.KeyStoreUrl = ResolveImportString(record.KeyStoreUrl, "keyStoreUrl", effectiveConfig);
+                        _context.Entry(existingPriceGame).State = EntityState.Modified;
+                        result.Updated++;
+                        await _context.SaveChangesAsync();
+                        continue;
+                    }
+
                     // Resolve all property values
                     var resolvedStatus = ResolveImportString(record.Status, "status", effectiveConfig);
                     var resolvedPlatform = ResolveImportString(record.Platform, "platform", effectiveConfig);

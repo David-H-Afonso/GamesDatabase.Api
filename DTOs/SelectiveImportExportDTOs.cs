@@ -50,7 +50,7 @@ public class SelectiveImportConfig
 
 public class GameImportConfig
 {
-    /// <summary>"simple" = all AsImported. "custom" = use Properties. "customCleared" = clean personal fields, keep rest AsImported.</summary>
+    /// <summary>"simple" = all AsImported. "priceOnly" = update only price fields. "custom" = use Properties. "customCleared" = clean personal fields, keep rest AsImported.</summary>
     public string Mode { get; set; } = "simple";
 
     public Dictionary<string, ImportPropertyOverride>? Properties { get; set; }
