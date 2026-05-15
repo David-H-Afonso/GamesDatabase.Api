@@ -9,6 +9,7 @@ public class GamePlatform
     public int SortOrder { get; set; } = 0;
     public bool IsActive { get; set; } = true;
     public string Color { get; set; } = "#ffffff";
+    public string? Logo { get; set; }
 
     public int UserId { get; set; }
 

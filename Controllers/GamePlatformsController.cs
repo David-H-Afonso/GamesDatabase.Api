@@ -13,6 +13,7 @@ namespace GamesDatabase.Api.Controllers;
 [Authorize]
 public class GamePlatformsController : BaseApiController
 {
+    private const int MaxLogoLength = 500_000;
     private readonly GamesDbContext _context;
 
     public GamePlatformsController(GamesDbContext context)
@@ -113,9 +114,16 @@ public class GamePlatformsController : BaseApiController
             return Conflict(new { message = "Ya existe una plataforma con este nombre" });
         }
 
+        var logoValidation = ValidatePlatformLogo(updateDto.Logo);
+        if (logoValidation != null)
+        {
+            return BadRequest(new { message = logoValidation });
+        }
+
         gamePlatform.Name = updateDto.Name;
         gamePlatform.IsActive = updateDto.IsActive;
         gamePlatform.Color = updateDto.Color;
+        gamePlatform.Logo = NormalizeLogo(updateDto.Logo);
 
         try
         {
@@ -142,6 +150,12 @@ public class GamePlatformsController : BaseApiController
             return Conflict(new { message = "Ya existe una plataforma con este nombre" });
         }
 
+        var logoValidation = ValidatePlatformLogo(createDto.Logo);
+        if (logoValidation != null)
+        {
+            return BadRequest(new { message = logoValidation });
+        }
+
         var maxSort = await _context.GamePlatforms
             .Where(p => p.UserId == userId)
             .MaxAsync(p => (int?)p.SortOrder) ?? 0;
@@ -152,7 +166,8 @@ public class GamePlatformsController : BaseApiController
             Name = createDto.Name,
             SortOrder = maxSort + 1,
             IsActive = createDto.IsActive,
-            Color = createDto.Color
+            Color = createDto.Color,
+            Logo = NormalizeLogo(createDto.Logo)
         };
 
         _context.GamePlatforms.Add(gamePlatform);
@@ -233,5 +248,52 @@ public class GamePlatformsController : BaseApiController
     {
         var userId = GetCurrentUserIdOrDefault(1);
         return _context.GamePlatforms.Any(e => e.Id == id && e.UserId == userId);
+    }
+
+    private static string? NormalizeLogo(string? logo)
+    {
+        return string.IsNullOrWhiteSpace(logo) ? null : logo.Trim();
+    }
+
+    private static string? ValidatePlatformLogo(string? logo)
+    {
+        var normalized = NormalizeLogo(logo);
+        if (normalized == null)
+        {
+            return null;
+        }
+
+        if (normalized.Length > MaxLogoLength)
+        {
+            return "El logo es demasiado grande";
+        }
+
+        if (IsValidImageUrl(normalized) || IsValidImageDataUrl(normalized))
+        {
+            return null;
+        }
+
+        return "El logo debe ser una URL http(s) o una imagen PNG, JPG, WebP o SVG en data URL";
+    }
+
+    private static bool IsValidImageUrl(string logo)
+    {
+        return Uri.TryCreate(logo, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+    }
+
+    private static bool IsValidImageDataUrl(string logo)
+    {
+        var allowedPrefixes = new[]
+        {
+            "data:image/png;base64,",
+        "data:image/jpeg;base64,",
+        "data:image/jpg;base64,",
+        "data:image/webp;base64,",
+        "data:image/avif;base64,",
+        "data:image/svg+xml,"
+    };
+
+        return allowedPrefixes.Any(prefix => logo.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -143,6 +143,9 @@ public class GameHistoryService : IGameHistoryService
         if (!string.IsNullOrEmpty(game.KeyStoreUrl))
             Add("KeyStoreUrl", game.KeyStoreUrl, "URL de tienda de claves establecida");
 
+        if (game.ManualPlaytimeMinutes.HasValue)
+            Add("ManualPlaytimeMinutes", game.ManualPlaytimeMinutes.ToString(), $"Horas manuales: {FormatMinutesAsHours(game.ManualPlaytimeMinutes.Value)}");
+
         return entries;
     }
 
@@ -293,7 +296,31 @@ public class GameHistoryService : IGameHistoryService
                 entries.Add(Changed("KeyStoreUrl", before.KeyStoreUrl, newVal, newVal == null ? "URL tienda de claves eliminada" : "URL tienda de claves actualizada")!);
         }
 
+        if (patch.TryGetProperty("manualPlaytimeMinutes", out var manualPlaytimeEl))
+        {
+            var newVal = manualPlaytimeEl.ValueKind == System.Text.Json.JsonValueKind.Null ? (int?)null : manualPlaytimeEl.GetInt32();
+            if (before.ManualPlaytimeMinutes != newVal)
+            {
+                entries.Add(Changed(
+                    "ManualPlaytimeMinutes",
+                    before.ManualPlaytimeMinutes?.ToString(),
+                    newVal?.ToString(),
+                    $"Horas manuales: {FormatMinutesAsHours(before.ManualPlaytimeMinutes)} → {FormatMinutesAsHours(newVal)}")!);
+            }
+        }
+
         return entries.Where(e => e != null).ToList();
+    }
+
+    private static string FormatMinutesAsHours(int? minutes)
+    {
+        if (!minutes.HasValue)
+        {
+            return "—";
+        }
+
+        var hours = minutes.Value / 60m;
+        return $"{hours:0.##}h";
     }
 
     private async Task PersistEntriesAsync(List<GameHistoryEntry> entries)

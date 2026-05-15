@@ -15,6 +15,7 @@ namespace GamesDatabase.Api.Controllers;
 [Authorize]
 public class GamesController : BaseApiController
 {
+    private const int MaxManualPlaytimeMinutes = 600_000;
     private readonly GamesDbContext _context;
     private readonly IViewFilterService _viewFilterService;
     private readonly IGameHistoryService _historyService;
@@ -417,7 +418,7 @@ public class GamesController : BaseApiController
                 "finished" => parameters.SortDescending ? query.OrderByDescending(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "createdat" or "created" => parameters.SortDescending ? query.OrderByDescending(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "updatedat" or "updated" or "lastedited" => parameters.SortDescending ? query.OrderByDescending(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "steamplaytime" or "steamplaytimeforever" or "steamhours" => parameters.SortDescending ? query.OrderByDescending(g => g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
+                "steamplaytime" or "steamplaytimeforever" or "steamhours" => parameters.SortDescending ? query.OrderByDescending(g => g.ManualPlaytimeMinutes ?? g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.ManualPlaytimeMinutes ?? g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(g => g.Id) : query.OrderBy(g => g.Id),
                 _ => query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) // Default: ordenar por status ascendente
             };
@@ -529,6 +530,7 @@ public class GamesController : BaseApiController
             Cover = game.Cover,
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
+            ManualPlaytimeMinutes = game.ManualPlaytimeMinutes,
             IsManuallyCompleted = game.IsManuallyCompleted
         };
 
@@ -683,6 +685,18 @@ public class GamesController : BaseApiController
             }
         }
 
+        if (gameDto.TryGetProperty("manualPlaytimeMinutes", out var manualPlaytimeElement))
+        {
+            var manualPlaytime = manualPlaytimeElement.ValueKind == System.Text.Json.JsonValueKind.Null ? (int?)null : manualPlaytimeElement.GetInt32();
+            var validationError = ValidateManualPlaytime(manualPlaytime);
+            if (validationError != null)
+            {
+                return BadRequest(new { error = validationError });
+            }
+
+            game.ManualPlaytimeMinutes = manualPlaytime;
+        }
+
         if (gameDto.TryGetProperty("isManuallyCompleted", out var isManuallyCompletedElement))
         {
             game.IsManuallyCompleted = isManuallyCompletedElement.ValueKind != System.Text.Json.JsonValueKind.Null && isManuallyCompletedElement.GetBoolean();
@@ -765,6 +779,12 @@ public class GamesController : BaseApiController
                 .AnyAsync(ps => ps.Id == gameDto.PlayedStatusId.Value && ps.UserId == userId);
             if (!playedStatusExists)
                 return BadRequest(new { message = "Invalid PlayedStatusId for current user" });
+        }
+
+        var manualPlaytimeValidation = ValidateManualPlaytime(gameDto.ManualPlaytimeMinutes);
+        if (manualPlaytimeValidation != null)
+        {
+            return BadRequest(new { message = manualPlaytimeValidation });
         }
 
         var game = gameDto.ToEntity();
@@ -859,6 +879,26 @@ public class GamesController : BaseApiController
 
         // Must be http or https
         return uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps;
+    }
+
+    private static string? ValidateManualPlaytime(int? minutes)
+    {
+        if (!minutes.HasValue)
+        {
+            return null;
+        }
+
+        if (minutes.Value < 0)
+        {
+            return "Manual playtime cannot be negative";
+        }
+
+        if (minutes.Value > MaxManualPlaytimeMinutes)
+        {
+            return "Manual playtime is too large";
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -51,6 +51,9 @@ public class Game
     public DateTime? SteamFinishedSyncedAt { get; set; }
     public string? SteamFinishedRejectedValue { get; set; }
 
+    // Manual playtime override in minutes. When present, it takes priority over Steam time.
+    public int? ManualPlaytimeMinutes { get; set; }
+
     // Manual 100% completion (for non-Steam games)
     public bool IsManuallyCompleted { get; set; } = false;
 

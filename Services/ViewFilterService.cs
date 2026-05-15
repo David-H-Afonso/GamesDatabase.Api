@@ -151,7 +151,9 @@ public class ViewFilterService : IViewFilterService
             FilterField.CreatedAt => Expression.Property(parameter, nameof(Game.CreatedAt)),
             FilterField.UpdatedAt => Expression.Property(parameter, nameof(Game.UpdatedAt)),
             FilterField.SteamAppId => Expression.Property(parameter, nameof(Game.SteamAppId)),
-            FilterField.SteamPlaytimeForever => Expression.Property(parameter, nameof(Game.SteamPlaytimeForever)),
+            FilterField.SteamPlaytimeForever => Expression.Coalesce(
+                Expression.Property(parameter, nameof(Game.ManualPlaytimeMinutes)),
+                Expression.Property(parameter, nameof(Game.SteamPlaytimeForever))),
             _ => throw new ArgumentException($"Campo de filtro no soportado: {field}")
         };
     }
@@ -541,7 +543,7 @@ public class ViewFilterService : IViewFilterService
             SortField.EffectiveFinished => g => g.Finished ?? "",
             SortField.CreatedAt => g => g.CreatedAt,
             SortField.UpdatedAt => g => g.UpdatedAt,
-            SortField.SteamPlaytimeForever => g => g.SteamPlaytimeForever ?? 0,
+            SortField.SteamPlaytimeForever => g => g.ManualPlaytimeMinutes ?? g.SteamPlaytimeForever ?? 0,
             SortField.Id => g => g.Id,
             _ => throw new ArgumentException($"Campo de ordenamiento no soportado: {field}")
         };

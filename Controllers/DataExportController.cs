@@ -241,7 +241,7 @@ public class DataExportController : BaseApiController
             var platforms = await _context.GamePlatforms.Where(p => p.UserId == userId).OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")).ToListAsync();
             foreach (var p in platforms)
             {
-                allRecords.Add(new FullExportModel { Type = "Platform", Name = p.Name, Color = p.Color, IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
+                allRecords.Add(new FullExportModel { Type = "Platform", Name = p.Name, Color = p.Color, Logo = p.Logo ?? "", IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
             }
             var statuses = await _context.GameStatuses.Where(s => s.UserId == userId).OrderBy(s => s.SortOrder).ThenBy(s => EF.Functions.Collate(s.Name, "NOCASE")).ToListAsync();
             foreach (var s in statuses)
@@ -286,7 +286,7 @@ public class DataExportController : BaseApiController
                 var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                     ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                     : "";
-                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "" });
+                allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
             }
 
             // ReplayType catalog
@@ -390,8 +390,8 @@ public class DataExportController : BaseApiController
             {
                 if (string.IsNullOrWhiteSpace(record.Name)) continue;
                 var existing = await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower() && p.UserId == userId);
-                if (existing != null) { existing.Color = record.Color; existing.IsActive = bool.Parse(record.IsActive ?? "true"); existing.SortOrder = int.Parse(record.SortOrder ?? "0"); results = results with { platformsUpdated = results.platformsUpdated + 1 }; }
-                else { _context.GamePlatforms.Add(new GamePlatform { UserId = userId, Name = record.Name, Color = record.Color, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { platformsImported = results.platformsImported + 1 }; }
+                if (existing != null) { existing.Color = record.Color; existing.Logo = string.IsNullOrWhiteSpace(record.Logo) ? null : record.Logo; existing.IsActive = bool.Parse(record.IsActive ?? "true"); existing.SortOrder = int.Parse(record.SortOrder ?? "0"); results = results with { platformsUpdated = results.platformsUpdated + 1 }; }
+                else { _context.GamePlatforms.Add(new GamePlatform { UserId = userId, Name = record.Name, Color = record.Color, Logo = string.IsNullOrWhiteSpace(record.Logo) ? null : record.Logo, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { platformsImported = results.platformsImported + 1 }; }
             }
             await _context.SaveChangesAsync();
             foreach (var record in statuses)
@@ -540,6 +540,7 @@ public class DataExportController : BaseApiController
                         existing.SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever);
                         existing.SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks);
                         existing.SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced);
+                        existing.ManualPlaytimeMinutes = ParseNullableInt(record.ManualPlaytimeMinutes);
                         existing.CalculateScore();
 
                         // Update PlayWith relationships
@@ -584,7 +585,8 @@ public class DataExportController : BaseApiController
                             SteamAppId = ParseNullableInt(record.SteamAppId),
                             SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever),
                             SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks),
-                            SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced)
+                            SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced),
+                            ManualPlaytimeMinutes = ParseNullableInt(record.ManualPlaytimeMinutes)
                         };
                         newGame.CalculateScore();
                         _context.Games.Add(newGame);
@@ -874,6 +876,7 @@ public class DataExportController : BaseApiController
                     SteamPlaytimeForever = ApplyExportString(g.SteamPlaytimeForever?.ToString() ?? "", "steamPlaytimeForever", effectiveConfig),
                     SteamPlaytime2Weeks = ApplyExportString(g.SteamPlaytime2Weeks?.ToString() ?? "", "steamPlaytime2Weeks", effectiveConfig),
                     SteamLastSynced = ApplyExportString(g.SteamLastSynced?.ToString("O") ?? "", "steamLastSynced", effectiveConfig),
+                    ManualPlaytimeMinutes = ApplyExportString(g.ManualPlaytimeMinutes?.ToString() ?? "", "manualPlaytimeMinutes", effectiveConfig),
                 });
             }
 
@@ -1019,6 +1022,7 @@ public class DataExportController : BaseApiController
                     var resolvedSteamPlaytimeForever = ResolveImportString(record.SteamPlaytimeForever, "steamPlaytimeForever", effectiveConfig);
                     var resolvedSteamPlaytime2Weeks = ResolveImportString(record.SteamPlaytime2Weeks, "steamPlaytime2Weeks", effectiveConfig);
                     var resolvedSteamLastSynced = ResolveImportString(record.SteamLastSynced, "steamLastSynced", effectiveConfig);
+                    var resolvedManualPlaytimeMinutes = ResolveImportString(record.ManualPlaytimeMinutes, "manualPlaytimeMinutes", effectiveConfig);
 
                     // Resolve entity lookups
                     var status = string.IsNullOrWhiteSpace(resolvedStatus)
@@ -1082,6 +1086,7 @@ public class DataExportController : BaseApiController
                         existing.SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever);
                         existing.SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks);
                         existing.SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced);
+                        existing.ManualPlaytimeMinutes = ParseNullableInt(resolvedManualPlaytimeMinutes);
                         existing.CalculateScore();
 
                         foreach (var mapping in existing.GamePlayWiths.ToList())
@@ -1118,6 +1123,7 @@ public class DataExportController : BaseApiController
                             SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever),
                             SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks),
                             SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced),
+                            ManualPlaytimeMinutes = ParseNullableInt(resolvedManualPlaytimeMinutes),
                         };
                         newGame.CalculateScore();
                         _context.Games.Add(newGame);
@@ -1250,6 +1256,8 @@ public class FullExportModel
     public string? SteamPlaytime2Weeks { get; set; }
     [Name("SteamLastSynced")]
     public string? SteamLastSynced { get; set; }
+    [Name("ManualPlaytimeMinutes")]
+    public string? ManualPlaytimeMinutes { get; set; }
     // View fields
     public string? Description { get; set; }
     public string? FiltersJson { get; set; }

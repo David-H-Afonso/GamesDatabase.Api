@@ -143,6 +143,7 @@ public class ZipExportService : IZipExportService
             {
                 Name = r.Name,
                 Color = r.Color ?? "",
+                Logo = r.Logo ?? "",
                 IsActive = ParseBool(r.IsActive),
                 SortOrder = ParseInt(r.SortOrder) ?? 0,
                 IsDefault = ParseBool(r.IsDefault)
@@ -284,7 +285,12 @@ public class ZipExportService : IZipExportService
                     Completion = game.Completion ?? "",
                     Story = game.Story ?? "",
                     Comment = game.Comment ?? "",
-                    Description = game.Description ?? ""
+                    Description = game.Description ?? "",
+                    SteamAppId = game.SteamAppId ?? "",
+                    SteamPlaytimeForever = game.SteamPlaytimeForever ?? "",
+                    SteamPlaytime2Weeks = game.SteamPlaytime2Weeks ?? "",
+                    SteamLastSynced = game.SteamLastSynced ?? "",
+                    ManualPlaytimeMinutes = game.ManualPlaytimeMinutes ?? ""
                 };
                 await AddJsonToZip(archive, $"{basePath}/info.json", gameInfo);
             }

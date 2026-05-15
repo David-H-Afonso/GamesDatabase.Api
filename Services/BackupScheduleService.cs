@@ -110,7 +110,7 @@ public class BackupScheduleService : BackgroundService
             // ── Catalogs ────────────────────────────────────────────────────────
             var platforms = await db.GamePlatforms.Where(p => p.UserId == userId).OrderBy(p => p.SortOrder).ToListAsync(ct);
             foreach (var p in platforms)
-                allRecords.Add(new FullExportModel { Type = "Platform", Name = p.Name, Color = p.Color, IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
+                allRecords.Add(new FullExportModel { Type = "Platform", Name = p.Name, Color = p.Color, Logo = p.Logo ?? "", IsActive = p.IsActive.ToString(), SortOrder = p.SortOrder.ToString() });
 
             var statuses = await db.GameStatuses.Where(s => s.UserId == userId).OrderBy(s => s.SortOrder).ToListAsync(ct);
             foreach (var s in statuses)
@@ -171,7 +171,8 @@ public class BackupScheduleService : BackgroundService
                     SteamAppId = g.SteamAppId?.ToString() ?? "",
                     SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "",
                     SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "",
-                    SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? ""
+                    SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "",
+                    ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? ""
                 });
             }
 

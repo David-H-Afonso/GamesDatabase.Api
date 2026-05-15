@@ -37,11 +37,13 @@ public static class MappingExtensions
             SteamFinishedLastValue = game.SteamFinishedLastValue,
             SteamFinishedSyncedAt = game.SteamFinishedSyncedAt,
             SteamFinishedRejectedValue = game.SteamFinishedRejectedValue,
+            ManualPlaytimeMinutes = game.ManualPlaytimeMinutes,
             IsManuallyCompleted = game.IsManuallyCompleted,
             CreatedAt = game.CreatedAt,
             UpdatedAt = game.UpdatedAt,
             StatusName = game.Status?.Name,
             PlatformName = game.Platform?.Name,
+            PlatformLogo = game.Platform?.Logo,
             PlayWithNames = game.GamePlayWiths?.Select(gpw => gpw.PlayWith.Name).ToList() ?? new List<string>(),
             PlayedStatusName = game.PlayedStatus?.Name
         };
@@ -70,6 +72,7 @@ public static class MappingExtensions
             IsCheaperByKey = dto.IsCheaperByKey,
             KeyStoreUrl = dto.KeyStoreUrl,
             SteamAppId = dto.SteamAppId,
+            ManualPlaytimeMinutes = dto.ManualPlaytimeMinutes,
             IsManuallyCompleted = dto.IsManuallyCompleted ?? false
         };
 
@@ -102,6 +105,7 @@ public static class MappingExtensions
 
         if (dto.KeyStoreUrl != null) entity.KeyStoreUrl = dto.KeyStoreUrl;
         if (dto.SteamAppId.HasValue) entity.SteamAppId = dto.SteamAppId.Value;
+        if (dto.ManualPlaytimeMinutes.HasValue) entity.ManualPlaytimeMinutes = dto.ManualPlaytimeMinutes.Value;
         if (dto.IsManuallyCompleted.HasValue) entity.IsManuallyCompleted = dto.IsManuallyCompleted.Value;
 
         entity.CalculateScore();
@@ -115,7 +119,8 @@ public static class MappingExtensions
             Name = platform.Name,
             SortOrder = platform.SortOrder,
             IsActive = platform.IsActive,
-            Color = platform.Color
+            Color = platform.Color,
+            Logo = platform.Logo
         };
     }
 

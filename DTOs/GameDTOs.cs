@@ -36,6 +36,7 @@ public class GameDto
     public string? SteamFinishedLastValue { get; set; }
     public DateTime? SteamFinishedSyncedAt { get; set; }
     public string? SteamFinishedRejectedValue { get; set; }
+    public int? ManualPlaytimeMinutes { get; set; }
 
     // Manual 100% completion
     public bool IsManuallyCompleted { get; set; }
@@ -47,6 +48,7 @@ public class GameDto
     // Navigation properties simplificadas (solo datos básicos)
     public string? StatusName { get; set; }
     public string? PlatformName { get; set; }
+    public string? PlatformLogo { get; set; }
     public List<string> PlayWithNames { get; set; } = new List<string>();
     public string? PlayedStatusName { get; set; }
 }
@@ -76,6 +78,7 @@ public class GameCreateDto
 
     // Steam integration
     public int? SteamAppId { get; set; }
+    public int? ManualPlaytimeMinutes { get; set; }
 
     // Manual 100% completion
     public bool? IsManuallyCompleted { get; set; }
@@ -107,6 +110,7 @@ public class GameUpdateDto
 
     // Steam integration
     public int? SteamAppId { get; set; }
+    public int? ManualPlaytimeMinutes { get; set; }
 
     // Manual 100% completion
     public bool? IsManuallyCompleted { get; set; }

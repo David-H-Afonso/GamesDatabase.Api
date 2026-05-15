@@ -91,6 +91,9 @@ public class ExportRecord
     [Name("SteamLastSynced")]
     public string? SteamLastSynced { get; set; }
 
+    [Name("ManualPlaytimeMinutes")]
+    public string? ManualPlaytimeMinutes { get; set; }
+
     [Name("Description")]
     public string? Description { get; set; }
 

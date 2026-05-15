@@ -191,6 +191,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.SteamFinishedLastValue).HasColumnName("steam_finished_last_value");
             entity.Property(e => e.SteamFinishedSyncedAt).HasColumnName("steam_finished_synced_at");
             entity.Property(e => e.SteamFinishedRejectedValue).HasColumnName("steam_finished_rejected_value");
+            entity.Property(e => e.ManualPlaytimeMinutes).HasColumnName("manual_playtime_minutes");
             entity.Property(e => e.IsManuallyCompleted).HasColumnName("IsManuallyCompleted");
             entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
             entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
@@ -227,6 +228,7 @@ public class GamesDbContext : DbContext
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#ffffff");
+            entity.Property(e => e.Logo).HasColumnName("logo");
             entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
 
             entity.HasOne(e => e.User)

@@ -27,7 +27,7 @@ public class GameExportConfig
     /// </summary>
     public static readonly IReadOnlySet<string> CustomClearedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "started", "finished", "grade", "comment", "status", "playWith"
+        "started", "finished", "grade", "comment", "status", "playWith", "manualPlaytimeMinutes"
     };
 }
 
@@ -61,7 +61,7 @@ public class GameImportConfig
     /// </summary>
     public static readonly IReadOnlySet<string> CustomClearedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "started", "finished", "grade", "comment", "status", "playWith"
+        "started", "finished", "grade", "comment", "status", "playWith", "manualPlaytimeMinutes"
     };
 }
 
