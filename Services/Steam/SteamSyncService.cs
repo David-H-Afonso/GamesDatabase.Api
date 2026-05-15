@@ -128,7 +128,10 @@ public class SteamSyncService : ISteamSyncService
 
             if (existingByAppId.TryGetValue(appId, out var existingGame))
             {
-                await UpdateSteamCriticScoreAsync(existingGame, appId);
+                // Preserve user-curated fields (PlatformId, Critic, Cover, Logo, etc.).
+                // Only fill critic score if the game doesn't already have one.
+                if (existingGame.Critic == null)
+                    await UpdateSteamCriticScoreAsync(existingGame, appId);
 
                 // Already linked - update playtime
                 if (ownedByAppId.TryGetValue(appId, out var owned))

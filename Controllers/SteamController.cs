@@ -129,7 +129,9 @@ public class SteamController : BaseApiController
 
         game.SteamAppId = request.AppId;
 
-        // Sync playtime if user has Steam linked
+        // Only update Steam-specific fields. Never overwrite user-curated data
+        // (PlatformId, Critic, Cover, Logo, Released, etc.) so linking Steam to a
+        // game that already has a platform (e.g. Epic) keeps that platform intact.
         var user = await _context.Users.FindAsync(userId.Value);
         if (user?.SteamId != null)
         {
@@ -166,7 +168,10 @@ public class SteamController : BaseApiController
             .Select(g => new { g.SteamAppId, g.Id, g.Name })
             .ToListAsync();
 
-        var gdbByAppId = gdbGames.ToDictionary(g => g.SteamAppId!.Value, g => g);
+        // GroupBy to handle edge case where the same SteamAppId appears more than once
+        var gdbByAppId = gdbGames
+            .GroupBy(g => g.SteamAppId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
 
         var result = ownedGames.Select(g =>
         {
