@@ -62,7 +62,11 @@ public class SteamAuthController : ControllerBase
 
         var nonce = _steamAuth.StoreNonce(userId, mode);
         var frontendBase = ResolveRequestedFrontendUrl(frontend_url) ?? GetFrontendBaseUrl();
-        var callbackUrl = $"{GetCallbackBaseUrl()}/api/auth/steam/callback" +
+        // Use the same base as the frontend for the Steam realm/callback.
+        // The API is proxied through the frontend nginx, so the public URL for both is identical.
+        // Falling back to GetCallbackBaseUrl() only if we have no trusted frontend origin.
+        var callbackBase = !string.IsNullOrEmpty(frontendBase) ? frontendBase : GetCallbackBaseUrl();
+        var callbackUrl = $"{callbackBase}/api/auth/steam/callback" +
             $"?frontend_url={Uri.EscapeDataString(frontendBase)}";
         var loginUrl = _steamAuth.BuildLoginUrl(nonce, callbackUrl);
 
@@ -83,7 +87,8 @@ public class SteamAuthController : ControllerBase
 
         var nonce = _steamAuth.StoreNonce(userId, "link");
         var frontendBase = ResolveRequestedFrontendUrl(frontend_url) ?? GetFrontendBaseUrl();
-        var callbackUrl = $"{GetCallbackBaseUrl()}/api/auth/steam/callback" +
+        var callbackBase = !string.IsNullOrEmpty(frontendBase) ? frontendBase : GetCallbackBaseUrl();
+        var callbackUrl = $"{callbackBase}/api/auth/steam/callback" +
             $"?frontend_url={Uri.EscapeDataString(frontendBase)}";
         var loginUrl = _steamAuth.BuildLoginUrl(nonce, callbackUrl);
 
