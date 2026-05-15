@@ -18,6 +18,7 @@ public class SteamAuthController : ControllerBase
     private readonly GamesDbContext _context;
     private readonly ISteamApiService _steamApi;
     private readonly SteamSettings _settings;
+    private readonly CorsSettings _corsSettings;
     private readonly ILogger<SteamAuthController> _logger;
 
     public SteamAuthController(
@@ -26,6 +27,7 @@ public class SteamAuthController : ControllerBase
         GamesDbContext context,
         ISteamApiService steamApi,
         IOptions<SteamSettings> settings,
+        IOptions<CorsSettings> corsSettings,
         ILogger<SteamAuthController> logger)
     {
         _steamAuth = steamAuth;
@@ -33,6 +35,7 @@ public class SteamAuthController : ControllerBase
         _context = context;
         _steamApi = steamApi;
         _settings = settings.Value;
+        _corsSettings = corsSettings.Value;
         _logger = logger;
     }
 
@@ -43,7 +46,7 @@ public class SteamAuthController : ControllerBase
     /// </summary>
     [HttpGet("login")]
     [AllowAnonymous]
-    public IActionResult StartLogin([FromQuery] string mode = "login")
+    public IActionResult StartLogin([FromQuery] string mode = "login", [FromQuery] string? frontend_url = null)
     {
         if (mode != "login" && mode != "link")
             return BadRequest(new { message = "mode must be 'login' or 'link'" });
@@ -58,7 +61,7 @@ public class SteamAuthController : ControllerBase
         }
 
         var nonce = _steamAuth.StoreNonce(userId, mode);
-        var frontendBase = GetFrontendBaseUrl();
+        var frontendBase = ResolveRequestedFrontendUrl(frontend_url) ?? GetFrontendBaseUrl();
         var callbackUrl = $"{GetCallbackBaseUrl()}/api/auth/steam/callback" +
             $"?frontend_url={Uri.EscapeDataString(frontendBase)}";
         var loginUrl = _steamAuth.BuildLoginUrl(nonce, callbackUrl);
@@ -72,14 +75,14 @@ public class SteamAuthController : ControllerBase
     /// </summary>
     [HttpGet("link-url")]
     [Authorize]
-    public IActionResult GetLinkUrl()
+    public IActionResult GetLinkUrl([FromQuery] string? frontend_url = null)
     {
         var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out var userId))
             return Unauthorized(new { message = "Invalid user" });
 
         var nonce = _steamAuth.StoreNonce(userId, "link");
-        var frontendBase = GetFrontendBaseUrl();
+        var frontendBase = ResolveRequestedFrontendUrl(frontend_url) ?? GetFrontendBaseUrl();
         var callbackUrl = $"{GetCallbackBaseUrl()}/api/auth/steam/callback" +
             $"?frontend_url={Uri.EscapeDataString(frontendBase)}";
         var loginUrl = _steamAuth.BuildLoginUrl(nonce, callbackUrl);
@@ -205,4 +208,31 @@ public class SteamAuthController : ControllerBase
 
     private static string BuildFrontendErrorUrl(string frontendBase, string error)
         => $"{frontendBase}/#/steam-callback?error={Uri.EscapeDataString(error)}";
+
+    /// <summary>
+    /// Validates a client-supplied frontend_url against the CORS allowed origins list.
+    /// Returns the URL if it is trusted, null otherwise. Prevents open-redirect attacks.
+    /// </summary>
+    private string? ResolveRequestedFrontendUrl(string? requestedUrl)
+    {
+        if (string.IsNullOrWhiteSpace(requestedUrl))
+            return null;
+
+        if (!Uri.TryCreate(requestedUrl, UriKind.Absolute, out var uri))
+            return null;
+
+        var origin = $"{uri.Scheme}://{uri.Authority}";
+
+        // Allow if it matches a configured CORS origin
+        if (_corsSettings.AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+            return origin;
+
+        // Also allow if it matches the explicitly configured FrontendBaseUrl
+        if (!string.IsNullOrWhiteSpace(_settings.FrontendBaseUrl) &&
+            string.Equals(origin, _settings.FrontendBaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            return origin;
+
+        _logger.LogWarning("Rejected untrusted frontend_url: {Url}", requestedUrl);
+        return null;
+    }
 }
