@@ -84,16 +84,13 @@ public class ExportController : BaseApiController
     [HttpPost("sync-to-network")]
     public async Task<IActionResult> SyncToNetwork([FromBody] SyncToNetworkRequest request)
     {
-        // Only allow sync from localhost or specific local IP
-        var host = Request.Host.Host;
-        var isLocalHost = host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                          host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                          host.Equals("192.168.0.32", StringComparison.OrdinalIgnoreCase);
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        var isAdmin = role == "Admin";
 
-        if (!isLocalHost)
+        if (!isAdmin)
         {
-            _logger.LogWarning("Network sync attempted from non-local host: {Host}", host);
-            return StatusCode(403, new { message = "Network sync is only available on local installations" });
+            _logger.LogWarning("Network sync attempted by non-admin user");
+            return StatusCode(403, new { message = "Network sync requires admin privileges" });
         }
 
         try

@@ -46,15 +46,10 @@ public class DataExportController : BaseApiController
     [Authorize]
     public async Task<ActionResult<UpdateImageUrlsResult>> UpdateImageUrls()
     {
-        // Only allow from localhost or specific local IP
-        var host = Request.Host.Host;
-        var isLocalHost = host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                          host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                          host.Equals("192.168.0.32", StringComparison.OrdinalIgnoreCase);
-
-        if (!isLocalHost)
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (role != "Admin")
         {
-            return StatusCode(403, new { message = "Image URL update is only available on local installations" });
+            return StatusCode(403, new { message = "Image URL update requires admin privileges" });
         }
 
         var result = new UpdateImageUrlsResult();
@@ -189,10 +184,10 @@ public class DataExportController : BaseApiController
     [Authorize]
     public async Task<ActionResult<FolderAnalysisResult>> AnalyzeFolders()
     {
-        // Only allow from localhost or specific local IP
-        if (!IsLocalRequest())
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (role != "Admin")
         {
-            return StatusCode(403, new { message = "Folder analysis is only available on localhost or 192.168.0.32" });
+            return StatusCode(403, new { message = "Folder analysis requires admin privileges" });
         }
 
         try
@@ -225,10 +220,10 @@ public class DataExportController : BaseApiController
         }
     }
 
-    private bool IsLocalRequest()
+    private bool IsAdminUser()
     {
-        var host = Request.Host.Host.ToLowerInvariant();
-        return host == "localhost" || host == "127.0.0.1" || host == "192.168.0.32";
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        return role == "Admin";
     }
 
     [HttpGet("full")]
@@ -1159,13 +1154,9 @@ public class DataExportController : BaseApiController
     [Authorize]
     public IActionResult ClearImageCache()
     {
-        var host = Request.Host.Host;
-        var isLocalHost = host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                          host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                          host.Equals("192.168.0.32", StringComparison.OrdinalIgnoreCase);
-
-        if (!isLocalHost)
-            return StatusCode(403, new { message = "Image cache clear is only available on local installations" });
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (role != "Admin")
+            return StatusCode(403, new { message = "Image cache clear requires admin privileges" });
 
         var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
         if (string.IsNullOrWhiteSpace(networkSyncPath))
