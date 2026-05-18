@@ -63,6 +63,14 @@ public class NetworkSyncService : INetworkSyncService
             _logger.LogInformation("Starting network sync for user {UserId} to {Path} (fullSync: {FullSync})",
                 userId, _syncOptions.NetworkPath, fullSync);
 
+            // Authenticate to the UNC share if credentials are configured (Windows Samba)
+            var authError = NetworkPathHelper.EnsureAuthenticated(
+                _syncOptions.NetworkPath,
+                _syncOptions.Username,
+                _syncOptions.Password);
+            if (authError != null)
+                _logger.LogWarning("Network path authentication warning: {Error}", authError);
+
             // Verify network path is accessible
             if (!Directory.Exists(_syncOptions.NetworkPath))
             {

@@ -13,6 +13,14 @@ public class ImageProxyController : ControllerBase
 {
     private static readonly WebpEncoder _encoder = new() { Quality = 75 };
 
+    // Used when the UNC network path is inaccessible — falls back to fetching
+    // the raw image from the NAS HTTP server configured in ImageSettings:BaseUrl.
+    private static readonly HttpClient _nasHttpFallback = new(
+        new HttpClientHandler { AllowAutoRedirect = true })
+    {
+        Timeout = TimeSpan.FromSeconds(10),
+    };
+
     private readonly IConfiguration _configuration;
     private readonly ILogger<ImageProxyController> _logger;
 
@@ -42,7 +50,7 @@ public class ImageProxyController : ControllerBase
         }
 
         if (!System.IO.File.Exists(requestedFull))
-            return NotFound();
+            return await ProxyFromNasHttpAsync(imagePath, ct);
 
         w = w > 0 ? Math.Clamp(w, 1, 2560) : 0;
         h = h > 0 ? Math.Clamp(h, 1, 2560) : 0;
@@ -132,6 +140,32 @@ public class ImageProxyController : ControllerBase
             SetCacheHeaders(eTag, sourceLastModified);
             var mimeType = GetMimeType(requestedFull);
             return PhysicalFile(requestedFull, mimeType);
+        }
+    }
+
+    // Falls back to the configured NAS HTTP server when the UNC path is inaccessible
+    // (e.g. credential conflict error 1219 on Windows prevents direct file access).
+    private async Task<IActionResult> ProxyFromNasHttpAsync(string imagePath, CancellationToken ct)
+    {
+        var nasHttpBase = _configuration["ImageSettings:BaseUrl"]?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(nasHttpBase))
+            return NotFound();
+
+        var url = $"{nasHttpBase}/game-images/{imagePath}";
+        try
+        {
+            using var resp = await _nasHttpFallback.GetAsync(url, ct);
+            if (!resp.IsSuccessStatusCode)
+                return NotFound();
+
+            var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+            var contentType = resp.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            return File(bytes, contentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("NAS HTTP fallback failed for {Path}: {Message}", imagePath, ex.Message);
+            return NotFound();
         }
     }
 

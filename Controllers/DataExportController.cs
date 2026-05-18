@@ -28,6 +28,41 @@ public class DataExportController : BaseApiController
     private readonly IConfiguration _configuration;
     private readonly INetworkSyncService _networkSyncService;
 
+    // Shared client for HTTP-based image extension detection (fallback when NAS is inaccessible).
+    private static readonly HttpClient _imageProbeClient = new(
+        new HttpClientHandler { AllowAutoRedirect = false, ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator })
+    {
+        Timeout = TimeSpan.FromSeconds(5),
+    };
+
+    /// <summary>
+    /// Fires HEAD requests for each extension in parallel and returns the first URL
+    /// that gets a 2xx response, preserving the extension order as tie-breaker.
+    /// Returns null when no extension matches.
+    /// </summary>
+    private static async Task<string?> DetectImageUrlViaHttpAsync(
+        string imageBaseUrl, string imagePath, string[] extensions)
+    {
+        if (string.IsNullOrWhiteSpace(imageBaseUrl)) return null;
+
+        var tasks = extensions.Select(async ext =>
+        {
+            var url = $"{imageBaseUrl}/{imagePath}{ext}";
+            try
+            {
+                using var resp = await _imageProbeClient.SendAsync(
+                    new HttpRequestMessage(HttpMethod.Head, url));
+                return resp.IsSuccessStatusCode ? url : null;
+            }
+            catch { return null; }
+        }).ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        // Return in original extension-order preference (first non-null match).
+        return results.FirstOrDefault(r => r != null);
+    }
+
     public DataExportController(
         GamesDbContext context,
         IOptions<ExportSettings> exportSettings,
@@ -44,7 +79,7 @@ public class DataExportController : BaseApiController
 
     [HttpPost("update-image-urls")]
     [Authorize]
-    public async Task<ActionResult<UpdateImageUrlsResult>> UpdateImageUrls()
+    public async Task<ActionResult<UpdateImageUrlsResult>> UpdateImageUrls([FromQuery] string? imageBaseUrl = null)
     {
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
         if (role != "Admin")
@@ -60,18 +95,34 @@ public class DataExportController : BaseApiController
             return BadRequest("NetworkSync:NetworkPath not configured");
         }
 
-        if (!Directory.Exists(networkSyncPath))
-        {
-            return BadRequest($"NetworkSync path does not exist: {networkSyncPath}");
-        }
+        // Authenticate to the UNC share if credentials are configured.
+        var authError = NetworkPathHelper.EnsureAuthenticated(
+            networkSyncPath,
+            _configuration["NetworkSync:Username"],
+            _configuration["NetworkSync:Password"]);
+        if (authError != null)
+            _logger.LogWarning("Network path authentication warning: {Error}", authError);
 
         var userId = GetCurrentUserIdOrDefault(1);
         var userPath = Path.Combine(networkSyncPath, userId.ToString());
         var gamesPath = Path.Combine(userPath, "Games");
-        if (!Directory.Exists(gamesPath))
+
+        // NAS accessibility is advisory — when unavailable we still update URLs in the
+        // database, but skip per-game file-extension detection (default to .png).
+        var nasAccessible = Directory.Exists(networkSyncPath) && Directory.Exists(gamesPath);
+        result.NasAccessible = nasAccessible;
+        if (!nasAccessible)
         {
-            return BadRequest($"Games path does not exist: {gamesPath}");
+            var warning = $"NAS UNC path not accessible ({networkSyncPath}). Extension detection will use HTTP HEAD requests against the selected image URL.";
+            if (authError != null) warning += $" Auth error: {authError}";
+            result.NasWarning = warning;
+            _logger.LogWarning("{Warning}", warning);
         }
+
+        // Determine effective image base URL: caller wins, then config fallback.
+        var effectiveImageBaseUrl = (!string.IsNullOrWhiteSpace(imageBaseUrl)
+            ? imageBaseUrl
+            : _configuration["ImageSettings:BaseUrl"] ?? string.Empty).TrimEnd('/');
 
         var games = await _context.Games
             .Where(g => g.UserId == userId)
@@ -89,7 +140,7 @@ public class DataExportController : BaseApiController
 
                 var gamePath = Path.Combine(gamesPath, folderName);
 
-                if (!Directory.Exists(gamePath))
+                if (nasAccessible && !Directory.Exists(gamePath))
                 {
                     _logger.LogWarning("Folder not found for game '{GameName}'. Expected path: {ExpectedPath}", game.Name, gamePath);
                     result.SkippedGames++;
@@ -102,22 +153,27 @@ public class DataExportController : BaseApiController
 
                 // Check for logo
                 string? logoUrl = null;
-                var imageBaseUrl = _configuration["ImageSettings:BaseUrl"] ?? string.Empty;
-                foreach (var ext in extensions)
+                if (nasAccessible)
                 {
-                    var logoPath = Path.Combine(gamePath, $"logo{ext}");
-                    if (System.IO.File.Exists(logoPath))
+                    foreach (var ext in extensions)
                     {
-                        logoUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/logo{ext}";
-                        break;
+                        var logoPath = Path.Combine(gamePath, $"logo{ext}");
+                        if (System.IO.File.Exists(logoPath))
+                        {
+                            logoUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/logo{ext}";
+                            break;
+                        }
                     }
                 }
-
-                // Update logo - if found use actual file, otherwise use default logo.png
-                if (logoUrl == null)
+                else
                 {
-                    logoUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/logo.png";
+                    // HTTP HEAD fallback: detect extension from the image server directly.
+                    logoUrl = await DetectImageUrlViaHttpAsync(
+                        effectiveImageBaseUrl,
+                        $"game-images/{userId}/Games/{folderName}/logo",
+                        extensions);
                 }
+                logoUrl ??= $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/logo.png";
 
                 if (game.Logo != logoUrl)
                 {
@@ -128,21 +184,27 @@ public class DataExportController : BaseApiController
 
                 // Check for cover
                 string? coverUrl = null;
-                foreach (var ext in extensions)
+                if (nasAccessible)
                 {
-                    var coverPath = Path.Combine(gamePath, $"cover{ext}");
-                    if (System.IO.File.Exists(coverPath))
+                    foreach (var ext in extensions)
                     {
-                        coverUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
-                        break;
+                        var coverPath = Path.Combine(gamePath, $"cover{ext}");
+                        if (System.IO.File.Exists(coverPath))
+                        {
+                            coverUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
+                            break;
+                        }
                     }
                 }
-
-                // Update cover - if found use actual file, otherwise use default cover.png
-                if (coverUrl == null)
+                else
                 {
-                    coverUrl = $"{imageBaseUrl}/game-images/{userId}/Games/{folderName}/cover.png";
+                    // HTTP HEAD fallback: detect extension from the image server directly.
+                    coverUrl = await DetectImageUrlViaHttpAsync(
+                        effectiveImageBaseUrl,
+                        $"game-images/{userId}/Games/{folderName}/cover",
+                        extensions);
                 }
+                coverUrl ??= $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover.png";
 
                 if (game.Cover != coverUrl)
                 {
@@ -1271,4 +1333,6 @@ public class UpdateImageUrlsResult
     public int AlreadyCorrect { get; set; }
     public int NoImagesFound { get; set; }
     public List<string> Errors { get; set; } = new();
+    public bool NasAccessible { get; set; }
+    public string? NasWarning { get; set; }
 }
