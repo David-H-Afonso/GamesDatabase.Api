@@ -834,8 +834,49 @@ public class NetworkSyncService : INetworkSyncService
         }
     }
 
+    /// <summary>
+    /// If the URL points to our own /game-images/ proxy endpoint, resolve the image
+    /// path from the UNC network path directly so we never HTTP-loop back into ourselves.
+    /// </summary>
+    private async Task<byte[]?> TryReadFromNetworkPathAsync(string url)
+    {
+        const string marker = "/game-images/";
+        var idx = url.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0 || string.IsNullOrWhiteSpace(_syncOptions.NetworkPath))
+            return null;
+
+        // Extract the relative path after /game-images/  (e.g. "1/Games/Foo/logo.png")
+        var relativePath = url[(idx + marker.Length)..];
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return null;
+
+        // Normalise separators and resolve the full path under the network share
+        relativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(_syncOptions.NetworkPath, relativePath));
+
+        // Security: ensure the resolved path is still inside the network path root
+        var rootFull = Path.GetFullPath(_syncOptions.NetworkPath);
+        if (!fullPath.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        if (!File.Exists(fullPath))
+        {
+            _logger.LogDebug("Local file not found for self-referencing URL, will try HTTP download: {Path}", fullPath);
+            return null;
+        }
+
+        _logger.LogDebug("Reading image directly from network path instead of HTTP: {Path}", fullPath);
+        return await File.ReadAllBytesAsync(fullPath);
+    }
+
     private async Task<byte[]?> SafeDownloadAsync(string url, int attempt = 1, int maxAttempts = 3)
     {
+        // If the URL points to our own /game-images/ proxy, read directly from the UNC
+        // network path instead of making an HTTP round-trip that would loop back into us.
+        var localBytes = await TryReadFromNetworkPathAsync(url);
+        if (localBytes != null)
+            return localBytes;
+
         // Check if CDN is healthy before attempting download
         if (!IsCdnHealthy(url))
         {

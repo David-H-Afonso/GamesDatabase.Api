@@ -41,6 +41,11 @@ public class ImageProxyController : ControllerBase
         if (string.IsNullOrWhiteSpace(networkSyncPath))
             return NotFound();
 
+        // Prevent infinite proxy loop: if this request came from our own NAS fallback,
+        // don't attempt another fallback — just 404 immediately.
+        if (Request.Headers.ContainsKey("X-Image-Proxy"))
+            return NotFound();
+
         var rootFull = Path.GetFullPath(networkSyncPath);
         var requestedFull = Path.GetFullPath(Path.Combine(networkSyncPath, imagePath));
         if (!requestedFull.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
@@ -154,7 +159,9 @@ public class ImageProxyController : ControllerBase
         var url = $"{nasHttpBase}/game-images/{imagePath}";
         try
         {
-            using var resp = await _nasHttpFallback.GetAsync(url, ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("X-Image-Proxy", "true");
+            using var resp = await _nasHttpFallback.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
                 return NotFound();
 
