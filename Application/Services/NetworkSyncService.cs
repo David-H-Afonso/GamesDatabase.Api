@@ -418,53 +418,65 @@ public class NetworkSyncService : INetworkSyncService
             // Sync logo
             if (!string.IsNullOrWhiteSpace(game.Logo) && (needsSync || logoNeedsSync))
             {
-                bool isRetry = cache?.LogoUrl == game.Logo && !cache.LogoDownloaded;
                 bool urlChanged = cache?.LogoUrl != game.Logo;
 
-                // Check if URL is local (localhost or 192.168.0.32) - skip download
-                bool isLocalUrl = game.Logo.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
-                                  game.Logo.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
+                // Check if URL points to our own image proxy (self-referencing URL)
+                // This includes localhost, LAN IPs, and any URL containing /game-images/ that
+                // resolves to our own NAS storage
+                bool isSelfReferencing = IsSelfReferencingUrl(game.Logo);
 
-                if (isLocalUrl)
+                if (isSelfReferencing)
                 {
-                    // Mark as downloaded without actually downloading (leave existing files intact)
-                    if (cache != null) cache.LogoDownloaded = true;
-                    result.ImagesSynced++;
-                    _logger.LogDebug("Skipping local logo download for '{Name}'", game.Name);
-                }
-                else
-                {
-                    if (urlChanged && cache?.LogoUrl != null)
+                    // Self-referencing URL: the image already lives on the NAS.
+                    // Verify the file actually exists; if so, mark as downloaded.
+                    // NEVER delete or re-download these.
+                    bool fileExists = ImageFileExistsOnDisk(gamePath, "logo");
+                    if (fileExists)
                     {
-                        // Delete old logo files when URL changes (only for external URLs)
-                        DeleteOldImageFiles(gamePath, "logo");
-                        _logger.LogInformation("Logo URL changed for '{Name}', downloading new image", game.Name);
-                    }
-
-
-                    // Apply rate limiting
-                    await ApplyRateLimitAsync(game.Logo, domainLastRequest, minDelayBetweenRequestsMs);
-
-                    var logoBytes = await SafeDownloadAsync(game.Logo, attempt: 1, maxAttempts: 1);
-                    if (logoBytes != null)
-                    {
-                        var extension = GetExtensionFromUrl(game.Logo);
-                        var logoPath = Path.Combine(gamePath, $"logo{extension}");
-                        await File.WriteAllBytesAsync(logoPath, logoBytes);
                         if (cache != null) cache.LogoDownloaded = true;
                         result.ImagesSynced++;
-                        result.FilesWritten++;
+                        _logger.LogDebug("Skipping self-referencing logo for '{Name}' - file exists on NAS", game.Name);
                     }
                     else
                     {
                         if (cache != null) cache.LogoDownloaded = false;
                         result.ImagesFailed++;
                         failedImageTypes.Add("logo");
-                        // Track for retry at the end
+                        _logger.LogWarning("Self-referencing logo for '{Name}' but file missing on NAS", game.Name);
+                    }
+                }
+                else
+                {
+                    // External URL: download FIRST, only delete old files on success
+                    await ApplyRateLimitAsync(game.Logo, domainLastRequest, minDelayBetweenRequestsMs);
+
+                    var logoBytes = await SafeDownloadAsync(game.Logo, attempt: 1, maxAttempts: 1);
+                    if (logoBytes != null)
+                    {
+                        // Download succeeded - now safe to replace old files
+                        if (urlChanged && cache?.LogoUrl != null)
+                        {
+                            DeleteOldImageFiles(gamePath, "logo");
+                        }
+                        var extension = GetExtensionFromUrl(game.Logo);
+                        var logoPath = Path.Combine(gamePath, $"logo{extension}");
+                        await File.WriteAllBytesAsync(logoPath, logoBytes);
+                        if (cache != null) cache.LogoDownloaded = true;
+                        result.ImagesSynced++;
+                        result.FilesWritten++;
+                        _logger.LogDebug("Downloaded logo for '{Name}'", game.Name);
+                    }
+                    else
+                    {
+                        // Download failed - preserve existing files, never delete
+                        if (cache != null) cache.LogoDownloaded = false;
+                        result.ImagesFailed++;
+                        failedImageTypes.Add("logo");
                         if (game.Logo != null)
                         {
                             failedImageRetries.Add((game, dbGame.Id, gamePath, "logo", game.Logo, cache));
                         }
+                        _logger.LogWarning("Failed to download logo for '{Name}' - existing files preserved", game.Name);
                     }
                 }
 
@@ -474,53 +486,63 @@ public class NetworkSyncService : INetworkSyncService
             // Sync cover
             if (!string.IsNullOrWhiteSpace(game.Cover) && (needsSync || coverNeedsSync))
             {
-                bool isRetry = cache?.CoverUrl == game.Cover && !cache.CoverDownloaded;
                 bool urlChanged = cache?.CoverUrl != game.Cover;
 
-                // Check if URL is local (localhost or 192.168.0.32) - skip download
-                bool isLocalUrl = game.Cover.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
-                                  game.Cover.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase);
+                // Check if URL points to our own image proxy (self-referencing URL)
+                bool isSelfReferencing = IsSelfReferencingUrl(game.Cover);
 
-                if (isLocalUrl)
+                if (isSelfReferencing)
                 {
-                    // Mark as downloaded without actually downloading (leave existing files intact)
-                    if (cache != null) cache.CoverDownloaded = true;
-                    result.ImagesSynced++;
-                    _logger.LogDebug("Skipping local cover download for '{Name}'", game.Name);
-                }
-                else
-                {
-                    if (urlChanged && cache?.CoverUrl != null)
+                    // Self-referencing URL: the image already lives on the NAS.
+                    // Verify the file actually exists; if so, mark as downloaded.
+                    // NEVER delete or re-download these.
+                    bool fileExists = ImageFileExistsOnDisk(gamePath, "cover");
+                    if (fileExists)
                     {
-                        // Delete old cover files when URL changes (only for external URLs)
-                        DeleteOldImageFiles(gamePath, "cover");
-                        _logger.LogInformation("Cover URL changed for '{Name}', downloading new image", game.Name);
-                    }
-
-
-                    // Apply rate limiting
-                    await ApplyRateLimitAsync(game.Cover, domainLastRequest, minDelayBetweenRequestsMs);
-
-                    var coverBytes = await SafeDownloadAsync(game.Cover, attempt: 1, maxAttempts: 1);
-                    if (coverBytes != null)
-                    {
-                        var extension = GetExtensionFromUrl(game.Cover);
-                        var coverPath = Path.Combine(gamePath, $"cover{extension}");
-                        await File.WriteAllBytesAsync(coverPath, coverBytes);
                         if (cache != null) cache.CoverDownloaded = true;
                         result.ImagesSynced++;
-                        result.FilesWritten++;
+                        _logger.LogDebug("Skipping self-referencing cover for '{Name}' - file exists on NAS", game.Name);
                     }
                     else
                     {
                         if (cache != null) cache.CoverDownloaded = false;
                         result.ImagesFailed++;
                         failedImageTypes.Add("cover");
-                        // Track for retry at the end
+                        _logger.LogWarning("Self-referencing cover for '{Name}' but file missing on NAS", game.Name);
+                    }
+                }
+                else
+                {
+                    // External URL: download FIRST, only delete old files on success
+                    await ApplyRateLimitAsync(game.Cover, domainLastRequest, minDelayBetweenRequestsMs);
+
+                    var coverBytes = await SafeDownloadAsync(game.Cover, attempt: 1, maxAttempts: 1);
+                    if (coverBytes != null)
+                    {
+                        // Download succeeded - now safe to replace old files
+                        if (urlChanged && cache?.CoverUrl != null)
+                        {
+                            DeleteOldImageFiles(gamePath, "cover");
+                        }
+                        var extension = GetExtensionFromUrl(game.Cover);
+                        var coverPath = Path.Combine(gamePath, $"cover{extension}");
+                        await File.WriteAllBytesAsync(coverPath, coverBytes);
+                        if (cache != null) cache.CoverDownloaded = true;
+                        result.ImagesSynced++;
+                        result.FilesWritten++;
+                        _logger.LogDebug("Downloaded cover for '{Name}'", game.Name);
+                    }
+                    else
+                    {
+                        // Download failed - preserve existing files, never delete
+                        if (cache != null) cache.CoverDownloaded = false;
+                        result.ImagesFailed++;
+                        failedImageTypes.Add("cover");
                         if (game.Cover != null)
                         {
                             failedImageRetries.Add((game, dbGame.Id, gamePath, "cover", game.Cover, cache));
                         }
+                        _logger.LogWarning("Failed to download cover for '{Name}' - existing files preserved", game.Name);
                     }
                 }
 
@@ -995,7 +1017,7 @@ public class NetworkSyncService : INetworkSyncService
     {
         try
         {
-            var imageExtensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
+            var imageExtensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico" };
             foreach (var ext in imageExtensions)
             {
                 var filePath = Path.Combine(gamePath, $"{prefix}{ext}");
@@ -1009,6 +1031,52 @@ public class NetworkSyncService : INetworkSyncService
         {
             // Ignore deletion errors
         }
+    }
+
+    /// <summary>
+    /// Detects whether a URL points to our own image proxy / NAS storage.
+    /// These images already exist on disk and must NEVER be deleted or re-downloaded.
+    /// Matches: localhost, LAN IPs, and any URL containing /game-images/ (our proxy path).
+    /// </summary>
+    private bool IsSelfReferencingUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        // Direct local references
+        if (url.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("192.168.0.32", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Any URL containing /game-images/ is our own proxy endpoint.
+        // This covers production domains (gamesdatabase.*, gdb.*) that reverse-proxy
+        // back to the same NAS storage.
+        if (url.Contains("/game-images/", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Check against configured ImageBaseUrl if available
+        if (!string.IsNullOrWhiteSpace(_syncOptions.ImageBaseUrl) &&
+            url.StartsWith(_syncOptions.ImageBaseUrl, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether any image file for the given prefix (logo/cover) exists on disk,
+    /// regardless of file extension.
+    /// </summary>
+    private static bool ImageFileExistsOnDisk(string gamePath, string prefix)
+    {
+        var imageExtensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico" };
+        foreach (var ext in imageExtensions)
+        {
+            var filePath = Path.Combine(gamePath, $"{prefix}{ext}");
+            if (File.Exists(filePath))
+                return true;
+        }
+        return false;
     }
 
     private static string GetExtensionFromUrl(string url)
