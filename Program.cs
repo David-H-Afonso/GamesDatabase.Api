@@ -1,13 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using GamesDatabase.Api.Data;
 using GamesDatabase.Api.Configuration;
+using GamesDatabase.Api.Infrastructure.Persistence;
 using GamesDatabase.Api.Middleware;
-using GamesDatabase.Api.Services;
-using GamesDatabase.Api.Services.Steam;
-using GamesDatabase.Api.Models;
-using GamesDatabase.Api.Helpers;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.Data.Sqlite;
 
 var builder = WebApplication.CreateBuilder(args);
 var isDesktopMode = string.Equals(Environment.GetEnvironmentVariable("GDB_DESKTOP"), "true", StringComparison.OrdinalIgnoreCase);
@@ -16,342 +10,30 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
-// Load environment variables from .env file if it exists (for local development)
-var envFilePath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
-if (File.Exists(envFilePath))
-{
-    foreach (var line in File.ReadAllLines(envFilePath))
-    {
-        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
-            continue;
+builder.LoadEnvironmentFile();
+builder.ApplyEnvironmentOverrides();
 
-        var parts = line.Split('=', 2);
-        if (parts.Length == 2)
-        {
-            Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
-        }
-    }
-}
-
-// Override configuration with environment variables for NetworkSync
-builder.Configuration["NetworkSync:Enabled"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_ENABLED")
-    ?? builder.Configuration["NetworkSync:Enabled"];
-builder.Configuration["NetworkSync:NetworkPath"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PATH")
-    ?? builder.Configuration["NetworkSync:NetworkPath"];
-builder.Configuration["NetworkSync:Username"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_USERNAME")
-    ?? builder.Configuration["NetworkSync:Username"];
-builder.Configuration["NetworkSync:Password"] = Environment.GetEnvironmentVariable("NETWORK_SYNC_PASSWORD")
-    ?? builder.Configuration["NetworkSync:Password"];
-
-// Override JWT settings from environment variables
-builder.Configuration["JwtSettings:SecretKey"] = Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
-    ?? builder.Configuration["JwtSettings:SecretKey"];
-builder.Configuration["JwtSettings:Issuer"] = Environment.GetEnvironmentVariable("JWT_ISSUER")
-    ?? builder.Configuration["JwtSettings:Issuer"];
-builder.Configuration["JwtSettings:Audience"] = Environment.GetEnvironmentVariable("JWT_AUDIENCE")
-    ?? builder.Configuration["JwtSettings:Audience"];
-if (int.TryParse(Environment.GetEnvironmentVariable("JWT_EXPIRATION_MINUTES"), out var expMinutes))
-{
-    builder.Configuration["JwtSettings:ExpirationMinutes"] = expMinutes.ToString();
-}
-
-// Override Steam settings from environment variables
-builder.Configuration["SteamSettings:ApiKey"] = Environment.GetEnvironmentVariable("STEAM_API_KEY")
-    ?? builder.Configuration["SteamSettings:ApiKey"];
-builder.Configuration["SteamSettings:CallbackBaseUrl"] = Environment.GetEnvironmentVariable("STEAM_CALLBACK_BASE_URL")
-    ?? builder.Configuration["SteamSettings:CallbackBaseUrl"];
-builder.Configuration["SteamSettings:FrontendBaseUrl"] = Environment.GetEnvironmentVariable("STEAM_FRONTEND_BASE_URL")
-    ?? builder.Configuration["SteamSettings:FrontendBaseUrl"];
-
-builder.Services.Configure<CorsSettings>(
-    builder.Configuration.GetSection(CorsSettings.SectionName));
-builder.Services.Configure<DatabaseSettings>(
-    builder.Configuration.GetSection(DatabaseSettings.SectionName));
-builder.Services.Configure<ExportSettings>(
-    builder.Configuration.GetSection(ExportSettings.SectionName));
-builder.Services.Configure<JwtSettings>(
-    builder.Configuration.GetSection(JwtSettings.SectionName));
-builder.Services.Configure<DataExportOptions>(
-    builder.Configuration.GetSection(DataExportOptions.SectionName));
-builder.Services.Configure<NetworkSyncOptions>(
-    builder.Configuration.GetSection(NetworkSyncOptions.SectionName));
-builder.Services.Configure<SteamSettings>(
-    builder.Configuration.GetSection(SteamSettings.SectionName));
-
-// Add services to the container.
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
-        options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-    });
-builder.Services.AddMemoryCache();
-
-var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"];
-if (isDesktopMode && !string.IsNullOrWhiteSpace(dataProtectionKeysPath))
-{
-    Directory.CreateDirectory(dataProtectionKeysPath);
-    builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
-        .SetApplicationName("GamesDatabase");
-}
-
-// Configure Entity Framework
-var databaseSettings = builder.Configuration.GetSection(DatabaseSettings.SectionName).Get<DatabaseSettings>() ?? new DatabaseSettings();
-
-var databasePath = databaseSettings.DatabasePath;
-if (!Path.IsPathRooted(databasePath))
-{
-    databasePath = Path.GetFullPath(databasePath);
-}
-
-var connectionString = $"Data Source={databasePath}";
-
-builder.Services.AddDbContext<GamesDbContext>(options =>
-{
-    options.UseSqlite(connectionString);
-    if (databaseSettings.EnableSensitiveDataLogging)
-    {
-        options.EnableSensitiveDataLogging();
-    }
-    // Enable SQL query logging for debugging
-    options.LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information);
-});
-
-builder.Services.AddScoped<IViewFilterService, ViewFilterService>();
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddHttpClient();
-builder.Services.AddScoped<IZipExportService, ZipExportService>();
-builder.Services.AddScoped<INetworkSyncService, NetworkSyncService>();
-builder.Services.AddScoped<IGameHistoryService, GameHistoryService>();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ISteamApiService, SteamApiService>();
-builder.Services.AddScoped<ISteamStoreService, SteamStoreService>();
-builder.Services.AddScoped<ISteamSyncService, SteamSyncService>();
-builder.Services.AddSingleton<ISteamAuthService, SteamAuthService>();
-
-// Scheduled backup background service
-builder.Services.AddSingleton<BackupScheduleService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupScheduleService>());
-
-// Configure HttpClient for CSV exports (longer timeout)
-builder.Services.AddHttpClient("TrustAllCerts")
-    .ConfigurePrimaryHttpMessageHandler(() =>
-    {
-        var handler = new HttpClientHandler();
-        if (builder.Environment.IsDevelopment())
-        {
-            handler.ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-        }
-        return handler;
-    })
-    .ConfigureHttpClient(client =>
-    {
-        client.Timeout = TimeSpan.FromSeconds(120);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-        client.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
-        client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
-        client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
-        client.DefaultRequestHeaders.Add("DNT", "1");
-        client.DefaultRequestHeaders.Add("Connection", "keep-alive");
-        client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-User", "?1");
-        client.DefaultRequestHeaders.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
-        {
-            NoCache = false,
-            MaxAge = TimeSpan.FromDays(365)
-        };
-    });
-
-// Configure HttpClient for images (shorter timeout to avoid hanging)
-builder.Services.AddHttpClient("ImageDownloader")
-    .ConfigurePrimaryHttpMessageHandler(() =>
-    {
-        var handler = new HttpClientHandler();
-        if (builder.Environment.IsDevelopment())
-        {
-            handler.ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-        }
-        return handler;
-    })
-    .ConfigureHttpClient(client =>
-    {
-        client.Timeout = TimeSpan.FromSeconds(30);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-        client.DefaultRequestHeaders.Add("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
-        client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
-        client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
-        client.DefaultRequestHeaders.Add("DNT", "1");
-        client.DefaultRequestHeaders.Add("Connection", "keep-alive");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "image");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "no-cors");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "cross-site");
-        client.DefaultRequestHeaders.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
-        {
-            NoCache = false,
-            MaxAge = TimeSpan.FromHours(1)
-        };
-    });
-
-// Configure CORS
-var corsSettings = builder.Configuration.GetSection(CorsSettings.SectionName).Get<CorsSettings>() ?? new CorsSettings();
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowSpecificOrigins", policy =>
-    {
-        if (corsSettings.AllowedOrigins.Any())
-        {
-            policy.WithOrigins(corsSettings.AllowedOrigins.ToArray())
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
-        else
-        {
-            // Configuración por defecto en caso de que no haya orígenes configurados
-            policy.AllowAnyOrigin()
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
-        }
-    });
-
-    // Política adicional para desarrollo
-    options.AddPolicy("AllowAll", policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyHeader()
-              .AllowAnyMethod();
-    });
-});
-
-var jwtSettings = builder.Configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>() ?? new JwtSettings();
-builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSettings.Issuer,
-            ValidAudience = jwtSettings.Audience,
-            IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
-                System.Text.Encoding.UTF8.GetBytes(jwtSettings.SecretKey))
-        };
-
-        options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
-        {
-            OnMessageReceived = context =>
-            {
-                // Only log if there's no token or if in debug mode
-                if (builder.Environment.IsDevelopment())
-                {
-                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                    var authHeader = context.Request.Headers["Authorization"].ToString();
-                    if (!string.IsNullOrEmpty(authHeader))
-                    {
-                        logger.LogDebug($"Authorization Header received: {authHeader.Substring(0, Math.Min(30, authHeader.Length))}...");
-                    }
-                }
-                return Task.CompletedTask;
-            },
-            OnAuthenticationFailed = context =>
-            {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-
-                // Check if it's a token expiration (common and expected)
-                if (context.Exception.Message.Contains("expired") || context.Exception.Message.Contains("IDX10223"))
-                {
-                    logger.LogWarning("Token has expired - client needs to re-authenticate");
-                }
-                else
-                {
-                    // Other authentication failures are more concerning
-                    logger.LogError($"Authentication failed: {context.Exception.Message}");
-                }
-                return Task.CompletedTask;
-            },
-            OnTokenValidated = context =>
-            {
-                // Only log successful validations in debug mode
-                if (builder.Environment.IsDevelopment())
-                {
-                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                    var userId = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-                    logger.LogDebug($"Token validated successfully for UserId: {userId}");
-                }
-                return Task.CompletedTask;
-            }
-        };
-    });
-
-builder.Services.AddAuthorization();
-
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new()
-    {
-        Title = "Games Database API",
-        Version = "v2.0",
-        Description = "API para gestión de base de datos de videojuegos con soporte multi-usuario"
-    });
-
-    // Configurar autenticación JWT en Swagger
-    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-    {
-        Description = "JWT Authorization header usando el esquema Bearer. Ejemplo: \"Bearer {token}\"",
-        Name = "Authorization",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
-    });
-
-    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
-    {
-        {
-            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-            {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
-                {
-                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
-        }
-    });
-
-    // Incluir comentarios XML para documentación
-    // var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    // var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-    // if (File.Exists(xmlPath))
-    // {
-    //     c.IncludeXmlComments(xmlPath);
-    // }
-});
+builder.Services.BindConfigurationSections(builder.Configuration);
+builder.Services.AddGamesDatabaseServices(builder.Environment);
+builder.Services.AddGamesDatabaseDataProtection(builder.Configuration, isDesktopMode);
+builder.Services.AddGamesDatabasePersistence(builder.Configuration);
+builder.Services.AddGamesDatabaseCors(builder.Configuration, builder.Environment);
+builder.Services.AddGamesDatabaseAuth(builder.Configuration, builder.Environment);
+builder.Services.AddGamesDatabaseSwagger();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-// Enable Swagger in all environments (can be accessed at /swagger)
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "Games Database API v1");
-    c.RoutePrefix = "swagger"; // Swagger en /swagger
+    c.RoutePrefix = "swagger";
 });
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 
 // Ensure database is created and seed default data
+var dbHelper = new DatabaseStartupHelper();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
@@ -367,7 +49,7 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        EnsureCompatibilitySchema(context, startupLogger);
+        dbHelper.EnsureCompatibilitySchema(context, startupLogger);
     }
     catch (Exception ex)
     {
@@ -376,8 +58,8 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        await SeedDefaultDataAsync(context);
-        await SeedMissingReplayTypesAsync(context);
+        await dbHelper.SeedDefaultDataAsync(context);
+        await dbHelper.SeedMissingReplayTypesAsync(context);
     }
     catch (Exception ex)
     {
@@ -390,100 +72,6 @@ using (var scope = app.Services.CreateScope())
 // The container only listens on HTTP (ASPNETCORE_URLS=http://+:8080).
 // Enabling it would cause the /health curl check to follow a redirect to an
 // HTTPS port that doesn't exist, making the container permanently unhealthy.
-
-static async Task SeedDefaultDataAsync(GamesDbContext context)
-{
-    if (!context.Users.Any())
-    {
-        var adminUser = new User
-        {
-            Username = "Admin",
-            PasswordHash = null,
-            Role = UserRole.Admin,
-            IsDefault = true
-        };
-        context.Users.Add(adminUser);
-        await context.SaveChangesAsync();
-
-        var platforms = new[]
-        {
-            new GamePlatform { Name = "Steam", Color = "#2a475e", SortOrder = 1, UserId = adminUser.Id },
-            new GamePlatform { Name = "Epic Games", Color = "#2F2D2E", SortOrder = 2, UserId = adminUser.Id },
-            new GamePlatform { Name = "GOG", Color = "#c99aff", SortOrder = 3, UserId = adminUser.Id },
-            new GamePlatform { Name = "Itch.io", Color = "#de4660", SortOrder = 4, UserId = adminUser.Id },
-            new GamePlatform { Name = "EA", Color = "#EA2020", SortOrder = 5, UserId = adminUser.Id },
-            new GamePlatform { Name = "Ubisoft", Color = "#1472F1", SortOrder = 6, UserId = adminUser.Id },
-            new GamePlatform { Name = "Battle.net", Color = "#009AE4", SortOrder = 7, UserId = adminUser.Id },
-            new GamePlatform { Name = "Emulator", Color = "#d12e2e", SortOrder = 8, UserId = adminUser.Id },
-            new GamePlatform { Name = "Nintendo Switch", Color = "#fe0016", SortOrder = 9, UserId = adminUser.Id }
-        };
-        context.GamePlatforms.AddRange(platforms);
-
-        var statuses = new[]
-        {
-            new GameStatus { Name = "Pending", Color = "#be9c23", SortOrder = 1, UserId = adminUser.Id },
-            new GameStatus { Name = "Next up", Color = "#793e77", SortOrder = 2, UserId = adminUser.Id },
-            new GameStatus { Name = "DEFAULT_PLAYING", Color = "#61afef", SortOrder = 3, IsDefault = true, StatusType = SpecialStatusType.Playing, UserId = adminUser.Id },
-            new GameStatus { Name = "Done", Color = "#3fc20f", SortOrder = 4, UserId = adminUser.Id },
-            new GameStatus { Name = "Abandoned", Color = "#b91d1d", SortOrder = 5, UserId = adminUser.Id },
-            new GameStatus { Name = "DEFAULT_NOT_FULFILLED", Color = "#919191", SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled, UserId = adminUser.Id }
-        };
-        context.GameStatuses.AddRange(statuses);
-
-        var playWiths = new[]
-        {
-            new GamePlayWith { Name = "Solo", Color = "#24c2b7", SortOrder = 1, UserId = adminUser.Id },
-            new GamePlayWith { Name = "Friends", Color = "#ab32ec", SortOrder = 2, UserId = adminUser.Id },
-            new GamePlayWith { Name = "Family", Color = "#099012", SortOrder = 3, UserId = adminUser.Id }
-        };
-        context.GamePlayWiths.AddRange(playWiths);
-
-        var playedStatuses = new[]
-        {
-            new GamePlayedStatus { Name = "None", Color = "#b5b5b5", SortOrder = 1, UserId = adminUser.Id },
-            new GamePlayedStatus { Name = "Some", Color = "#873ed0", SortOrder = 2, UserId = adminUser.Id },
-            new GamePlayedStatus { Name = "Almost", Color = "#cc1eb5", SortOrder = 3, UserId = adminUser.Id },
-            new GamePlayedStatus { Name = "Completed", Color = "#2ed42b", SortOrder = 4, UserId = adminUser.Id },
-            new GamePlayedStatus { Name = "Abandoned", Color = "#a60808", SortOrder = 5, UserId = adminUser.Id }
-        };
-        context.GamePlayedStatuses.AddRange(playedStatuses);
-
-        var replayTypes = new[]
-        {
-            new GameReplayType { Name = "Rejugado", Color = "#61afef", SortOrder = 1, IsDefault = true, ReplayType = SpecialReplayType.Replay, UserId = adminUser.Id },
-            new GameReplayType { Name = "DLC", Color = "#c678dd", SortOrder = 2, UserId = adminUser.Id },
-            new GameReplayType { Name = "Expansión", Color = "#98c379", SortOrder = 3, UserId = adminUser.Id },
-            new GameReplayType { Name = "NG+", Color = "#e5c07b", SortOrder = 4, UserId = adminUser.Id },
-            new GameReplayType { Name = "100%", Color = "#e06c75", SortOrder = 5, UserId = adminUser.Id },
-            new GameReplayType { Name = "Logros", Color = "#56b6c2", SortOrder = 6, UserId = adminUser.Id }
-        };
-        context.GameReplayTypes.AddRange(replayTypes);
-
-        await context.SaveChangesAsync();
-    }
-}
-
-static async Task SeedMissingReplayTypesAsync(GamesDbContext context)
-{
-    var usersWithoutReplayTypes = await context.Users
-        .Where(u => !context.GameReplayTypes.Any(rt => rt.UserId == u.Id))
-        .ToListAsync();
-
-    foreach (var user in usersWithoutReplayTypes)
-    {
-        context.GameReplayTypes.AddRange(
-            new GameReplayType { Name = "Rejugado", Color = "#61afef", SortOrder = 1, IsDefault = true, ReplayType = SpecialReplayType.Replay, UserId = user.Id },
-            new GameReplayType { Name = "DLC", Color = "#c678dd", SortOrder = 2, UserId = user.Id },
-            new GameReplayType { Name = "Expansión", Color = "#98c379", SortOrder = 3, UserId = user.Id },
-            new GameReplayType { Name = "NG+", Color = "#e5c07b", SortOrder = 4, UserId = user.Id },
-            new GameReplayType { Name = "100%", Color = "#e06c75", SortOrder = 5, UserId = user.Id },
-            new GameReplayType { Name = "Logros", Color = "#56b6c2", SortOrder = 6, UserId = user.Id }
-        );
-    }
-
-    if (usersWithoutReplayTypes.Any())
-        await context.SaveChangesAsync();
-}
 
 // Game images are now served by ImageProxyController at /game-images.
 // It resizes + converts to WebP on demand and disk-caches the result,
@@ -513,125 +101,3 @@ app.MapGet("/health", () => Results.Ok(new
 app.MapControllers();
 
 app.Run();
-
-static void EnsureCompatibilitySchema(GamesDbContext context, ILogger logger)
-{
-    var conn = (SqliteConnection)context.Database.GetDbConnection();
-    if (conn.State != System.Data.ConnectionState.Open)
-        conn.Open();
-
-    EnsureColumn(conn, logger, "game_replay", "released", "TEXT NULL");
-
-    EnsureColumn(conn, logger, "user", "steam_avatar_url", "TEXT NULL");
-    EnsureColumn(conn, logger, "user", "steam_id", "TEXT NULL");
-    EnsureColumn(conn, logger, "user", "steam_linked_at", "TEXT NULL");
-    EnsureColumn(conn, logger, "user", "steam_nickname", "TEXT NULL");
-
-    EnsureColumn(conn, logger, "game", "steam_app_id", "INTEGER NULL");
-    EnsureColumn(conn, logger, "game", "steam_last_synced", "TEXT NULL");
-    EnsureColumn(conn, logger, "game", "steam_playtime_2weeks", "INTEGER NULL");
-    EnsureColumn(conn, logger, "game", "steam_playtime_forever", "INTEGER NULL");
-    EnsureColumn(conn, logger, "game", "steam_finished_source", "TEXT NULL");
-    EnsureColumn(conn, logger, "game", "steam_finished_last_value", "TEXT NULL");
-    EnsureColumn(conn, logger, "game", "steam_finished_synced_at", "TEXT NULL");
-    EnsureColumn(conn, logger, "game", "steam_finished_rejected_value", "TEXT NULL");
-    EnsureColumn(conn, logger, "game", "IsManuallyCompleted", "INTEGER NOT NULL DEFAULT 0");
-
-    ExecuteRepairSql(conn, logger, """
-        CREATE TABLE IF NOT EXISTS "steam_achievement" (
-            "id" INTEGER NOT NULL CONSTRAINT "PK_steam_achievement" PRIMARY KEY AUTOINCREMENT,
-            "user_id" INTEGER NOT NULL,
-            "game_id" INTEGER NULL,
-            "steam_app_id" INTEGER NOT NULL,
-            "api_name" TEXT NOT NULL,
-            "display_name" TEXT NOT NULL,
-            "description" TEXT NULL,
-            "achieved" INTEGER NOT NULL DEFAULT 0,
-            "unlock_time" TEXT NULL,
-            "icon_url" TEXT NULL,
-            "icon_gray_url" TEXT NULL,
-            "hidden" INTEGER NOT NULL DEFAULT 0,
-            "last_synced" TEXT NOT NULL,
-            CONSTRAINT "FK_steam_achievement_game_game_id" FOREIGN KEY ("game_id") REFERENCES "game" ("id") ON DELETE SET NULL,
-            CONSTRAINT "FK_steam_achievement_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
-        );
-        """, "ensured steam_achievement table exists");
-
-    ExecuteRepairSql(conn, logger, """
-        CREATE TABLE IF NOT EXISTS "steam_app_cache" (
-            "app_id" INTEGER NOT NULL CONSTRAINT "PK_steam_app_cache" PRIMARY KEY AUTOINCREMENT,
-            "name" TEXT NOT NULL,
-            "developer" TEXT NULL,
-            "publisher" TEXT NULL,
-            "genres_json" TEXT NULL,
-            "categories_json" TEXT NULL,
-            "release_date" TEXT NULL,
-            "metacritic_score" INTEGER NULL,
-            "header_image_url" TEXT NULL,
-            "background_image_url" TEXT NULL,
-            "price" TEXT NULL,
-            "is_free" INTEGER NOT NULL DEFAULT 0,
-            "last_fetched" TEXT NOT NULL
-        );
-        """, "ensured steam_app_cache table exists");
-
-    ExecuteRepairSql(conn, logger, """
-        CREATE TABLE IF NOT EXISTS "steam_match_dismissal" (
-            "id" INTEGER NOT NULL CONSTRAINT "PK_steam_match_dismissal" PRIMARY KEY AUTOINCREMENT,
-            "user_id" INTEGER NOT NULL,
-            "steam_app_id" INTEGER NOT NULL,
-            "game_id" INTEGER NOT NULL,
-            "created_at" TEXT NOT NULL,
-            CONSTRAINT "FK_steam_match_dismissal_game_game_id" FOREIGN KEY ("game_id") REFERENCES "game" ("id") ON DELETE CASCADE,
-            CONSTRAINT "FK_steam_match_dismissal_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
-        );
-        """, "ensured steam_match_dismissal table exists");
-
-    ExecuteRepairSql(conn, logger,
-        "CREATE INDEX IF NOT EXISTS \"IX_steam_achievement_game_id\" ON \"steam_achievement\" (\"game_id\");",
-        "ensured steam achievement game index exists");
-    ExecuteRepairSql(conn, logger,
-        "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_steam_achievement_user_id_steam_app_id_api_name\" ON \"steam_achievement\" (\"user_id\", \"steam_app_id\", \"api_name\");",
-        "ensured steam achievement unique index exists");
-    ExecuteRepairSql(conn, logger,
-        "CREATE INDEX IF NOT EXISTS \"IX_steam_match_dismissal_game_id\" ON \"steam_match_dismissal\" (\"game_id\");",
-        "ensured steam match dismissal game index exists");
-    ExecuteRepairSql(conn, logger,
-        "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_steam_match_dismissal_user_id_steam_app_id_game_id\" ON \"steam_match_dismissal\" (\"user_id\", \"steam_app_id\", \"game_id\");",
-        "ensured steam match dismissal unique index exists");
-}
-
-static void EnsureColumn(SqliteConnection conn, ILogger logger, string table, string column, string definition)
-{
-    if (ColumnExists(conn, table, column))
-        return;
-
-    using var cmd = conn.CreateCommand();
-    cmd.CommandText = $"ALTER TABLE {QuoteIdentifier(table)} ADD COLUMN {QuoteIdentifier(column)} {definition}";
-    cmd.ExecuteNonQuery();
-    logger.LogInformation("Schema repair: added missing column {Table}.{Column}.", table, column);
-}
-
-static bool ColumnExists(SqliteConnection conn, string table, string column)
-{
-    using var cmd = conn.CreateCommand();
-    cmd.CommandText = $"PRAGMA table_info({QuoteIdentifier(table)})";
-    using var reader = cmd.ExecuteReader();
-    while (reader.Read())
-    {
-        if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
-            return true;
-    }
-
-    return false;
-}
-
-static void ExecuteRepairSql(SqliteConnection conn, ILogger logger, string sql, string description)
-{
-    using var cmd = conn.CreateCommand();
-    cmd.CommandText = sql;
-    cmd.ExecuteNonQuery();
-    logger.LogInformation("Schema repair: {Description}.", description);
-}
-
-static string QuoteIdentifier(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";

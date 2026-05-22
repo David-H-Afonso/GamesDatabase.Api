@@ -56,7 +56,6 @@ A RESTful API built with ASP.NET Core for managing personal game collections. Th
 5. **Configure settings** (optional)
 
    Edit `appsettings.json` to customize:
-
    - JWT settings (secret, issuer, audience, expiration)
    - CORS settings
    - Database path
@@ -224,16 +223,24 @@ The application uses the following main entities:
 
 ```
 GamesDatabase.Api/
-├── Configuration/      # Application settings classes
-├── Controllers/        # API endpoints
-├── Data/              # Database context
+├── Application/
+│   ├── Interfaces/    # Service interfaces
+│   ├── Mapping/       # Entity ↔ DTO mapping helpers
+│   └── Services/      # Business logic (incl. Steam/ subfolder)
+├── Common/            # Shared utilities and helpers
+├── Configuration/     # Settings classes, DI registration
+├── Contracts/         # Data transfer objects
+├── Controllers/       # API endpoints (MVC)
 ├── DOCS/              # Documentation
-├── DTOs/              # Data transfer objects
-├── Helpers/           # Utility classes
-├── Middleware/        # Custom middleware
-├── Migrations/        # Entity Framework migrations
-├── Models/            # Entity models
-└── Services/          # Business logic services
+├── Domain/
+│   └── Entities/      # EF Core entity models
+├── Infrastructure/
+│   └── Persistence/
+│       ├── Configurations/  # IEntityTypeConfiguration classes
+│       └── GamesDbContext.cs
+├── Middleware/         # Custom middleware
+├── Migrations/         # Entity Framework migrations
+└── Program.cs          # App entry point
 ```
 
 ## Migrations

@@ -1,10 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
-using GamesDatabase.Api.Data;
-using GamesDatabase.Api.Models;
-using GamesDatabase.Api.DTOs;
-using GamesDatabase.Api.Helpers;
+using GamesDatabase.Api.Contracts;
+using GamesDatabase.Api.Application.Interfaces;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -13,116 +10,47 @@ namespace GamesDatabase.Api.Controllers;
 [Authorize]
 public class GameReplaysController : BaseApiController
 {
-    private readonly GamesDbContext _context;
+    private readonly IGameReplayService _replays;
 
-    public GameReplaysController(GamesDbContext context)
+    public GameReplaysController(IGameReplayService replays)
     {
-        _context = context;
+        _replays = replays;
     }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<GameReplayDto>>> GetReplaysForGame(int gameId)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-
-        var gameExists = await _context.Games.AnyAsync(g => g.Id == gameId && g.UserId == userId);
-        if (!gameExists)
-            return NotFound(new { message = "Juego no encontrado" });
-
-        var replays = await _context.GameReplays
-            .Where(r => r.GameId == gameId && r.UserId == userId)
-            .Include(r => r.ReplayType)
-            .OrderByDescending(r => r.CreatedAt)
-            .ToListAsync();
-
-        return Ok(replays.Select(r => r.ToDto()));
+        var result = await _replays.GetReplaysForGameAsync(userId, gameId);
+        if (result == null) return NotFound(new { message = "Juego no encontrado" });
+        return Ok(result);
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<GameReplayDto>> GetGameReplay(int gameId, int id)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var replay = await _context.GameReplays
-            .Where(r => r.Id == id && r.GameId == gameId && r.UserId == userId)
-            .Include(r => r.ReplayType)
-            .FirstOrDefaultAsync();
-
-        return replay == null ? NotFound() : Ok(replay.ToDto());
+        var result = await _replays.GetGameReplayAsync(userId, gameId, id);
+        if (result == null) return NotFound();
+        return Ok(result);
     }
 
     [HttpPost]
     public async Task<ActionResult<GameReplayDto>> PostGameReplay(int gameId, GameReplayCreateDto createDto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-
-        var gameExists = await _context.Games.AnyAsync(g => g.Id == gameId && g.UserId == userId);
-        if (!gameExists)
-            return BadRequest(new { message = "Juego no encontrado" });
-
-        int replayTypeId;
-        if (createDto.ReplayTypeId.HasValue)
-        {
-            var typeExists = await _context.GameReplayTypes
-                .AnyAsync(t => t.Id == createDto.ReplayTypeId.Value && t.UserId == userId);
-            if (!typeExists)
-                return BadRequest(new { message = "Tipo de rejugada no válido" });
-            replayTypeId = createDto.ReplayTypeId.Value;
-        }
-        else
-        {
-            var specialType = await _context.GameReplayTypes
-                .FirstOrDefaultAsync(t => t.UserId == userId && t.ReplayType == SpecialReplayType.Replay);
-            if (specialType == null)
-                return BadRequest(new { message = "No hay tipo de rejugada especial configurado" });
-            replayTypeId = specialType.Id;
-        }
-
-        var replay = new GameReplay
-        {
-            GameId = gameId,
-            ReplayTypeId = replayTypeId,
-            Started = createDto.Started,
-            Finished = createDto.Finished,
-            Grade = createDto.Grade,
-            Notes = createDto.Notes,
-            Released = createDto.Released,
-            UserId = userId
-        };
-
-        _context.GameReplays.Add(replay);
-        await _context.SaveChangesAsync();
-
-        await _context.Entry(replay).Reference(r => r.ReplayType).LoadAsync();
-
-        return CreatedAtAction(nameof(GetGameReplay), new { gameId, id = replay.Id }, replay.ToDto());
+        var (dto, error) = await _replays.CreateReplayAsync(userId, gameId, createDto);
+        if (dto == null) return BadRequest(new { message = error });
+        return CreatedAtAction(nameof(GetGameReplay), new { gameId, id = dto.Id }, dto);
     }
 
     [HttpPut("{id}")]
     public async Task<IActionResult> PutGameReplay(int gameId, int id, GameReplayUpdateDto updateDto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var replay = await _context.GameReplays
-            .FirstOrDefaultAsync(r => r.Id == id && r.GameId == gameId && r.UserId == userId);
-
-        if (replay == null)
-            return NotFound();
-
-        if (updateDto.ReplayTypeId.HasValue)
-        {
-            var typeExists = await _context.GameReplayTypes
-                .AnyAsync(t => t.Id == updateDto.ReplayTypeId.Value && t.UserId == userId);
-            if (!typeExists)
-                return BadRequest(new { message = "Tipo de rejugada no válido" });
-            replay.ReplayTypeId = updateDto.ReplayTypeId.Value;
-        }
-
-        replay.Started = updateDto.Started;
-        replay.Finished = updateDto.Finished;
-        replay.Grade = updateDto.Grade;
-        replay.Notes = updateDto.Notes;
-        replay.Released = updateDto.Released;
-
-        await _context.SaveChangesAsync();
+        var (success, error) = await _replays.UpdateReplayAsync(userId, gameId, id, updateDto);
+        if (!success && error != null) return BadRequest(new { message = error });
+        if (!success) return NotFound();
         return NoContent();
     }
 
@@ -130,15 +58,8 @@ public class GameReplaysController : BaseApiController
     public async Task<IActionResult> DeleteGameReplay(int gameId, int id)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var replay = await _context.GameReplays
-            .FirstOrDefaultAsync(r => r.Id == id && r.GameId == gameId && r.UserId == userId);
-
-        if (replay == null)
-            return NotFound();
-
-        _context.GameReplays.Remove(replay);
-        await _context.SaveChangesAsync();
-
+        var deleted = await _replays.DeleteReplayAsync(userId, gameId, id);
+        if (!deleted) return NotFound();
         return NoContent();
     }
 }

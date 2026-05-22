@@ -1,0 +1,820 @@
+using GamesDatabase.Api.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
+using System.Reflection;
+
+namespace GamesDatabase.Api.Application.Services;
+
+public interface IViewFilterService
+{
+    IQueryable<Game> ApplyFilters(IQueryable<Game> query, ViewConfiguration configuration, int userId);
+}
+
+public class ViewFilterService : IViewFilterService
+{
+    public IQueryable<Game> ApplyFilters(IQueryable<Game> query, ViewConfiguration configuration, int userId)
+    {
+        query = query.Where(g => g.UserId == userId);
+
+        // Aplicar grupos de filtros
+        if (configuration.FilterGroups.Any())
+        {
+            var parameter = Expression.Parameter(typeof(Game), "g");
+            Expression? groupsCombined = null;
+
+            foreach (var group in configuration.FilterGroups)
+            {
+                if (!group.Filters.Any()) continue;
+
+                Expression? groupExpression = null;
+
+                // Combinar filtros dentro del grupo
+                foreach (var filter in group.Filters)
+                {
+                    Expression filterExpression;
+                    if (IsReplayField(filter.Field))
+                    {
+                        filterExpression = CreateReplayFilterExpression(parameter, filter);
+                    }
+                    else
+                    {
+                        Expression propertyExpression = GetPropertyExpression(parameter, filter.Field);
+                        filterExpression = CreateFilterExpression(propertyExpression, filter.Operator, filter.Value, filter.SecondValue);
+                    }
+
+                    if (groupExpression == null)
+                    {
+                        groupExpression = filterExpression;
+                    }
+                    else
+                    {
+                        groupExpression = group.CombineWith == FilterLogic.Or
+                            ? Expression.OrElse(groupExpression, filterExpression)
+                            : Expression.AndAlso(groupExpression, filterExpression);
+                    }
+                }
+
+                if (groupExpression != null)
+                {
+                    if (groupsCombined == null)
+                    {
+                        groupsCombined = groupExpression;
+                    }
+                    else
+                    {
+                        groupsCombined = configuration.GroupCombineWith == FilterLogic.Or
+                            ? Expression.OrElse(groupsCombined, groupExpression)
+                            : Expression.AndAlso(groupsCombined, groupExpression);
+                    }
+                }
+            }
+
+            if (groupsCombined != null)
+            {
+                var lambda = Expression.Lambda<Func<Game, bool>>(groupsCombined, parameter);
+                query = query.Where(lambda);
+            }
+        }
+
+        // Aplicar ordenamientos
+        if (configuration.Sorting.Any())
+        {
+            query = ApplySorting(query, configuration);
+        }
+
+        return query;
+    }
+
+    private IQueryable<Game> ApplyFilter(IQueryable<Game> query, ViewFilter filter)
+    {
+        var parameter = Expression.Parameter(typeof(Game), "g");
+        Expression propertyExpression = GetPropertyExpression(parameter, filter.Field);
+        Expression filterExpression = CreateFilterExpression(propertyExpression, filter.Operator, filter.Value, filter.SecondValue);
+
+        var lambda = Expression.Lambda<Func<Game, bool>>(filterExpression, parameter);
+        return query.Where(lambda);
+    }
+
+    private static bool IsReplayField(FilterField field) =>
+        field is FilterField.ReplayStarted or FilterField.ReplayFinished or FilterField.ReplayReleased
+            or FilterField.ReplayGrade or FilterField.ReplayTypeId;
+
+    private Expression CreateReplayFilterExpression(ParameterExpression gameParam, ViewFilter filter)
+    {
+        var replayParam = Expression.Parameter(typeof(GameReplay), "r");
+
+        Expression replayProperty = filter.Field switch
+        {
+            FilterField.ReplayStarted => Expression.Property(replayParam, nameof(GameReplay.Started)),
+            FilterField.ReplayFinished => Expression.Property(replayParam, nameof(GameReplay.Finished)),
+            FilterField.ReplayReleased => Expression.Property(replayParam, nameof(GameReplay.Released)),
+            FilterField.ReplayGrade => Expression.Property(replayParam, nameof(GameReplay.Grade)),
+            FilterField.ReplayTypeId => Expression.Property(replayParam, nameof(GameReplay.ReplayTypeId)),
+            _ => throw new ArgumentException($"Campo de replay no soportado: {filter.Field}")
+        };
+
+        Expression predicateExpression = CreateFilterExpression(replayProperty, filter.Operator, filter.Value, filter.SecondValue);
+        var predicateLambda = Expression.Lambda<Func<GameReplay, bool>>(predicateExpression, replayParam);
+
+        var gameReplaysNav = Expression.Property(gameParam, nameof(Game.GameReplays));
+        var anyMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m => m.Name == "Any" && m.GetParameters().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay));
+
+        return Expression.Call(anyMethod, gameReplaysNav, predicateLambda);
+    }
+
+    private Expression GetPropertyExpression(ParameterExpression parameter, FilterField field)
+    {
+        return field switch
+        {
+            FilterField.Name => Expression.Property(parameter, nameof(Game.Name)),
+            FilterField.StatusId => Expression.Property(parameter, nameof(Game.StatusId)),
+            FilterField.PlatformId => Expression.Property(parameter, nameof(Game.PlatformId)),
+            FilterField.PlayWithId => throw new NotSupportedException("PlayWithId filtering is not supported with many-to-many relationship. Use custom filters instead."),
+            FilterField.PlayedStatusId => Expression.Property(parameter, nameof(Game.PlayedStatusId)),
+            FilterField.Grade => Expression.Property(parameter, nameof(Game.Grade)),
+            FilterField.Critic => Expression.Property(parameter, nameof(Game.Critic)),
+            FilterField.CriticProvider => Expression.Property(parameter, nameof(Game.CriticProvider)),
+            FilterField.Story => Expression.Property(parameter, nameof(Game.Story)),
+            FilterField.Completion => Expression.Property(parameter, nameof(Game.Completion)),
+            FilterField.Score => Expression.Property(parameter, nameof(Game.Score)),
+            FilterField.Released => Expression.Property(parameter, nameof(Game.Released)),
+            FilterField.ReleaseDate => Expression.Property(parameter, nameof(Game.Released)),
+            FilterField.Started => Expression.Property(parameter, nameof(Game.Started)),
+            FilterField.Finished => Expression.Property(parameter, nameof(Game.Finished)),
+            FilterField.Comment => Expression.Property(parameter, nameof(Game.Comment)),
+            FilterField.Description => Expression.Property(parameter, nameof(Game.Comment)),
+            FilterField.Logo => Expression.Property(parameter, nameof(Game.Logo)),
+            FilterField.Cover => Expression.Property(parameter, nameof(Game.Cover)),
+            FilterField.CreatedAt => Expression.Property(parameter, nameof(Game.CreatedAt)),
+            FilterField.UpdatedAt => Expression.Property(parameter, nameof(Game.UpdatedAt)),
+            FilterField.SteamAppId => Expression.Property(parameter, nameof(Game.SteamAppId)),
+            FilterField.SteamPlaytimeForever => Expression.Coalesce(
+                Expression.Property(parameter, nameof(Game.ManualPlaytimeMinutes)),
+                Expression.Property(parameter, nameof(Game.SteamPlaytimeForever))),
+            _ => throw new ArgumentException($"Campo de filtro no soportado: {field}")
+        };
+    }
+
+    private Expression CreateFilterExpression(Expression propertyExpression, FilterOperator filterOperator, object? value, object? secondValue)
+    {
+        return filterOperator switch
+        {
+            FilterOperator.Equals => CreateEqualsExpression(propertyExpression, value),
+            FilterOperator.NotEquals => Expression.Not(CreateEqualsExpression(propertyExpression, value)),
+            FilterOperator.Contains => CreateContainsExpression(propertyExpression, value),
+            FilterOperator.NotContains => Expression.Not(CreateContainsExpression(propertyExpression, value)),
+            FilterOperator.GreaterThan => CreateComparisonExpression(propertyExpression, value, Expression.GreaterThan),
+            FilterOperator.GreaterThanOrEqual => CreateComparisonExpression(propertyExpression, value, Expression.GreaterThanOrEqual),
+            FilterOperator.LessThan => CreateComparisonExpression(propertyExpression, value, Expression.LessThan),
+            FilterOperator.LessThanOrEqual => CreateComparisonExpression(propertyExpression, value, Expression.LessThanOrEqual),
+            FilterOperator.In => CreateInExpression(propertyExpression, value),
+            FilterOperator.NotIn => Expression.Not(CreateInExpression(propertyExpression, value)),
+            FilterOperator.IsNull => CreateIsNullExpression(propertyExpression),
+            FilterOperator.IsNotNull => Expression.Not(CreateIsNullExpression(propertyExpression)),
+            FilterOperator.IsEmpty => CreateIsEmptyExpression(propertyExpression),
+            FilterOperator.IsNotEmpty => Expression.Not(CreateIsEmptyExpression(propertyExpression)),
+            FilterOperator.StartsWith => CreateStartsWithExpression(propertyExpression, value),
+            FilterOperator.EndsWith => CreateEndsWithExpression(propertyExpression, value),
+            // Operadores específicos para fechas
+            FilterOperator.On => CreateEqualsExpression(propertyExpression, value), // Fecha exacta
+            FilterOperator.Before => CreateComparisonExpression(propertyExpression, value, Expression.LessThanOrEqual), // Antes o igual
+            FilterOperator.After => CreateComparisonExpression(propertyExpression, value, Expression.GreaterThanOrEqual), // Después o igual
+            FilterOperator.Between => CreateBetweenExpression(propertyExpression, value, secondValue),
+            _ => throw new ArgumentException($"Operador de filtro no soportado: {filterOperator}")
+        };
+    }
+
+    private Expression CreateEqualsExpression(Expression propertyExpression, object? value)
+    {
+        if (value == null)
+        {
+            return Expression.Equal(propertyExpression, Expression.Constant(null));
+        }
+
+        // Manejar JsonElement
+        if (value is System.Text.Json.JsonElement jsonElement)
+        {
+            value = jsonElement.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.String => jsonElement.GetString(),
+                System.Text.Json.JsonValueKind.Number => jsonElement.GetInt32(),
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                _ => jsonElement.ToString()
+            };
+        }
+
+        // Manejo especial para fechas en campos string
+        if (propertyExpression.Type == typeof(string) && value is string sVal)
+        {
+            // Intentar parsear como fecha para normalizar el formato
+            if (DateTime.TryParse(sVal, out var parsed))
+            {
+                // Comparar usando formato ISO para consistencia
+                var iso = parsed.ToString("yyyy-MM-dd");
+                var constIso = Expression.Constant(iso, typeof(string));
+
+                // Manejar el caso donde la propiedad puede ser null o vacía
+                var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
+                var emptyCheck = Expression.NotEqual(propertyExpression, Expression.Constant("", typeof(string)));
+                var notNullOrEmpty = Expression.AndAlso(nullCheck, emptyCheck);
+                var equalsCheck = Expression.Equal(propertyExpression, constIso);
+                return Expression.AndAlso(notNullOrEmpty, equalsCheck);
+            }
+        }
+
+        var convertedValue = ConvertValue(value, propertyExpression.Type);
+        var constantExpression = Expression.Constant(convertedValue, propertyExpression.Type);
+        return Expression.Equal(propertyExpression, constantExpression);
+    }
+
+    private Expression CreateContainsExpression(Expression propertyExpression, object? value)
+    {
+        if (value == null)
+        {
+            return Expression.Constant(false);
+        }
+
+        // Solo permitir Contains en campos de tipo string
+        if (propertyExpression.Type != typeof(string))
+        {
+            throw new ArgumentException(
+                $"El operador 'Contains' solo puede usarse con campos de texto. " +
+                $"El campo es de tipo '{propertyExpression.Type.Name}'. " +
+                $"Para campos numéricos o de fecha, usa operadores como 'Equals', 'GreaterThan', 'LessThan', 'On', 'Before', 'After', etc.");
+        }
+
+        // Hacer la búsqueda case-insensitive convirtiendo a minúsculas
+        var toLowerMethod = typeof(string).GetMethod("ToLower", Type.EmptyTypes)!;
+        var containsMethod = typeof(string).GetMethod("Contains", new[] { typeof(string) })!;
+
+        // Convertir el valor de búsqueda a minúsculas
+        var searchValueLower = value.ToString()!.ToLower();
+        var valueExpression = Expression.Constant(searchValueLower, typeof(string));
+
+        // Manejar el caso donde la propiedad puede ser null
+        var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
+
+        // Convertir la propiedad a minúsculas antes de hacer Contains
+        var propertyToLower = Expression.Call(propertyExpression, toLowerMethod);
+        var containsCall = Expression.Call(propertyToLower, containsMethod, valueExpression);
+
+        return Expression.AndAlso(nullCheck, containsCall);
+    }
+
+    private Expression CreateIsEmptyExpression(Expression propertyExpression)
+    {
+        if (propertyExpression.Type != typeof(string))
+        {
+            return CreateIsNullExpression(propertyExpression);
+        }
+
+        var nullCheck = Expression.Equal(propertyExpression, Expression.Constant(null, typeof(string)));
+        var emptyCheck = Expression.Equal(propertyExpression, Expression.Constant("", typeof(string)));
+        return Expression.OrElse(nullCheck, emptyCheck);
+    }
+
+    private Expression CreateComparisonExpression(Expression propertyExpression, object? value, Func<Expression, Expression, Expression> comparisonFunc)
+    {
+        if (value == null)
+        {
+            return Expression.Constant(false);
+        }
+
+        // Manejar JsonElement
+        if (value is System.Text.Json.JsonElement jsonElement)
+        {
+            value = jsonElement.ValueKind == System.Text.Json.JsonValueKind.String
+                ? jsonElement.GetString()
+                : jsonElement.ToString();
+        }
+
+        var targetType = propertyExpression.Type;
+
+        // Special handling for string fields (like date strings)
+        if (targetType == typeof(string) && value is string sVal)
+        {
+            // Try parse value as DateTime to normalize format
+            if (DateTime.TryParse(sVal, out var parsed))
+            {
+                // Para comparaciones de fechas en strings, necesitamos normalizar ambos lados
+                // Convertir la fecha del filtro a un valor comparable
+                var filterDate = parsed;
+
+                // Excluir valores null o cadenas vacías (fechas legacy sin valor)
+                var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null, typeof(string)));
+                var emptyCheck = Expression.NotEqual(propertyExpression, Expression.Constant("", typeof(string)));
+                var notNullOrEmpty = Expression.AndAlso(nullCheck, emptyCheck);
+
+                // Crear una expresión que compare las fechas correctamente
+                // Usamos el valor numérico YYYYMMDD para comparación lexicográfica confiable
+                // La propiedad necesita ser convertida también: extraer año, mes, día
+                // Como no podemos parsear en LINQ to SQL fácilmente, usamos una aproximación:
+                // Comparamos directamente con múltiples formatos comunes normalizados
+
+                // Formato ISO (yyyy-MM-dd) - más confiable para comparación lexicográfica
+                var isoFormat = parsed.ToString("yyyy-MM-dd");
+                var constIso = Expression.Constant(isoFormat, typeof(string));
+
+                // También considerar formato dd/MM/yyyy que podría estar en la DB
+                // Para esto, intentamos comparar con formato ISO primero
+                var compareToMethod = typeof(string).GetMethod("CompareTo", new[] { typeof(string) })!;
+                var compareToCall = Expression.Call(propertyExpression, compareToMethod, constIso);
+                var zero = Expression.Constant(0);
+
+                // Map the comparison function to CompareTo result
+                Expression comparison;
+                if (comparisonFunc == Expression.GreaterThan)
+                {
+                    comparison = Expression.GreaterThan(compareToCall, zero);
+                }
+                else if (comparisonFunc == Expression.GreaterThanOrEqual)
+                {
+                    comparison = Expression.GreaterThanOrEqual(compareToCall, zero);
+                }
+                else if (comparisonFunc == Expression.LessThan)
+                {
+                    comparison = Expression.LessThan(compareToCall, zero);
+                }
+                else if (comparisonFunc == Expression.LessThanOrEqual)
+                {
+                    comparison = Expression.LessThanOrEqual(compareToCall, zero);
+                }
+                else
+                {
+                    // Fallback to direct comparison (may fail)
+                    comparison = comparisonFunc(propertyExpression, constIso);
+                }
+
+                return Expression.AndAlso(notNullOrEmpty, comparison);
+            }
+        }
+
+        // For non-string types or non-date strings
+        var convertedValue = ConvertValue(value, propertyExpression.Type);
+        var constantExpression = Expression.Constant(convertedValue, propertyExpression.Type);
+        return comparisonFunc(propertyExpression, constantExpression);
+    }
+
+
+
+    private Expression CreateBetweenExpression(Expression propertyExpression, object? minValue, object? maxValue)
+    {
+        if (minValue == null || maxValue == null)
+        {
+            return Expression.Constant(false);
+        }
+
+        var gteExpression = CreateComparisonExpression(propertyExpression, minValue, Expression.GreaterThanOrEqual);
+        var lteExpression = CreateComparisonExpression(propertyExpression, maxValue, Expression.LessThanOrEqual);
+
+        return Expression.AndAlso(gteExpression, lteExpression);
+    }
+
+    private Expression CreateInExpression(Expression propertyExpression, object? value)
+    {
+        if (value == null)
+        {
+            return Expression.Constant(false);
+        }
+
+        // Convertir el valor a una lista si no lo es
+        var valuesList = value is System.Collections.IEnumerable enumerable && !(value is string)
+            ? enumerable.Cast<object>().ToList()
+            : new List<object> { value };
+
+        if (!valuesList.Any())
+        {
+            return Expression.Constant(false);
+        }
+
+        // Crear expresiones de igualdad para cada valor
+        var equalityExpressions = valuesList.Select(v =>
+        {
+            var convertedValue = ConvertValue(v, propertyExpression.Type);
+            var constantExpression = Expression.Constant(convertedValue, propertyExpression.Type);
+            return Expression.Equal(propertyExpression, constantExpression);
+        });
+
+        // Combinar con OR
+        return equalityExpressions.Aggregate(Expression.OrElse);
+    }
+
+    private Expression CreateIsNullExpression(Expression propertyExpression)
+    {
+        // Para campos string (como fechas), considerar tanto null como cadenas vacías
+        if (propertyExpression.Type == typeof(string))
+        {
+            var isNull = Expression.Equal(propertyExpression, Expression.Constant(null, typeof(string)));
+            var isEmpty = Expression.Equal(propertyExpression, Expression.Constant("", typeof(string)));
+            return Expression.OrElse(isNull, isEmpty);
+        }
+
+        // Para otros tipos, solo verificar null
+        return Expression.Equal(propertyExpression, Expression.Constant(null));
+    }
+
+    private Expression CreateStartsWithExpression(Expression propertyExpression, object? value)
+    {
+        if (value == null)
+        {
+            return Expression.Constant(false);
+        }
+
+        if (propertyExpression.Type == typeof(string))
+        {
+            // Hacer la búsqueda case-insensitive convirtiendo a minúsculas
+            var toLowerMethod = typeof(string).GetMethod("ToLower", Type.EmptyTypes)!;
+            var startsWithMethod = typeof(string).GetMethod("StartsWith", new[] { typeof(string) })!;
+
+            // Convertir el valor de búsqueda a minúsculas
+            var searchValueLower = value.ToString()!.ToLower();
+            var valueExpression = Expression.Constant(searchValueLower, typeof(string));
+
+            var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
+
+            // Convertir la propiedad a minúsculas antes de hacer StartsWith
+            var propertyToLower = Expression.Call(propertyExpression, toLowerMethod);
+            var startsWithCall = Expression.Call(propertyToLower, startsWithMethod, valueExpression);
+
+            return Expression.AndAlso(nullCheck, startsWithCall);
+        }
+
+        throw new ArgumentException($"StartsWith no es soportado para el tipo {propertyExpression.Type}");
+    }
+
+    private Expression CreateEndsWithExpression(Expression propertyExpression, object? value)
+    {
+        if (value == null)
+        {
+            return Expression.Constant(false);
+        }
+
+        if (propertyExpression.Type == typeof(string))
+        {
+            // Hacer la búsqueda case-insensitive convirtiendo a minúsculas
+            var toLowerMethod = typeof(string).GetMethod("ToLower", Type.EmptyTypes)!;
+            var endsWithMethod = typeof(string).GetMethod("EndsWith", new[] { typeof(string) })!;
+
+            // Convertir el valor de búsqueda a minúsculas
+            var searchValueLower = value.ToString()!.ToLower();
+            var valueExpression = Expression.Constant(searchValueLower, typeof(string));
+
+            var nullCheck = Expression.NotEqual(propertyExpression, Expression.Constant(null));
+
+            // Convertir la propiedad a minúsculas antes de hacer EndsWith
+            var propertyToLower = Expression.Call(propertyExpression, toLowerMethod);
+            var endsWithCall = Expression.Call(propertyToLower, endsWithMethod, valueExpression);
+
+            return Expression.AndAlso(nullCheck, endsWithCall);
+        }
+
+        throw new ArgumentException($"EndsWith no es soportado para el tipo {propertyExpression.Type}");
+    }
+
+    private IQueryable<Game> ApplySorting(IQueryable<Game> query, ViewConfiguration configuration)
+    {
+        // Ordenar los sortings por Order
+        var orderedSortings = configuration.Sorting.OrderBy(s => s.Order).ToList();
+
+        IOrderedQueryable<Game>? orderedQuery = null;
+
+        for (int i = 0; i < orderedSortings.Count; i++)
+        {
+            var sort = orderedSortings[i];
+
+            if (i == 0)
+            {
+                // Primer ordenamiento
+                orderedQuery = sort.Direction == SortDirection.Ascending
+                    ? query.OrderBy(GetSortExpression(sort.Field, configuration))
+                    : query.OrderByDescending(GetSortExpression(sort.Field, configuration));
+            }
+            else
+            {
+                // Ordenamientos adicionales
+                orderedQuery = sort.Direction == SortDirection.Ascending
+                    ? orderedQuery!.ThenBy(GetSortExpression(sort.Field, configuration))
+                    : orderedQuery!.ThenByDescending(GetSortExpression(sort.Field, configuration));
+            }
+        }
+
+        return orderedQuery ?? query;
+    }
+
+    private Expression<Func<Game, object>> GetSortExpression(SortField field, ViewConfiguration configuration)
+    {
+        if (field == SortField.EffectiveGrade)
+        {
+            return CreateEffectiveGradeSortExpression(configuration);
+        }
+
+        if (field is SortField.EffectiveReleased or SortField.EffectiveStarted or SortField.EffectiveFinished)
+        {
+            return CreateEffectiveDateSortExpression(field, configuration);
+        }
+
+        return field switch
+        {
+            SortField.Name => g => EF.Functions.Collate(g.Name, "NOCASE"),
+            SortField.StatusId => g => g.StatusId,
+            SortField.Status => g => g.Status.SortOrder,
+            SortField.PlatformId => g => g.PlatformId ?? 0,
+            SortField.Platform => g => g.Platform != null ? g.Platform.SortOrder : 0,
+            SortField.PlayWithId => throw new NotSupportedException("PlayWithId sorting is not supported with many-to-many relationship."),
+            SortField.PlayWith => throw new NotSupportedException("PlayWith sorting is not supported with many-to-many relationship."),
+            SortField.PlayedStatusId => g => g.PlayedStatusId ?? 0,
+            SortField.PlayedStatus => g => g.PlayedStatus != null ? g.PlayedStatus.SortOrder : 0,
+            SortField.Grade => g => g.Grade ?? 0,
+            SortField.EffectiveGrade => g => g.Grade ?? 0,
+            SortField.Critic => g => g.Critic ?? 0,
+            SortField.CriticProvider => g => g.CriticProvider ?? "",
+            SortField.Story => g => g.Story ?? 0,
+            SortField.Completion => g => g.Completion ?? 0,
+            SortField.Score => g => g.Score.HasValue ? (double)g.Score.Value : 0.0,
+            SortField.Released => g => g.Released ?? "",
+            SortField.EffectiveReleased => g => g.Released ?? "",
+            SortField.Started => g => g.Started ?? "",
+            SortField.Finished => g => g.Finished ?? "",
+            SortField.EffectiveStarted => g => g.Started ?? "",
+            SortField.EffectiveFinished => g => g.Finished ?? "",
+            SortField.CreatedAt => g => g.CreatedAt,
+            SortField.UpdatedAt => g => g.UpdatedAt,
+            SortField.SteamPlaytimeForever => g => g.ManualPlaytimeMinutes ?? g.SteamPlaytimeForever ?? 0,
+            SortField.Id => g => g.Id,
+            _ => throw new ArgumentException($"Campo de ordenamiento no soportado: {field}")
+        };
+    }
+
+    private Expression<Func<Game, object>> CreateEffectiveGradeSortExpression(ViewConfiguration configuration)
+    {
+        var gameParam = Expression.Parameter(typeof(Game), "g");
+        var replayParam = Expression.Parameter(typeof(GameReplay), "r");
+
+        var replayPredicate = CreateReplaySortPredicate(replayParam, configuration)
+            ?? Expression.Constant(true);
+
+        var replays = Expression.Property(gameParam, nameof(Game.GameReplays));
+        var whereMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Where" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay));
+        var filteredReplays = Expression.Call(whereMethod, replays, Expression.Lambda<Func<GameReplay, bool>>(replayPredicate, replayParam));
+
+        var selectMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Select" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay), typeof(int?));
+        var gradeProperty = Expression.Property(replayParam, nameof(GameReplay.Grade));
+        var replayGrades = Expression.Call(selectMethod, filteredReplays, Expression.Lambda<Func<GameReplay, int?>>(gradeProperty, replayParam));
+
+        var maxMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m => m.Name == "Max" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(IEnumerable<int?>));
+        var maxReplayGrade = Expression.Call(maxMethod, replayGrades);
+        var gameGrade = Expression.Property(gameParam, nameof(Game.Grade));
+        var replayOrGameGrade = Expression.Coalesce(maxReplayGrade, gameGrade);
+        var effectiveGrade = Expression.Coalesce(replayOrGameGrade, Expression.Constant(0, typeof(int)));
+
+        return Expression.Lambda<Func<Game, object>>(Expression.Convert(effectiveGrade, typeof(object)), gameParam);
+    }
+
+    private Expression<Func<Game, object>> CreateEffectiveDateSortExpression(SortField field, ViewConfiguration configuration)
+    {
+        var gameParam = Expression.Parameter(typeof(Game), "g");
+        var replayParam = Expression.Parameter(typeof(GameReplay), "r");
+
+        var (replayFilterField, replayPropertyName, gamePropertyName) = field switch
+        {
+            SortField.EffectiveReleased => (FilterField.ReplayReleased, nameof(GameReplay.Released), nameof(Game.Released)),
+            SortField.EffectiveStarted => (FilterField.ReplayStarted, nameof(GameReplay.Started), nameof(Game.Started)),
+            SortField.EffectiveFinished => (FilterField.ReplayFinished, nameof(GameReplay.Finished), nameof(Game.Finished)),
+            _ => throw new ArgumentException($"Campo de fecha relevante no soportado: {field}")
+        };
+
+        var replayPredicate = CreateReplaySortPredicate(replayParam, configuration, replayFilterField)
+            ?? Expression.Constant(true);
+
+        var replayDateProperty = Expression.Property(replayParam, replayPropertyName);
+        var hasDate = Expression.AndAlso(
+            Expression.NotEqual(replayDateProperty, Expression.Constant(null, typeof(string))),
+            Expression.NotEqual(replayDateProperty, Expression.Constant("", typeof(string))));
+        var matchingReplayWithDate = Expression.AndAlso(replayPredicate, hasDate);
+
+        var replays = Expression.Property(gameParam, nameof(Game.GameReplays));
+        var whereMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Where" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay));
+        var filteredReplays = Expression.Call(whereMethod, replays, Expression.Lambda<Func<GameReplay, bool>>(matchingReplayWithDate, replayParam));
+
+        var selectMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Select" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[1].ParameterType.GetGenericArguments().Length == 2)
+            .MakeGenericMethod(typeof(GameReplay), typeof(string));
+        var replayDates = Expression.Call(selectMethod, filteredReplays, Expression.Lambda<Func<GameReplay, string>>(replayDateProperty, replayParam));
+
+        var maxMethod = typeof(Enumerable)
+            .GetMethods()
+            .First(m =>
+                m.Name == "Max" &&
+                m.IsGenericMethodDefinition &&
+                m.GetGenericArguments().Length == 1 &&
+                m.GetParameters().Length == 1)
+            .MakeGenericMethod(typeof(string));
+        var maxReplayDate = Expression.Call(maxMethod, replayDates);
+        var gameDate = Expression.Property(gameParam, gamePropertyName);
+        var gameDateOrEmpty = Expression.Coalesce(gameDate, Expression.Constant("", typeof(string)));
+        var effectiveDate = Expression.Coalesce(maxReplayDate, gameDateOrEmpty);
+
+        return Expression.Lambda<Func<Game, object>>(Expression.Convert(effectiveDate, typeof(object)), gameParam);
+    }
+
+    private Expression? CreateReplaySortPredicate(ParameterExpression replayParam, ViewConfiguration configuration, FilterField? preferredField = null)
+    {
+        Expression? groupsCombined = null;
+        var hasPreferredField = preferredField.HasValue && configuration.FilterGroups
+            .SelectMany(g => g.Filters)
+            .Any(f => f.Field == preferredField.Value);
+
+        foreach (var group in configuration.FilterGroups)
+        {
+            var replayFilters = group.Filters
+                .Where(f => IsReplaySortField(f.Field))
+                .ToList();
+
+            if (!replayFilters.Any()) continue;
+
+            if (preferredField.HasValue)
+            {
+                var groupHasPreferredField = replayFilters.Any(f => f.Field == preferredField.Value);
+                replayFilters = replayFilters
+                    .Where(f =>
+                        (hasPreferredField && groupHasPreferredField && f.Field == preferredField.Value) ||
+                        (hasPreferredField && groupHasPreferredField && group.CombineWith == FilterLogic.And && IsReplayScopeField(f.Field)) ||
+                        (!hasPreferredField && IsReplayScopeField(f.Field)))
+                    .ToList();
+            }
+
+            if (!replayFilters.Any()) continue;
+
+            Expression? groupExpression = null;
+
+            foreach (var filter in replayFilters)
+            {
+                var replayProperty = GetReplayPropertyExpression(replayParam, filter.Field);
+                var filterExpression = CreateFilterExpression(replayProperty, filter.Operator, filter.Value, filter.SecondValue);
+
+                groupExpression = groupExpression == null
+                    ? filterExpression
+                    : group.CombineWith == FilterLogic.Or
+                        ? Expression.OrElse(groupExpression, filterExpression)
+                        : Expression.AndAlso(groupExpression, filterExpression);
+            }
+
+            if (groupExpression == null) continue;
+
+            groupsCombined = groupsCombined == null
+                ? groupExpression
+                : Expression.OrElse(groupsCombined, groupExpression);
+        }
+
+        return groupsCombined;
+    }
+
+    private static Expression GetReplayPropertyExpression(ParameterExpression replayParam, FilterField field) =>
+        field switch
+        {
+            FilterField.ReplayStarted => Expression.Property(replayParam, nameof(GameReplay.Started)),
+            FilterField.ReplayFinished => Expression.Property(replayParam, nameof(GameReplay.Finished)),
+            FilterField.ReplayReleased => Expression.Property(replayParam, nameof(GameReplay.Released)),
+            FilterField.ReplayGrade => Expression.Property(replayParam, nameof(GameReplay.Grade)),
+            FilterField.ReplayTypeId => Expression.Property(replayParam, nameof(GameReplay.ReplayTypeId)),
+            _ => throw new ArgumentException($"Campo de replay no soportado: {field}")
+        };
+
+    private static bool IsReplaySortField(FilterField field) =>
+        field is FilterField.ReplayStarted or FilterField.ReplayFinished
+            or FilterField.ReplayReleased or FilterField.ReplayGrade or FilterField.ReplayTypeId;
+
+    private static bool IsReplayScopeField(FilterField field) =>
+        field is FilterField.ReplayReleased or FilterField.ReplayGrade or FilterField.ReplayTypeId;
+
+    private object? ConvertValue(object? value, Type targetType)
+    {
+        if (value == null)
+            return null;
+
+        // Manejar JsonElement si viene desde JSON
+        if (value is System.Text.Json.JsonElement jsonElement)
+        {
+            value = jsonElement.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.String => jsonElement.GetString(),
+                System.Text.Json.JsonValueKind.Number => jsonElement.GetInt32(),
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                System.Text.Json.JsonValueKind.Null => null,
+                _ => jsonElement.ToString()
+            };
+        }
+
+        if (value == null)
+            return null;
+
+        // Manejar tipos nullable
+        var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        try
+        {
+            // Manejo especial para DateTime
+            if (underlyingType == typeof(DateTime))
+            {
+                if (value is string stringValue)
+                {
+                    if (DateTime.TryParse(stringValue, out var dateValue))
+                        return dateValue;
+                }
+                else if (value is DateTime)
+                {
+                    return value;
+                }
+            }
+
+            // Manejo especial para decimales
+            if (underlyingType == typeof(decimal))
+            {
+                if (value is string stringValue)
+                {
+                    if (decimal.TryParse(stringValue, out var decimalValue))
+                        return decimalValue;
+                }
+                else if (value is IConvertible)
+                {
+                    return Convert.ToDecimal(value);
+                }
+            }
+
+            // Manejo especial para enteros
+            if (underlyingType == typeof(int))
+            {
+                if (value is string stringValue)
+                {
+                    if (int.TryParse(stringValue, out var intValue))
+                        return intValue;
+                }
+                else if (value is IConvertible)
+                {
+                    return Convert.ToInt32(value);
+                }
+            }
+
+            // Para otros tipos, intentar conversión directa
+            return Convert.ChangeType(value, underlyingType);
+        }
+        catch
+        {
+            // Si la conversión falla, devolver null o el valor original
+            return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
+        }
+    }
+
+    /// <summary>
+    /// Normaliza un string removiendo tildes y diacríticos.
+    /// Pokémon -> Pokemon, José -> Jose, etc.
+    /// </summary>
+    private static string RemoveDiacritics(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var normalizedString = text.Normalize(System.Text.NormalizationForm.FormD);
+        var stringBuilder = new System.Text.StringBuilder();
+
+        foreach (var c in normalizedString)
+        {
+            var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+            if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                stringBuilder.Append(c);
+            }
+        }
+
+        return stringBuilder.ToString().Normalize(System.Text.NormalizationForm.FormC);
+    }
+}

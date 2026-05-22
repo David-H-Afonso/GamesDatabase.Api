@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
-using GamesDatabase.Api.Helpers;
+using GamesDatabase.Api.Application.Mapping;
+using GamesDatabase.Api.Common;
 
 namespace GamesDatabase.Api.Controllers;
 

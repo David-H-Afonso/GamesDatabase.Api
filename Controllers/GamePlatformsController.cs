@@ -1,10 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
-using GamesDatabase.Api.Data;
-using GamesDatabase.Api.Models;
-using GamesDatabase.Api.DTOs;
-using GamesDatabase.Api.Helpers;
+using GamesDatabase.Api.Contracts;
+using GamesDatabase.Api.Application.Interfaces;
+using GamesDatabase.Api.Common;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -13,287 +11,81 @@ namespace GamesDatabase.Api.Controllers;
 [Authorize]
 public class GamePlatformsController : BaseApiController
 {
-    private const int MaxLogoLength = 500_000;
-    private readonly GamesDbContext _context;
+    private readonly ICatalogService _catalogService;
 
-    public GamePlatformsController(GamesDbContext context)
+    public GamePlatformsController(ICatalogService catalogService)
     {
-        _context = context;
+        _catalogService = catalogService;
     }
 
     [HttpGet]
     public async Task<ActionResult<PagedResult<GamePlatformDto>>> GetGamePlatforms([FromQuery] QueryParameters parameters)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var query = _context.GamePlatforms.Where(p => p.UserId == userId).AsQueryable();
-        if (!string.IsNullOrEmpty(parameters.Search))
-        {
-            query = query.Where(p => p.Name.Contains(parameters.Search));
-        }
-
-        if (parameters.IsActive.HasValue)
-        {
-            query = query.Where(p => p.IsActive == parameters.IsActive.Value);
-        }
-
-        // Aplicar ordenado
-        if (!string.IsNullOrEmpty(parameters.SortBy))
-        {
-            query = parameters.SortBy.ToLower() switch
-            {
-                "name" or "alphabetical" => parameters.SortDescending ?
-                    query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")).Reverse() :
-                    query.OrderBy(p => EF.Functions.Collate(p.Name, "NOCASE")),
-                "isactive" => parameters.SortDescending ? query.OrderByDescending(p => p.IsActive) : query.OrderBy(p => p.IsActive),
-                "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(p => p.Id) : query.OrderBy(p => p.Id),
-                "sortorder" or "order" or "position" => parameters.SortDescending ? query.OrderByDescending(p => p.SortOrder) : query.OrderBy(p => p.SortOrder),
-                _ => query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")) // Default: use SortOrder then name
-            };
-        }
-        else
-        {
-            query = query.OrderBy(p => p.SortOrder).ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE")); // Default: use SortOrder then name
-        }
-
-        var totalCount = await query.CountAsync();
-
-        var platforms = await query
-            .Skip(parameters.Skip)
-            .Take(parameters.Take)
-            .ToListAsync();
-
-        var platformDtos = platforms.Select(p => p.ToDto()).ToList();
-
-        return Ok(new PagedResult<GamePlatformDto>
-        {
-            Data = platformDtos,
-            TotalCount = totalCount,
-            Page = parameters.Page,
-            PageSize = parameters.PageSize
-        });
+        var result = await _catalogService.GetPlatformsAsync(parameters, userId);
+        return Ok(result);
     }
 
     [HttpGet("active")]
     public async Task<ActionResult<IEnumerable<GamePlatformDto>>> GetActiveGamePlatforms()
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var platforms = await _context.GamePlatforms
-            .Where(p => p.IsActive && p.UserId == userId)
-            .OrderBy(p => p.SortOrder)
-            .ThenBy(p => EF.Functions.Collate(p.Name, "NOCASE"))
-            .ToListAsync();
-
-        return Ok(platforms.Select(p => p.ToDto()));
+        var result = await _catalogService.GetActivePlatformsAsync(userId);
+        return Ok(result);
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<GamePlatformDto>> GetGamePlatform(int id)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var gamePlatform = await _context.GamePlatforms
-            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
-
-        if (gamePlatform == null)
-            return NotFound();
-
-        return Ok(gamePlatform.ToDto());
+        var result = await _catalogService.GetPlatformByIdAsync(id, userId);
+        if (result == null) return NotFound();
+        return Ok(result);
     }
 
     [HttpPut("{id}")]
     public async Task<IActionResult> PutGamePlatform(int id, GamePlatformUpdateDto updateDto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var gamePlatform = await _context.GamePlatforms
-            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
-
-        if (gamePlatform == null)
-            return NotFound(new { message = "Plataforma no encontrada" });
-
-        if (await _context.GamePlatforms.AnyAsync(p => p.Name.ToLower() == updateDto.Name.ToLower() && p.Id != id && p.UserId == userId))
-        {
-            return Conflict(new { message = "Ya existe una plataforma con este nombre" });
-        }
-
-        var logoValidation = ValidatePlatformLogo(updateDto.Logo);
-        if (logoValidation != null)
-        {
-            return BadRequest(new { message = logoValidation });
-        }
-
-        gamePlatform.Name = updateDto.Name;
-        gamePlatform.IsActive = updateDto.IsActive;
-        gamePlatform.Color = updateDto.Color;
-        gamePlatform.Logo = NormalizeLogo(updateDto.Logo);
-
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            if (!GamePlatformExists(id))
-                return NotFound(new { message = "Plataforma no encontrada" });
-            else
-                return Conflict(new { message = "Conflicto de concurrencia" });
-        }
-
-        return NoContent();
+        var result = await _catalogService.UpdatePlatformAsync(id, updateDto, userId);
+        return ToCatalogActionResult(result);
     }
 
     [HttpPost]
     public async Task<ActionResult<GamePlatformDto>> PostGamePlatform(GamePlatformCreateDto createDto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-
-        if (await _context.GamePlatforms.AnyAsync(p => p.Name.ToLower() == createDto.Name.ToLower() && p.UserId == userId))
-        {
-            return Conflict(new { message = "Ya existe una plataforma con este nombre" });
-        }
-
-        var logoValidation = ValidatePlatformLogo(createDto.Logo);
-        if (logoValidation != null)
-        {
-            return BadRequest(new { message = logoValidation });
-        }
-
-        var maxSort = await _context.GamePlatforms
-            .Where(p => p.UserId == userId)
-            .MaxAsync(p => (int?)p.SortOrder) ?? 0;
-
-        var gamePlatform = new GamePlatform
-        {
-            UserId = userId,
-            Name = createDto.Name,
-            SortOrder = maxSort + 1,
-            IsActive = createDto.IsActive,
-            Color = createDto.Color,
-            Logo = NormalizeLogo(createDto.Logo)
-        };
-
-        _context.GamePlatforms.Add(gamePlatform);
-        await _context.SaveChangesAsync();
-
-        var result = gamePlatform.ToDto();
-        return CreatedAtAction("GetGamePlatform", new { id = gamePlatform.Id }, result);
+        var result = await _catalogService.CreatePlatformAsync(createDto, userId);
+        if (result.Conflict) return Conflict(new { message = result.Error });
+        if (!result.Success) return BadRequest(new { message = result.Error });
+        return CreatedAtAction("GetGamePlatform", new { id = result.Data!.Id }, result.Data);
     }
 
     [HttpPost("reorder")]
     public async Task<IActionResult> ReorderPlatforms([FromBody] ReorderStatusesDto dto)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-
-        if (dto?.OrderedIds == null || dto.OrderedIds.Count == 0)
-            return BadRequest(new { message = "OrderedIds must be provided" });
-
-        var platforms = await _context.GamePlatforms
-            .Where(p => dto.OrderedIds.Contains(p.Id) && p.UserId == userId)
-            .ToListAsync();
-
-        if (platforms.Count != dto.OrderedIds.Count)
-        {
-            return NotFound(new { message = "One or more platform IDs not found" });
-        }
-
-        using var transaction = await _context.Database.BeginTransactionAsync();
-        try
-        {
-            for (int i = 0; i < dto.OrderedIds.Count; i++)
-            {
-                var id = dto.OrderedIds[i];
-                var platform = platforms.First(p => p.Id == id);
-                platform.SortOrder = i + 1; // 1-based ordering
-            }
-
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            return Ok(new { message = "Platforms reordered successfully" });
-        }
-        catch (Exception)
-        {
-            await transaction.RollbackAsync();
-            return StatusCode(500, new { message = "Error reordering platforms" });
-        }
+        var result = await _catalogService.ReorderPlatformsAsync(dto, userId);
+        if (result.Success) return Ok(new { message = "Platforms reordered successfully" });
+        return ToCatalogActionResult(result);
     }
 
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteGamePlatform(int id)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var gamePlatform = await _context.GamePlatforms
-            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId);
-
-        if (gamePlatform == null)
-            return NotFound(new { message = "Plataforma no encontrada" });
-
-        // Verificar si hay juegos usando esta plataforma
-        var gamesUsingPlatform = await _context.Games.CountAsync(g => g.PlatformId == id && g.UserId == userId);
-        if (gamesUsingPlatform > 0)
-        {
-            return BadRequest(new
-            {
-                message = "No se puede eliminar la plataforma",
-                details = $"Hay {gamesUsingPlatform} juego(s) que usan esta plataforma",
-                gamesCount = gamesUsingPlatform
-            });
-        }
-
-        _context.GamePlatforms.Remove(gamePlatform);
-        await _context.SaveChangesAsync();
-
-        return NoContent();
+        var result = await _catalogService.DeletePlatformAsync(id, userId);
+        if (result.Success) return NoContent();
+        if (result.ErrorData != null) return result.NotFound ? NotFound(result.ErrorData) : BadRequest(result.ErrorData);
+        return ToCatalogActionResult(result);
     }
 
-    private bool GamePlatformExists(int id)
+    private ActionResult ToCatalogActionResult(CatalogServiceResult result)
     {
-        var userId = GetCurrentUserIdOrDefault(1);
-        return _context.GamePlatforms.Any(e => e.Id == id && e.UserId == userId);
-    }
-
-    private static string? NormalizeLogo(string? logo)
-    {
-        return string.IsNullOrWhiteSpace(logo) ? null : logo.Trim();
-    }
-
-    private static string? ValidatePlatformLogo(string? logo)
-    {
-        var normalized = NormalizeLogo(logo);
-        if (normalized == null)
-        {
-            return null;
-        }
-
-        if (normalized.Length > MaxLogoLength)
-        {
-            return "El logo es demasiado grande";
-        }
-
-        if (IsValidImageUrl(normalized) || IsValidImageDataUrl(normalized))
-        {
-            return null;
-        }
-
-        return "El logo debe ser una URL http(s) o una imagen PNG, JPG, WebP o SVG en data URL";
-    }
-
-    private static bool IsValidImageUrl(string logo)
-    {
-        return Uri.TryCreate(logo, UriKind.Absolute, out var uri)
-            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
-    }
-
-    private static bool IsValidImageDataUrl(string logo)
-    {
-        var allowedPrefixes = new[]
-        {
-            "data:image/png;base64,",
-        "data:image/jpeg;base64,",
-        "data:image/jpg;base64,",
-        "data:image/webp;base64,",
-        "data:image/avif;base64,",
-        "data:image/svg+xml,"
-    };
-
-        return allowedPrefixes.Any(prefix => logo.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (result.Success) return NoContent();
+        if (result.NotFound) return NotFound(new { message = result.Error });
+        if (result.Conflict) return Conflict(new { message = result.Error });
+        if (result.StatusCode == 500) return StatusCode(500, new { message = result.Error });
+        return BadRequest(new { message = result.Error });
     }
 }

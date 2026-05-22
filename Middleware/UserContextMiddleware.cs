@@ -6,11 +6,13 @@ public class UserContextMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<UserContextMiddleware> _logger;
+    private readonly IWebHostEnvironment _environment;
 
-    public UserContextMiddleware(RequestDelegate next, ILogger<UserContextMiddleware> logger)
+    public UserContextMiddleware(RequestDelegate next, ILogger<UserContextMiddleware> logger, IWebHostEnvironment environment)
     {
         _next = next;
         _logger = logger;
+        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -49,8 +51,8 @@ public class UserContextMiddleware
             }
         }
 
-        // Fallback to X-User-Id header (for development/testing)
-        if (!userId.HasValue && context.Request.Headers.TryGetValue("X-User-Id", out var headerUserId))
+        // Fallback to X-User-Id header (development only)
+        if (!userId.HasValue && _environment.IsDevelopment() && context.Request.Headers.TryGetValue("X-User-Id", out var headerUserId))
         {
             if (int.TryParse(headerUserId.FirstOrDefault(), out var parsedUserId))
             {

@@ -45,8 +45,8 @@ public class ErrorHandlingMiddleware
                 response = new ErrorResponse
                 {
                     StatusCode = (int)HttpStatusCode.BadRequest,
-                    Message = "Error al guardar los datos",
-                    Details = "Verifique que los datos sean válidos y no existan duplicados"
+                    Message = "Error saving data",
+                    Details = "Please verify the data is valid and no duplicates exist"
                 };
                 break;
 
@@ -54,7 +54,7 @@ public class ErrorHandlingMiddleware
                 response = new ErrorResponse
                 {
                     StatusCode = (int)HttpStatusCode.BadRequest,
-                    Message = "Datos inválidos",
+                    Message = "Invalid data",
                     Details = argEx.Message
                 };
                 break;
@@ -63,8 +63,8 @@ public class ErrorHandlingMiddleware
                 response = new ErrorResponse
                 {
                     StatusCode = (int)HttpStatusCode.Unauthorized,
-                    Message = "No autorizado",
-                    Details = "No tiene permisos para realizar esta acción"
+                    Message = "Unauthorized",
+                    Details = "You do not have permission to perform this action"
                 };
                 break;
 
@@ -72,8 +72,8 @@ public class ErrorHandlingMiddleware
                 response = new ErrorResponse
                 {
                     StatusCode = (int)HttpStatusCode.NotFound,
-                    Message = "Recurso no encontrado",
-                    Details = "El elemento solicitado no existe"
+                    Message = "Resource not found",
+                    Details = "The requested item does not exist"
                 };
                 break;
 
@@ -81,8 +81,8 @@ public class ErrorHandlingMiddleware
                 response = new ErrorResponse
                 {
                     StatusCode = (int)HttpStatusCode.InternalServerError,
-                    Message = "Error interno del servidor",
-                    Details = "Ha ocurrido un error inesperado. Por favor, intente nuevamente"
+                    Message = "Internal server error",
+                    Details = "An unexpected error occurred. Please try again"
                 };
                 break;
         }
@@ -105,20 +105,20 @@ public class ErrorHandlingMiddleware
             19 when sqliteEx.Message.Contains("FOREIGN KEY constraint failed") => new ErrorResponse
             {
                 StatusCode = (int)HttpStatusCode.BadRequest,
-                Message = "Error de referencia de clave foránea",
-                Details = $"Valor de clave foránea inválido. Verifique que StatusId, PlatformId, PlayWithId y PlayedStatusId tengan valores válidos. Error original: {sqliteEx.Message}"
+                Message = "Foreign key reference error",
+                Details = $"Invalid foreign key value. Verify that StatusId, PlatformId, PlayWithId, and PlayedStatusId have valid values. Original error: {sqliteEx.Message}"
             },
             19 when sqliteEx.Message.Contains("NOT NULL constraint failed") => new ErrorResponse
             {
                 StatusCode = (int)HttpStatusCode.BadRequest,
-                Message = "Campo requerido",
-                Details = "Faltan datos obligatorios para completar la operación"
+                Message = "Required field missing",
+                Details = "Required data is missing to complete the operation"
             },
             _ => new ErrorResponse
             {
                 StatusCode = (int)HttpStatusCode.BadRequest,
-                Message = "Error en la base de datos",
-                Details = "No se pudo completar la operación. Verifique los datos e intente nuevamente"
+                Message = "Database error",
+                Details = "Could not complete the operation. Please verify the data and try again"
             }
         };
     }
@@ -131,14 +131,14 @@ public class ErrorHandlingMiddleware
         return new ErrorResponse
         {
             StatusCode = (int)HttpStatusCode.Conflict,
-            Message = $"Ya existe un elemento con este {friendlyFieldName}",
-            Details = $"El {friendlyFieldName} debe ser único. Por favor, use un {friendlyFieldName} diferente."
+            Message = $"An item with this {friendlyFieldName} already exists",
+            Details = $"The {friendlyFieldName} must be unique. Please use a different {friendlyFieldName}."
         };
     }
 
     private static string ExtractFieldFromUniqueConstraintMessage(string message)
     {
-        // Extraer el campo del mensaje "UNIQUE constraint failed: tabla.campo"
+        // Extract field name from "UNIQUE constraint failed: table.field"
         var parts = message.Split(':');
         if (parts.Length > 1)
         {
@@ -149,18 +149,18 @@ public class ErrorHandlingMiddleware
                 return fieldParts[1];
             }
         }
-        return "campo";
+        return "field";
     }
 
     private static string GetFriendlyFieldName(string field)
     {
         return field.ToLower() switch
         {
-            "name" => "nombre",
+            "name" => "name",
             "email" => "email",
-            "username" => "nombre de usuario",
-            "code" => "código",
-            _ => "valor"
+            "username" => "username",
+            "code" => "code",
+            _ => "value"
         };
     }
 }

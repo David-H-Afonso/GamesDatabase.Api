@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using GamesDatabase.Api.Services;
+using GamesDatabase.Api.Application.Services;
+using GamesDatabase.Api.Application.Interfaces;
 
 namespace GamesDatabase.Api.Controllers;
 

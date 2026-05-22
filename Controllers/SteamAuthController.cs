@@ -1,7 +1,8 @@
 using GamesDatabase.Api.Configuration;
-using GamesDatabase.Api.Data;
-using GamesDatabase.Api.Services;
-using GamesDatabase.Api.Services.Steam;
+using GamesDatabase.Api.Infrastructure.Persistence;
+using GamesDatabase.Api.Application.Services;
+using GamesDatabase.Api.Application.Interfaces;
+using GamesDatabase.Api.Application.Services.Steam;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

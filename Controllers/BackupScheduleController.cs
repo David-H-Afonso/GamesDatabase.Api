@@ -1,9 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using GamesDatabase.Api.Data;
-using GamesDatabase.Api.Models;
-using GamesDatabase.Api.Services;
+using GamesDatabase.Api.Infrastructure.Persistence;
+using GamesDatabase.Api.Domain.Entities;
+using GamesDatabase.Api.Application.Services;
+using GamesDatabase.Api.Application.Interfaces;
 
 namespace GamesDatabase.Api.Controllers;
 

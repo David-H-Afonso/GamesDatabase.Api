@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace GamesDatabase.Api.Migrations
 {
     /// <inheritdoc />
-    [DbContext(typeof(GamesDatabase.Api.Data.GamesDbContext))]
+    [DbContext(typeof(GamesDatabase.Api.Infrastructure.Persistence.GamesDbContext))]
     [Migration("20260212120000_AddShowPriceComparisonIconToUser")]
     public partial class AddShowPriceComparisonIconToUser : Migration
     {
