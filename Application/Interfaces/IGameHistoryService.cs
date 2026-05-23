@@ -14,9 +14,9 @@ public interface IGameHistoryService
     Task RecordDeletedAsync(Game game, int userId);
     Task<PagedResult<GameHistoryEntryDto>> GetGameHistoryAsync(int userId, int gameId, int page, int pageSize);
     Task<PagedResult<GameHistoryEntryDto>> GetAllHistoryAsync(int userId, int page, int pageSize,
-        string? actionType, string? field, int? gameId, DateTime? from, DateTime? to);
+        string? actionType, string? field, int? gameId, DateTime? from, DateTime? to, string? search = null);
     Task<bool> DeleteHistoryEntryAsync(int userId, int gameId, int entryId);
     Task<bool> DeleteAllGameHistoryAsync(int userId, int gameId);
     Task<PagedResult<GameHistoryEntryDto>?> GetAdminHistoryAsync(int currentUserId, int page, int pageSize,
-        int? userId, string? actionType, DateTime? from, DateTime? to);
+        int? userId, string? actionType, DateTime? from, DateTime? to, string? field = null, string? search = null);
 }

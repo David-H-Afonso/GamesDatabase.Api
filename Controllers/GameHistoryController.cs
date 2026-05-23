@@ -37,10 +37,11 @@ public class GameHistoryController : BaseApiController
         [FromQuery] string? field = null,
         [FromQuery] int? gameId = null,
         [FromQuery] DateTime? from = null,
-        [FromQuery] DateTime? to = null)
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? search = null)
     {
         var userId = GetCurrentUserIdOrDefault(1);
-        var result = await _history.GetAllHistoryAsync(userId, page, pageSize, actionType, field, gameId, from, to);
+        var result = await _history.GetAllHistoryAsync(userId, page, pageSize, actionType, field, gameId, from, to, search);
         return Ok(result);
     }
 
@@ -69,10 +70,12 @@ public class GameHistoryController : BaseApiController
         [FromQuery] int? userId = null,
         [FromQuery] string? actionType = null,
         [FromQuery] DateTime? from = null,
-        [FromQuery] DateTime? to = null)
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? field = null,
+        [FromQuery] string? search = null)
     {
         var currentUserId = GetCurrentUserIdOrDefault(1);
-        var result = await _history.GetAdminHistoryAsync(currentUserId, page, pageSize, userId, actionType, from, to);
+        var result = await _history.GetAdminHistoryAsync(currentUserId, page, pageSize, userId, actionType, from, to, field, search);
         if (result == null) return Forbid();
         return Ok(result);
     }

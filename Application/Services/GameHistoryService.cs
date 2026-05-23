@@ -379,12 +379,14 @@ public class GameHistoryService : IGameHistoryService
     }
 
     public async Task<PagedResult<GameHistoryEntryDto>> GetAllHistoryAsync(int userId, int page, int pageSize,
-        string? actionType, string? field, int? gameId, DateTime? from, DateTime? to)
+        string? actionType, string? field, int? gameId, DateTime? from, DateTime? to, string? search = null)
     {
         var query = _context.GameHistoryEntries
             .Where(e => e.UserId == userId)
             .AsQueryable();
 
+        if (!string.IsNullOrEmpty(search))
+            query = query.Where(e => e.GameName.Contains(search) || e.Field.Contains(search) || e.Description.Contains(search));
         if (!string.IsNullOrEmpty(actionType))
             query = query.Where(e => e.ActionType == actionType);
         if (!string.IsNullOrEmpty(field))
@@ -434,7 +436,7 @@ public class GameHistoryService : IGameHistoryService
     }
 
     public async Task<PagedResult<GameHistoryEntryDto>?> GetAdminHistoryAsync(int currentUserId, int page, int pageSize,
-        int? userId, string? actionType, DateTime? from, DateTime? to)
+        int? userId, string? actionType, DateTime? from, DateTime? to, string? field = null, string? search = null)
     {
         var currentUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == currentUserId);
         if (currentUser?.Role != UserRole.Admin) return null;
@@ -443,8 +445,12 @@ public class GameHistoryService : IGameHistoryService
 
         if (userId.HasValue)
             query = query.Where(e => e.UserId == userId.Value);
+        if (!string.IsNullOrEmpty(search))
+            query = query.Where(e => e.GameName.Contains(search) || e.Field.Contains(search) || e.Description.Contains(search));
         if (!string.IsNullOrEmpty(actionType))
             query = query.Where(e => e.ActionType == actionType);
+        if (!string.IsNullOrEmpty(field))
+            query = query.Where(e => e.Field == field);
         if (from.HasValue)
             query = query.Where(e => e.ChangedAt >= from.Value);
         if (to.HasValue)
