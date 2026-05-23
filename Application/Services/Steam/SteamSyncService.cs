@@ -64,7 +64,9 @@ public class SteamSyncService : ISteamSyncService
         {
             if (game.SteamAppId == null) continue;
 
-            await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
+            // Only update critic score if not already set (preserve user modifications)
+            if (game.Critic == null)
+                await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
 
             // Update playtime from bulk call
             if (playtimeMap.TryGetValue(game.SteamAppId.Value, out var steamGame))
@@ -421,7 +423,9 @@ public class SteamSyncService : ISteamSyncService
         if (user.SteamId == null || game.SteamAppId == null)
             return new SteamSyncResult { Success = false };
 
-        await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
+        // Only update critic score if not already set (preserve user modifications)
+        if (game.Critic == null)
+            await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
 
         // Get owned games for playtime
         var ownedGames = await _steamApi.GetOwnedGamesAsync(user.SteamId);

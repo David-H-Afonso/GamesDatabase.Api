@@ -399,6 +399,7 @@ public class SteamProfileService : ISteamProfileService
             }
 
             var updated = false;
+            // Only set Started if not already provided by the user
             if (string.IsNullOrWhiteSpace(game.Started) && IsValidDateValue(suggestion.Started))
             {
                 game.Started = suggestion.Started;
@@ -407,6 +408,7 @@ public class SteamProfileService : ISteamProfileService
 
             if (string.IsNullOrWhiteSpace(game.Finished) && IsValidDateValue(suggestion.Finished))
             {
+                // Finished is empty — safe to fill from Steam
                 game.Finished = suggestion.Finished;
                 game.SteamFinishedSource = "steam";
                 game.SteamFinishedLastValue = suggestion.Finished;
@@ -415,16 +417,19 @@ public class SteamProfileService : ISteamProfileService
                     game.SteamFinishedRejectedValue = null;
                 updated = true;
             }
-            else if (IsValidDateValue(suggestion.Finished) && game.Finished != suggestion.Finished)
+            else if (IsValidDateValue(suggestion.Finished)
+                     && game.Finished != suggestion.Finished
+                     && game.SteamFinishedSource == "steam")
             {
+                // Finished was previously set by Steam — update it (still steam-managed)
                 game.Finished = suggestion.Finished;
-                game.SteamFinishedSource = "steam";
                 game.SteamFinishedLastValue = suggestion.Finished;
                 game.SteamFinishedSyncedAt = DateTime.UtcNow;
                 if (game.SteamFinishedRejectedValue == suggestion.Finished)
                     game.SteamFinishedRejectedValue = null;
                 updated = true;
             }
+            // else: game.Finished was set manually by the user — do not overwrite
 
             if (updated)
             {
