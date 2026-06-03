@@ -386,7 +386,7 @@ public class GameHistoryService : IGameHistoryService
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(e => e.GameName.Contains(search) || e.Field.Contains(search) || e.Description.Contains(search));
+            query = ApplySearch(query, search);
         if (!string.IsNullOrEmpty(actionType))
             query = query.Where(e => e.ActionType == actionType);
         if (!string.IsNullOrEmpty(field))
@@ -446,7 +446,7 @@ public class GameHistoryService : IGameHistoryService
         if (userId.HasValue)
             query = query.Where(e => e.UserId == userId.Value);
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(e => e.GameName.Contains(search) || e.Field.Contains(search) || e.Description.Contains(search));
+            query = ApplySearch(query, search);
         if (!string.IsNullOrEmpty(actionType))
             query = query.Where(e => e.ActionType == actionType);
         if (!string.IsNullOrEmpty(field))
@@ -468,5 +468,27 @@ public class GameHistoryService : IGameHistoryService
             Page = page,
             PageSize = pageSize
         };
+    }
+
+    private static IQueryable<GameHistoryEntry> ApplySearch(IQueryable<GameHistoryEntry> query, string search)
+    {
+        var term = search.Trim();
+        if (term.Length == 0) return query;
+        var pattern = $"%{term}%";
+        var lowered = term.ToLowerInvariant();
+        var searchCreated = lowered.Contains("created") || lowered.Contains("creado");
+        var searchUpdated = lowered.Contains("updated") || lowered.Contains("actualizado");
+        var searchDeleted = lowered.Contains("deleted") || lowered.Contains("eliminado");
+
+        return query.Where(e =>
+            EF.Functions.Like(EF.Functions.Collate(e.GameName, "NOCASE"), pattern) ||
+            EF.Functions.Like(EF.Functions.Collate(e.Field, "NOCASE"), pattern) ||
+            EF.Functions.Like(EF.Functions.Collate(e.ActionType, "NOCASE"), pattern) ||
+            (searchCreated && e.ActionType == "Created") ||
+            (searchUpdated && e.ActionType == "Updated") ||
+            (searchDeleted && e.ActionType == "Deleted") ||
+            EF.Functions.Like(EF.Functions.Collate(e.Description, "NOCASE"), pattern) ||
+            (e.OldValue != null && EF.Functions.Like(EF.Functions.Collate(e.OldValue, "NOCASE"), pattern)) ||
+            (e.NewValue != null && EF.Functions.Like(EF.Functions.Collate(e.NewValue, "NOCASE"), pattern)));
     }
 }
