@@ -28,6 +28,7 @@ public class DatabaseStartupHelper
         EnsureColumn(conn, logger, "game", "steam_finished_last_value", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "steam_finished_synced_at", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "steam_finished_rejected_value", "TEXT NULL");
+        EnsureColumn(conn, logger, "game", "steam_started_rejected_value", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "IsManuallyCompleted", "INTEGER NOT NULL DEFAULT 0");
 
         ExecuteRepairSql(conn, logger, """

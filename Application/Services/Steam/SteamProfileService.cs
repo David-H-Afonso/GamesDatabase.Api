@@ -353,8 +353,12 @@ public class SteamProfileService : ISteamProfileService
             {
                 if (firstAchievementUnlocks.TryGetValue(appId, out var firstUnlock) && firstUnlock.HasValue)
                 {
-                    proposedStarted = firstUnlock.Value.ToString("yyyy-MM-dd");
-                    startedSource = "firstAchievement";
+                    var firstUnlockValue = firstUnlock.Value.ToString("yyyy-MM-dd");
+                    if (game.SteamStartedRejectedValue != firstUnlockValue)
+                    {
+                        proposedStarted = firstUnlockValue;
+                        startedSource = "firstAchievement";
+                    }
                 }
                 else
                 {
@@ -420,6 +424,8 @@ public class SteamProfileService : ISteamProfileService
             if (string.IsNullOrWhiteSpace(game.Started) && IsValidDateValue(suggestion.Started))
             {
                 game.Started = suggestion.Started;
+                if (game.SteamStartedRejectedValue == suggestion.Started)
+                    game.SteamStartedRejectedValue = null;
                 updated = true;
             }
 
@@ -464,7 +470,7 @@ public class SteamProfileService : ISteamProfileService
     public async Task<(int Dismissed, string? Error)> DismissDateSuggestionsAsync(int userId, SteamDismissDateSuggestionsRequest request)
     {
         var requested = request.Suggestions
-            .Where(s => s.GameId > 0 && IsValidDateValue(s.Finished))
+            .Where(s => s.GameId > 0 && (IsValidDateValue(s.Started) || IsValidDateValue(s.Finished)))
             .GroupBy(s => s.GameId)
             .Select(g => g.First())
             .ToList();
@@ -481,9 +487,19 @@ public class SteamProfileService : ISteamProfileService
         foreach (var suggestion in requested)
         {
             if (!games.TryGetValue(suggestion.GameId, out var game)) continue;
-            if (game.SteamFinishedRejectedValue == suggestion.Finished) continue;
-            game.SteamFinishedRejectedValue = suggestion.Finished;
-            dismissed++;
+
+            var changed = false;
+            if (IsValidDateValue(suggestion.Started) && game.SteamStartedRejectedValue != suggestion.Started)
+            {
+                game.SteamStartedRejectedValue = suggestion.Started;
+                changed = true;
+            }
+            if (IsValidDateValue(suggestion.Finished) && game.SteamFinishedRejectedValue != suggestion.Finished)
+            {
+                game.SteamFinishedRejectedValue = suggestion.Finished;
+                changed = true;
+            }
+            if (changed) dismissed++;
         }
 
         if (dismissed > 0)

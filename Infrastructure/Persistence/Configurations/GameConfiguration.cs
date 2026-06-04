@@ -36,6 +36,7 @@ public class GameConfiguration : IEntityTypeConfiguration<Game>
         entity.Property(e => e.SteamFinishedLastValue).HasColumnName("steam_finished_last_value");
         entity.Property(e => e.SteamFinishedSyncedAt).HasColumnName("steam_finished_synced_at");
         entity.Property(e => e.SteamFinishedRejectedValue).HasColumnName("steam_finished_rejected_value");
+        entity.Property(e => e.SteamStartedRejectedValue).HasColumnName("steam_started_rejected_value");
         entity.Property(e => e.ManualPlaytimeMinutes).HasColumnName("manual_playtime_minutes");
         entity.Property(e => e.IsManuallyCompleted).HasColumnName("IsManuallyCompleted");
         entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);

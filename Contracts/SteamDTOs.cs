@@ -480,6 +480,7 @@ public class SteamDismissDateSuggestionsRequest
 public class SteamDismissDateSuggestionItem
 {
     public int GameId { get; set; }
+    public string? Started { get; set; }
     public string? Finished { get; set; }
 }
 

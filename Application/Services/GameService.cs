@@ -464,6 +464,7 @@ public class GameService : IGameService
                 game.SteamFinishedLastValue = null;
                 game.SteamFinishedSyncedAt = null;
                 game.SteamFinishedRejectedValue = null;
+                game.SteamStartedRejectedValue = null;
             }
         }
 

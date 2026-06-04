@@ -37,6 +37,7 @@ public static class MappingExtensions
             SteamFinishedLastValue = game.SteamFinishedLastValue,
             SteamFinishedSyncedAt = game.SteamFinishedSyncedAt,
             SteamFinishedRejectedValue = game.SteamFinishedRejectedValue,
+            SteamStartedRejectedValue = game.SteamStartedRejectedValue,
             ManualPlaytimeMinutes = game.ManualPlaytimeMinutes,
             IsManuallyCompleted = game.IsManuallyCompleted,
             CreatedAt = game.CreatedAt,

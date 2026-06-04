@@ -36,6 +36,7 @@ public class GameDto
     public string? SteamFinishedLastValue { get; set; }
     public DateTime? SteamFinishedSyncedAt { get; set; }
     public string? SteamFinishedRejectedValue { get; set; }
+    public string? SteamStartedRejectedValue { get; set; }
     public int? ManualPlaytimeMinutes { get; set; }
 
     // Manual 100% completion

@@ -50,6 +50,7 @@ public class Game
     public string? SteamFinishedLastValue { get; set; }
     public DateTime? SteamFinishedSyncedAt { get; set; }
     public string? SteamFinishedRejectedValue { get; set; }
+    public string? SteamStartedRejectedValue { get; set; }
 
     // Manual playtime override in minutes. When present, it takes priority over Steam time.
     public int? ManualPlaytimeMinutes { get; set; }
