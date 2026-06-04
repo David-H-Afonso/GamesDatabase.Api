@@ -308,13 +308,31 @@ public class SteamProfileService : ISteamProfileService
         var ownedGames = (await GetCachedOwnedGamesAsync(user.SteamId))
             .ToDictionary(g => g.AppId, g => g);
 
+        var appIds = games.Select(g => g.SteamAppId!.Value).Distinct().ToList();
+        var cachedAppDetails = await _context.SteamAppCaches
+            .AsNoTracking()
+            .Where(a => appIds.Contains(a.AppId))
+            .ToDictionaryAsync(a => a.AppId, a => a);
+
+        var firstAchievementUnlocks = includeStarted
+            ? await _context.SteamAchievements
+                .AsNoTracking()
+                .Where(a => a.UserId == userId
+                    && appIds.Contains(a.SteamAppId)
+                    && a.Achieved
+                    && a.UnlockTime.HasValue)
+                .GroupBy(a => a.SteamAppId)
+                .Select(g => new { AppId = g.Key, UnlockTime = g.Min(a => a.UnlockTime) })
+                .ToDictionaryAsync(a => a.AppId, a => a.UnlockTime)
+            : [];
+
         var suggestions = new List<SteamDateSuggestionDto>();
 
         foreach (var game in games)
         {
             var appId = game.SteamAppId!.Value;
             ownedGames.TryGetValue(appId, out var ownedGame);
-            var appDetails = ownedGame == null ? await _steamStore.GetOrCacheAppDetailsAsync(appId) : null;
+            cachedAppDetails.TryGetValue(appId, out var appDetails);
 
             var notes = new List<string>();
             var proposedFinished = ownedGame?.LastPlayedAt?.ToString("yyyy-MM-dd");
@@ -333,8 +351,7 @@ public class SteamProfileService : ISteamProfileService
             var startedSource = "none";
             if (includeStarted && string.IsNullOrWhiteSpace(game.Started))
             {
-                var firstUnlock = await GetFirstAchievementUnlockAsync(userId, user.SteamId, appId);
-                if (firstUnlock.HasValue)
+                if (firstAchievementUnlocks.TryGetValue(appId, out var firstUnlock) && firstUnlock.HasValue)
                 {
                     proposedStarted = firstUnlock.Value.ToString("yyyy-MM-dd");
                     startedSource = "firstAchievement";
@@ -576,44 +593,6 @@ public class SteamProfileService : ISteamProfileService
             .Select(c => char.IsLetterOrDigit(c) ? c : ' ')
             .ToArray();
         return Regex.Replace(new string(chars), @"\s+", " ").Trim();
-    }
-
-    private async Task<DateTime?> GetFirstAchievementUnlockAsync(int userId, string steamId, int appId)
-    {
-        var cacheKey = $"steam:first-achievement:{userId}:{appId}";
-        if (_cache.TryGetValue<DateTime?>(cacheKey, out var cachedUnlock))
-            return cachedUnlock;
-
-        var cached = await _context.SteamAchievements
-            .Where(a => a.UserId == userId && a.SteamAppId == appId && a.Achieved && a.UnlockTime.HasValue)
-            .OrderBy(a => a.UnlockTime)
-            .Select(a => a.UnlockTime)
-            .FirstOrDefaultAsync();
-
-        if (cached.HasValue)
-        {
-            _cache.Set(cacheKey, cached.Value, TimeSpan.FromHours(12));
-            return cached.Value;
-        }
-
-        var achievements = await _steamApi.GetPlayerAchievementsAsync(steamId, appId);
-        if (!achievements.Success)
-        {
-            _cache.Set<DateTime?>(cacheKey, null, TimeSpan.FromHours(2));
-            return null;
-        }
-
-        var firstUnlockUnix = achievements.Achievements
-            .Where(a => a.Achieved == 1 && a.UnlockTime > 0)
-            .Select(a => a.UnlockTime)
-            .DefaultIfEmpty(0)
-            .Min();
-
-        DateTime? firstUnlock = firstUnlockUnix > 0
-            ? DateTimeOffset.FromUnixTimeSeconds(firstUnlockUnix).UtcDateTime
-            : null;
-        _cache.Set(cacheKey, firstUnlock, firstUnlock.HasValue ? TimeSpan.FromHours(12) : TimeSpan.FromHours(2));
-        return firstUnlock;
     }
 
     private Task<List<SteamOwnedGameDto>> GetCachedOwnedGamesAsync(string steamId) =>
