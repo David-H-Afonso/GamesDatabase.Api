@@ -691,6 +691,14 @@ await fetch("/api/dataexport/full", {
 - All imported data is assigned to the current user
 - Special statuses (Playing, Not Fulfilled) are matched by `StatusType` + `IsDefault`, not by name
 
+#### Data cleanup and duplicate analysis
+
+- `GET /api/dataexport/analyze-folders` (Admin): compares the user's game image folders with games in the database. Response includes orphan folders, games missing folders, and database duplicate candidates.
+- `DELETE /api/dataexport/orphan-folder` (Admin): deletes an orphan folder by `{ "folderName": "..." }`. The server validates the folder is inside the current user's `Games` image directory and removes contents recursively.
+- `GET /api/dataexport/analyze-duplicate-games`: returns exact and fuzzy duplicate game candidates. Fuzzy matches catch one-character typos/transpositions such as `Beholder` vs `Beholderr` or `Final Fantasy` vs `Finla Fantasy`, while common sequel/version tokens are ignored where possible.
+- `POST /api/dataexport/duplicate-games/dismiss`: persists a false-positive dismissal by game IDs, e.g. `{ "gameIds": [12, 45] }`.
+- `DELETE /api/dataexport/duplicate-games/{id}`: deletes the selected duplicate game using the normal game delete flow.
+
 #### Legacy Data Import
 
 The API automatically handles **legacy CSV exports** (from single-user version):

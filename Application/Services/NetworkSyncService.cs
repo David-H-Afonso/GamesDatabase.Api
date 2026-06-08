@@ -24,6 +24,12 @@ public class NetworkSyncService : INetworkSyncService
     private readonly Dictionary<string, bool> _cdnHealthCache = new();
     private readonly TimeSpan _cdnHealthCacheDuration = TimeSpan.FromMinutes(5);
     private DateTime _cdnHealthCacheExpiry = DateTime.MinValue;
+    private static readonly HashSet<string> EditionTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "anniversary", "complete", "cut", "definitive", "deluxe", "director", "edition",
+        "enhanced", "final", "goty", "hd", "remake", "remaster", "remastered",
+        "redux", "special", "ultimate"
+    };
 
     public NetworkSyncService(
         IHttpClientFactory httpClientFactory,
@@ -1143,69 +1149,34 @@ public class NetworkSyncService : INetworkSyncService
             // Load all games once — used for both filesystem analysis and DB duplicate detection.
             var games = await _context.Games
                 .Where(g => g.UserId == userId)
-                .Select(g => new
+                .Select(g => new DuplicateCandidateGame
                 {
-                    g.Id,
-                    g.Name,
+                    Id = g.Id,
+                    Name = g.Name,
                     StatusName = g.Status.Name,
                     PlatformName = g.Platform != null ? g.Platform.Name : null,
                     PlayedStatusName = g.PlayedStatus != null ? g.PlayedStatus.Name : null,
-                    g.Released,
-                    g.Started,
-                    g.Finished,
-                    g.Grade,
-                    g.Critic,
-                    g.Score,
-                    g.Story,
-                    g.Completion,
-                    g.Logo,
-                    g.Cover,
-                    g.SteamAppId,
-                    g.SteamPlaytimeForever,
-                    g.CreatedAt,
-                    g.UpdatedAt
+                    Released = g.Released,
+                    Started = g.Started,
+                    Finished = g.Finished,
+                    Grade = g.Grade,
+                    Critic = g.Critic,
+                    Score = g.Score,
+                    Story = g.Story,
+                    Completion = g.Completion,
+                    Logo = g.Logo,
+                    Cover = g.Cover,
+                    SteamAppId = g.SteamAppId,
+                    SteamPlaytimeForever = g.SteamPlaytimeForever,
+                    CreatedAt = g.CreatedAt,
+                    UpdatedAt = g.UpdatedAt
                 })
                 .ToListAsync();
 
             result.TotalGamesInDatabase = games.Count;
 
             // ── DB duplicate detection (always run, regardless of filesystem) ───────
-            var dbDuplicates = new DatabaseDuplicatesResult { TotalGamesInDatabase = games.Count };
-            var dbGroups = games
-                .GroupBy(g => GetNormalizedWordSet(g.Name))
-                .Where(g => g.Count() > 1)
-                .ToList();
-            foreach (var group in dbGroups)
-            {
-                dbDuplicates.DuplicateGroups.Add(new DatabaseDuplicateGroup
-                {
-                    NormalizedKey = group.Key,
-                    Games = group.Select(g => new DatabaseDuplicateEntry
-                    {
-                        Id = g.Id,
-                        Name = g.Name,
-                        StatusName = g.StatusName,
-                        PlatformName = g.PlatformName,
-                        PlayedStatusName = g.PlayedStatusName,
-                        Released = g.Released,
-                        Started = g.Started,
-                        Finished = g.Finished,
-                        Grade = g.Grade,
-                        Critic = g.Critic,
-                        Score = g.Score,
-                        Story = g.Story,
-                        Completion = g.Completion,
-                        Logo = g.Logo,
-                        Cover = g.Cover,
-                        SteamAppId = g.SteamAppId,
-                        SteamPlaytimeForever = g.SteamPlaytimeForever,
-                        CreatedAt = g.CreatedAt,
-                        UpdatedAt = g.UpdatedAt
-                    }).ToList(),
-                    Reason = "Games share the same words in their title (case-insensitive, punctuation ignored)"
-                });
-            }
-            result.DatabaseDuplicates = dbDuplicates;
+            result.DatabaseDuplicates = await BuildDatabaseDuplicatesAsync(userId, games);
 
             // Get user's games path
             var userPath = Path.Combine(_syncOptions.NetworkPath!, userId.ToString(), "Games");
@@ -1305,76 +1276,329 @@ public class NetworkSyncService : INetworkSyncService
 
     public async Task<DatabaseDuplicatesResult> AnalyzeDatabaseDuplicatesAsync(int userId)
     {
-        var result = new DatabaseDuplicatesResult();
-
         var games = await _context.Games
             .Where(g => g.UserId == userId)
-            .Select(g => new
+            .Select(g => new DuplicateCandidateGame
             {
-                g.Id,
-                g.Name,
+                Id = g.Id,
+                Name = g.Name,
                 StatusName = g.Status.Name,
                 PlatformName = g.Platform != null ? g.Platform.Name : null,
                 PlayedStatusName = g.PlayedStatus != null ? g.PlayedStatus.Name : null,
-                g.Released,
-                g.Started,
-                g.Finished,
-                g.Grade,
-                g.Critic,
-                g.Score,
-                g.Story,
-                g.Completion,
-                g.Logo,
-                g.Cover,
-                g.SteamAppId,
-                g.SteamPlaytimeForever,
-                g.CreatedAt,
-                g.UpdatedAt
+                Released = g.Released,
+                Started = g.Started,
+                Finished = g.Finished,
+                Grade = g.Grade,
+                Critic = g.Critic,
+                Score = g.Score,
+                Story = g.Story,
+                Completion = g.Completion,
+                Logo = g.Logo,
+                Cover = g.Cover,
+                SteamAppId = g.SteamAppId,
+                SteamPlaytimeForever = g.SteamPlaytimeForever,
+                CreatedAt = g.CreatedAt,
+                UpdatedAt = g.UpdatedAt
             })
             .ToListAsync();
+        return await BuildDatabaseDuplicatesAsync(userId, games);
+    }
 
-        result.TotalGamesInDatabase = games.Count;
+    public async Task<int> DismissDuplicateGamesAsync(int userId, IReadOnlyCollection<int> gameIds)
+    {
+        var distinctIds = gameIds
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
 
-        // Group by word-set equality: games whose names consist of the same set of
-        // significant words are considered duplicate candidates.
-        // E.g. "God of War" == "god of war" but "Hollow Knight" != "Hollow Knight: Silksong"
-        var duplicateGroups = games
-            .GroupBy(g => GetNormalizedWordSet(g.Name))
-            .Where(g => g.Count() > 1)
-            .ToList();
+        if (distinctIds.Length < 2)
+            return 0;
 
-        foreach (var group in duplicateGroups)
+        var validIds = await _context.Games
+            .Where(g => g.UserId == userId && distinctIds.Contains(g.Id))
+            .Select(g => g.Id)
+            .ToListAsync();
+
+        if (validIds.Count < 2)
+            return 0;
+
+        var validSet = validIds.ToHashSet();
+        var pairs = BuildPairs(validSet.OrderBy(id => id).ToArray());
+        var existingPairs = (await _context.DuplicateGameDismissals
+            .Where(d => d.UserId == userId)
+            .Select(d => new { d.GameIdA, d.GameIdB })
+            .ToListAsync())
+            .Select(d => $"{d.GameIdA}:{d.GameIdB}")
+            .ToHashSet();
+
+        var created = 0;
+        foreach (var pair in pairs)
         {
+            if (existingPairs.Contains($"{pair.A}:{pair.B}"))
+                continue;
+
+            _context.DuplicateGameDismissals.Add(new DuplicateGameDismissal
+            {
+                UserId = userId,
+                GameIdA = pair.A,
+                GameIdB = pair.B,
+                CreatedAt = DateTime.UtcNow
+            });
+            created++;
+        }
+
+        if (created > 0)
+            await _context.SaveChangesAsync();
+
+        return created;
+    }
+
+    private async Task<DatabaseDuplicatesResult> BuildDatabaseDuplicatesAsync(int userId, List<DuplicateCandidateGame> games)
+    {
+        var result = new DatabaseDuplicatesResult { TotalGamesInDatabase = games.Count };
+        if (games.Count < 2)
+            return result;
+
+        var dismissedPairs = await GetDismissedDuplicatePairsAsync(userId);
+        var edges = new List<DuplicateEdge>();
+
+        for (var i = 0; i < games.Count - 1; i++)
+        {
+            for (var j = i + 1; j < games.Count; j++)
+            {
+                var pair = NormalizePair(games[i].Id, games[j].Id);
+                if (dismissedPairs.Contains($"{pair.A}:{pair.B}"))
+                    continue;
+
+                var edge = TryBuildDuplicateEdge(games[i], games[j]);
+                if (edge != null)
+                    edges.Add(edge);
+            }
+        }
+
+        if (edges.Count == 0)
+            return result;
+
+        var parent = games.ToDictionary(g => g.Id, g => g.Id);
+        foreach (var edge in edges)
+        {
+            Union(parent, edge.GameIdA, edge.GameIdB);
+        }
+
+        var edgesByRoot = edges
+            .GroupBy(edge => Find(parent, edge.GameIdA))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var gamesByRoot = games
+            .Where(g => edges.Any(edge => edge.GameIdA == g.Id || edge.GameIdB == g.Id))
+            .GroupBy(g => Find(parent, g.Id))
+            .Where(g => g.Count() > 1)
+            .OrderBy(g => g.Min(game => game.Name));
+
+        foreach (var group in gamesByRoot)
+        {
+            var groupEdges = edgesByRoot[group.Key];
+            var hasFuzzy = groupEdges.Any(edge => edge.MatchType == "fuzzy");
+            var minConfidence = groupEdges.Min(edge => edge.Confidence);
+
             result.DuplicateGroups.Add(new DatabaseDuplicateGroup
             {
-                NormalizedKey = group.Key,
-                Games = group.Select(g => new DatabaseDuplicateEntry
-                {
-                    Id = g.Id,
-                    Name = g.Name,
-                    StatusName = g.StatusName,
-                    PlatformName = g.PlatformName,
-                    PlayedStatusName = g.PlayedStatusName,
-                    Released = g.Released,
-                    Started = g.Started,
-                    Finished = g.Finished,
-                    Grade = g.Grade,
-                    Critic = g.Critic,
-                    Score = g.Score,
-                    Story = g.Story,
-                    Completion = g.Completion,
-                    Logo = g.Logo,
-                    Cover = g.Cover,
-                    SteamAppId = g.SteamAppId,
-                    SteamPlaytimeForever = g.SteamPlaytimeForever,
-                    CreatedAt = g.CreatedAt,
-                    UpdatedAt = g.UpdatedAt
-                }).ToList(),
-                Reason = "Games share the same words in their title (case-insensitive, punctuation ignored)"
+                NormalizedKey = string.Join("|", group.Select(g => g.Id).OrderBy(id => id)),
+                Games = group.OrderBy(g => g.Name).Select(ToDuplicateEntry).ToList(),
+                MatchType = hasFuzzy ? "fuzzy" : "exact",
+                Confidence = minConfidence,
+                Reason = hasFuzzy
+                    ? "Nombres muy parecidos: posible typo o variante mínima. Puedes descartarlo si es un falso positivo."
+                    : "Games share the same words in their title (case-insensitive, punctuation ignored)"
             });
         }
 
         return result;
+    }
+
+    private async Task<HashSet<string>> GetDismissedDuplicatePairsAsync(int userId) =>
+        (await _context.DuplicateGameDismissals
+            .Where(d => d.UserId == userId)
+            .Select(d => new { d.GameIdA, d.GameIdB })
+            .ToListAsync())
+        .Select(pair => $"{pair.GameIdA}:{pair.GameIdB}")
+        .ToHashSet();
+
+    private static DuplicateEdge? TryBuildDuplicateEdge(DuplicateCandidateGame a, DuplicateCandidateGame b)
+    {
+        var aWords = GetNormalizedWords(a.Name);
+        var bWords = GetNormalizedWords(b.Name);
+        if (aWords.Length == 0 || bWords.Length == 0)
+            return null;
+
+        var aWordSet = string.Join("|", aWords.OrderBy(w => w));
+        var bWordSet = string.Join("|", bWords.OrderBy(w => w));
+        if (aWordSet == bWordSet)
+        {
+            return new DuplicateEdge(a.Id, b.Id, "exact", 100);
+        }
+
+        if (IsLikelyEditionOrSequelDifference(aWords, bWords))
+            return null;
+
+        var compactA = string.Concat(aWords);
+        var compactB = string.Concat(bWords);
+        var maxLength = Math.Max(compactA.Length, compactB.Length);
+        if (maxLength < 5)
+            return null;
+
+        if (DamerauLevenshteinDistance(compactA, compactB, 1) <= 1)
+            return new DuplicateEdge(a.Id, b.Id, "fuzzy", 92);
+
+        if (aWords.Length == bWords.Length)
+        {
+            var differentWords = aWords.Zip(bWords)
+                .Where(pair => pair.First != pair.Second)
+                .ToList();
+            if (differentWords.Count == 1 && DamerauLevenshteinDistance(differentWords[0].First, differentWords[0].Second, 1) <= 1)
+                return new DuplicateEdge(a.Id, b.Id, "fuzzy", 90);
+        }
+
+        if (Math.Abs(aWords.Length - bWords.Length) == 1)
+        {
+            var longer = aWords.Length > bWords.Length ? aWords : bWords;
+            var shorter = aWords.Length > bWords.Length ? bWords : aWords;
+            var extra = longer.Except(shorter).ToArray();
+            if (extra.Length == 1 && extra[0].Length <= 2 && !IsVersionToken(extra[0]) && DamerauLevenshteinDistance(compactA, compactB, 1) <= 1)
+                return new DuplicateEdge(a.Id, b.Id, "fuzzy", 86);
+        }
+
+        return null;
+    }
+
+    private static bool IsLikelyEditionOrSequelDifference(string[] aWords, string[] bWords)
+    {
+        if (aWords.Length == bWords.Length)
+        {
+            var differentWords = aWords.Zip(bWords)
+                .Where(pair => pair.First != pair.Second)
+                .ToList();
+            return differentWords.Count == 1 &&
+                IsVersionToken(differentWords[0].First) &&
+                IsVersionToken(differentWords[0].Second);
+        }
+
+        var longer = aWords.Length > bWords.Length ? aWords : bWords;
+        var shorter = aWords.Length > bWords.Length ? bWords : aWords;
+        var remaining = longer.ToList();
+        foreach (var word in shorter)
+            remaining.Remove(word);
+
+        return remaining.Count > 0 && remaining.All(word => IsVersionToken(word) || IsEditionToken(word));
+    }
+
+    private static bool IsVersionToken(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        return value.All(char.IsDigit) ||
+            System.Text.RegularExpressions.Regex.IsMatch(value, @"^[ivxlcdm]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsEditionToken(string value)
+        => EditionTokens.Contains(value);
+
+    private static string[] GetNormalizedWords(string name) =>
+        System.Text.RegularExpressions.Regex
+            .Matches(name.Normalize(NormalizationForm.FormD).ToLowerInvariant(), @"[a-z0-9]+")
+            .Select(m => m.Value)
+            .Where(word => !string.IsNullOrWhiteSpace(word))
+            .ToArray();
+
+    private static int DamerauLevenshteinDistance(string source, string target, int maxDistance)
+    {
+        if (Math.Abs(source.Length - target.Length) > maxDistance)
+            return maxDistance + 1;
+
+        var previous = new int[target.Length + 1];
+        var current = new int[target.Length + 1];
+        var beforePrevious = new int[target.Length + 1];
+
+        for (var j = 0; j <= target.Length; j++)
+            previous[j] = j;
+
+        for (var i = 1; i <= source.Length; i++)
+        {
+            current[0] = i;
+            var rowMin = current[0];
+
+            for (var j = 1; j <= target.Length; j++)
+            {
+                var cost = source[i - 1] == target[j - 1] ? 0 : 1;
+                current[j] = Math.Min(
+                    Math.Min(current[j - 1] + 1, previous[j] + 1),
+                    previous[j - 1] + cost);
+
+                if (i > 1 && j > 1 && source[i - 1] == target[j - 2] && source[i - 2] == target[j - 1])
+                    current[j] = Math.Min(current[j], beforePrevious[j - 2] + 1);
+
+                rowMin = Math.Min(rowMin, current[j]);
+            }
+
+            if (rowMin > maxDistance)
+                return maxDistance + 1;
+
+            (beforePrevious, previous, current) = (previous, current, beforePrevious);
+        }
+
+        return previous[target.Length];
+    }
+
+    private static DatabaseDuplicateEntry ToDuplicateEntry(DuplicateCandidateGame game) => new()
+    {
+        Id = game.Id,
+        Name = game.Name,
+        StatusName = game.StatusName,
+        PlatformName = game.PlatformName,
+        PlayedStatusName = game.PlayedStatusName,
+        Released = game.Released,
+        Started = game.Started,
+        Finished = game.Finished,
+        Grade = game.Grade,
+        Critic = game.Critic,
+        Score = game.Score,
+        Story = game.Story,
+        Completion = game.Completion,
+        Logo = game.Logo,
+        Cover = game.Cover,
+        SteamAppId = game.SteamAppId,
+        SteamPlaytimeForever = game.SteamPlaytimeForever,
+        CreatedAt = game.CreatedAt,
+        UpdatedAt = game.UpdatedAt
+    };
+
+    private static List<(int A, int B)> BuildPairs(IReadOnlyList<int> ids)
+    {
+        var pairs = new List<(int A, int B)>();
+        for (var i = 0; i < ids.Count - 1; i++)
+        {
+            for (var j = i + 1; j < ids.Count; j++)
+                pairs.Add(NormalizePair(ids[i], ids[j]));
+        }
+        return pairs;
+    }
+
+    private static (int A, int B) NormalizePair(int a, int b) => a < b ? (a, b) : (b, a);
+
+    private static int Find(Dictionary<int, int> parent, int value)
+    {
+        if (parent[value] != value)
+            parent[value] = Find(parent, parent[value]);
+        return parent[value];
+    }
+
+    private static void Union(Dictionary<int, int> parent, int a, int b)
+    {
+        var rootA = Find(parent, a);
+        var rootB = Find(parent, b);
+        if (rootA != rootB)
+            parent[rootB] = rootA;
     }
 
     private static string NormalizeFolderName(string folderName)
@@ -1402,4 +1626,29 @@ public class NetworkSyncService : INetworkSyncService
             .ToArray();
         return string.Join("|", words);
     }
+
+    private sealed class DuplicateCandidateGame
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string? StatusName { get; set; }
+        public string? PlatformName { get; set; }
+        public string? PlayedStatusName { get; set; }
+        public string? Released { get; set; }
+        public string? Started { get; set; }
+        public string? Finished { get; set; }
+        public int? Grade { get; set; }
+        public int? Critic { get; set; }
+        public decimal? Score { get; set; }
+        public int? Story { get; set; }
+        public int? Completion { get; set; }
+        public string? Logo { get; set; }
+        public string? Cover { get; set; }
+        public int? SteamAppId { get; set; }
+        public int? SteamPlaytimeForever { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+    }
+
+    private sealed record DuplicateEdge(int GameIdA, int GameIdB, string MatchType, int Confidence);
 }

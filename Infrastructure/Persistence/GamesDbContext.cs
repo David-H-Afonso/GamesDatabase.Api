@@ -117,6 +117,7 @@ public class GamesDbContext : DbContext
     public DbSet<SteamAchievement> SteamAchievements { get; set; }
     public DbSet<SteamAppCache> SteamAppCaches { get; set; }
     public DbSet<SteamMatchDismissal> SteamMatchDismissals { get; set; }
+    public DbSet<DuplicateGameDismissal> DuplicateGameDismissals { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

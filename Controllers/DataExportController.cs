@@ -121,7 +121,7 @@ public class DataExportController : BaseApiController
 
         try
         {
-            Directory.Delete(folderPath, recursive: true);
+            DeleteDirectoryRobust(folderPath);
             _logger.LogInformation("Deleted orphan folder {FolderPath} for user {UserId}", folderPath, userId);
             return Ok(new { folderName = request.FolderName, deleted = true, message = $"Carpeta eliminada: {request.FolderName}" });
         }
@@ -130,6 +130,19 @@ public class DataExportController : BaseApiController
             _logger.LogError(ex, "Error deleting orphan folder {FolderPath} for user {UserId}", folderPath, userId);
             return StatusCode(500, new { message = "Error deleting orphan folder", error = ex.Message });
         }
+    }
+
+    [HttpPost("duplicate-games/dismiss")]
+    [Authorize]
+    public async Task<IActionResult> DismissDuplicateGames([FromBody] DismissDuplicateGamesRequest request)
+    {
+        if (request == null || request.GameIds == null || request.GameIds.Count < 2)
+            return BadRequest(new { message = "At least two game IDs are required" });
+
+        var userId = GetCurrentUserIdOrDefault(1);
+        var dismissed = await _networkSyncService.DismissDuplicateGamesAsync(userId, request.GameIds);
+
+        return Ok(new { dismissed, message = dismissed > 0 ? $"Duplicado descartado ({dismissed} pareja/s)." : "No había parejas nuevas para descartar." });
     }
 
     [HttpDelete("duplicate-games/{id:int}")]
@@ -144,6 +157,48 @@ public class DataExportController : BaseApiController
 
         _logger.LogInformation("Deleted duplicate game candidate {GameId} for user {UserId}", id, userId);
         return Ok(new { gameId = id, deleted = true, message = $"Juego eliminado: #{id}" });
+    }
+
+    private static void DeleteDirectoryRobust(string folderPath)
+    {
+        foreach (var file in Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories))
+        {
+            TryWithRetries(() =>
+            {
+                System.IO.File.SetAttributes(file, FileAttributes.Normal);
+                System.IO.File.Delete(file);
+            });
+        }
+
+        var directories = Directory.EnumerateDirectories(folderPath, "*", SearchOption.AllDirectories)
+            .OrderByDescending(path => path.Length)
+            .ToList();
+
+        foreach (var directory in directories)
+        {
+            TryWithRetries(() => Directory.Delete(directory, recursive: false));
+        }
+
+        TryWithRetries(() => Directory.Delete(folderPath, recursive: false));
+    }
+
+    private static void TryWithRetries(Action action)
+    {
+        const int maxAttempts = 4;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                action();
+                return;
+            }
+            catch when (attempt < maxAttempts)
+            {
+                Thread.Sleep(100 * attempt);
+            }
+        }
+
+        action();
     }
 
     [HttpGet("full")]

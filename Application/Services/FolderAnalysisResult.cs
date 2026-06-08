@@ -47,6 +47,8 @@ public class DatabaseDuplicateGroup
     public string NormalizedKey { get; set; } = string.Empty;
     public List<DatabaseDuplicateEntry> Games { get; set; } = new();
     public string Reason { get; set; } = string.Empty;
+    public string MatchType { get; set; } = "exact";
+    public int Confidence { get; set; } = 100;
 }
 
 public class DatabaseDuplicateEntry
@@ -75,4 +77,9 @@ public class DatabaseDuplicateEntry
 public class DeleteOrphanFolderRequest
 {
     public string FolderName { get; set; } = string.Empty;
+}
+
+public class DismissDuplicateGamesRequest
+{
+    public List<int> GameIds { get; set; } = new();
 }

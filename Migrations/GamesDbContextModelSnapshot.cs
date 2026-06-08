@@ -102,6 +102,41 @@ namespace GamesDatabase.Api.Migrations
                     b.ToTable("backup_schedule", (string)null);
                 });
 
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.DuplicateGameDismissal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("GameIdA")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("game_id_a");
+
+                    b.Property<int>("GameIdB")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("game_id_b");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GameIdA");
+
+                    b.HasIndex("GameIdB");
+
+                    b.HasIndex("UserId", "GameIdA", "GameIdB")
+                        .IsUnique();
+
+                    b.ToTable("duplicate_game_dismissal", (string)null);
+                });
+
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Game", b =>
                 {
                     b.Property<int>("Id")
@@ -1038,6 +1073,33 @@ namespace GamesDatabase.Api.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.DuplicateGameDismissal", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.Game", "GameA")
+                        .WithMany()
+                        .HasForeignKey("GameIdA")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.Game", "GameB")
+                        .WithMany()
+                        .HasForeignKey("GameIdB")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("GameA");
+
+                    b.Navigation("GameB");
 
                     b.Navigation("User");
                 });
