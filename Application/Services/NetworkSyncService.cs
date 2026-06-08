@@ -1212,7 +1212,19 @@ public class NetworkSyncService : INetworkSyncService
 
             if (!Directory.Exists(userPath))
             {
-                result.Difference = result.TotalGamesInDatabase;
+                result.TotalFoldersInFilesystem = 0;
+                result.Difference = -result.TotalGamesInDatabase;
+                result.MissingGameFolders = games.Select(g =>
+                {
+                    var expectedFolderName = FolderNameHelper.MakeSafeFolderName(g.Name);
+                    return new MissingGameFolder
+                    {
+                        GameId = g.Id,
+                        GameName = g.Name,
+                        ExpectedFolderName = expectedFolderName,
+                        ExpectedFullPath = Path.Combine(userPath, expectedFolderName)
+                    };
+                }).ToList();
                 return result;
             }
 
@@ -1241,6 +1253,22 @@ public class NetworkSyncService : INetworkSyncService
                     {
                         FolderName = folder!,
                         FullPath = Path.Combine(userPath, folder!)
+                    });
+                }
+            }
+
+            var foldersOnDisk = folders.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var game in games)
+            {
+                var expectedFolderName = gameToFolderMap[game.Id];
+                if (!foldersOnDisk.Contains(expectedFolderName))
+                {
+                    result.MissingGameFolders.Add(new MissingGameFolder
+                    {
+                        GameId = game.Id,
+                        GameName = game.Name,
+                        ExpectedFolderName = expectedFolderName,
+                        ExpectedFullPath = Path.Combine(userPath, expectedFolderName)
                     });
                 }
             }

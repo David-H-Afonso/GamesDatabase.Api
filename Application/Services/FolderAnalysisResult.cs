@@ -7,6 +7,7 @@ public class FolderAnalysisResult
     public int Difference { get; set; }
     public List<PotentialDuplicate> PotentialDuplicates { get; set; } = new();
     public List<OrphanFolder> OrphanFolders { get; set; } = new();
+    public List<MissingGameFolder> MissingGameFolders { get; set; } = new();
     /// <summary>Database duplicate detection results, always populated regardless of filesystem availability.</summary>
     public DatabaseDuplicatesResult DatabaseDuplicates { get; set; } = new();
 }
@@ -22,6 +23,14 @@ public class OrphanFolder
 {
     public string FolderName { get; set; } = string.Empty;
     public string FullPath { get; set; } = string.Empty;
+}
+
+public class MissingGameFolder
+{
+    public int GameId { get; set; }
+    public string GameName { get; set; } = string.Empty;
+    public string ExpectedFolderName { get; set; } = string.Empty;
+    public string ExpectedFullPath { get; set; } = string.Empty;
 }
 
 // ─── Database Duplicate Detection ────────────────────────────────────────────
