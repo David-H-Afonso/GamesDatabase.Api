@@ -44,4 +44,26 @@ public class DatabaseDuplicateEntry
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? StatusName { get; set; }
+    public string? PlatformName { get; set; }
+    public string? PlayedStatusName { get; set; }
+    public string? Released { get; set; }
+    public string? Started { get; set; }
+    public string? Finished { get; set; }
+    public int? Grade { get; set; }
+    public int? Critic { get; set; }
+    public decimal? Score { get; set; }
+    public int? Story { get; set; }
+    public int? Completion { get; set; }
+    public string? Logo { get; set; }
+    public string? Cover { get; set; }
+    public int? SteamAppId { get; set; }
+    public int? SteamPlaytimeForever { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class DeleteOrphanFolderRequest
+{
+    public string FolderName { get; set; } = string.Empty;
 }

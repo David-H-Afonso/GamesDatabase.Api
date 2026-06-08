@@ -1143,7 +1143,28 @@ public class NetworkSyncService : INetworkSyncService
             // Load all games once — used for both filesystem analysis and DB duplicate detection.
             var games = await _context.Games
                 .Where(g => g.UserId == userId)
-                .Select(g => new { g.Id, g.Name })
+                .Select(g => new
+                {
+                    g.Id,
+                    g.Name,
+                    StatusName = g.Status.Name,
+                    PlatformName = g.Platform != null ? g.Platform.Name : null,
+                    PlayedStatusName = g.PlayedStatus != null ? g.PlayedStatus.Name : null,
+                    g.Released,
+                    g.Started,
+                    g.Finished,
+                    g.Grade,
+                    g.Critic,
+                    g.Score,
+                    g.Story,
+                    g.Completion,
+                    g.Logo,
+                    g.Cover,
+                    g.SteamAppId,
+                    g.SteamPlaytimeForever,
+                    g.CreatedAt,
+                    g.UpdatedAt
+                })
                 .ToListAsync();
 
             result.TotalGamesInDatabase = games.Count;
@@ -1159,7 +1180,28 @@ public class NetworkSyncService : INetworkSyncService
                 dbDuplicates.DuplicateGroups.Add(new DatabaseDuplicateGroup
                 {
                     NormalizedKey = group.Key,
-                    Games = group.Select(g => new DatabaseDuplicateEntry { Id = g.Id, Name = g.Name }).ToList(),
+                    Games = group.Select(g => new DatabaseDuplicateEntry
+                    {
+                        Id = g.Id,
+                        Name = g.Name,
+                        StatusName = g.StatusName,
+                        PlatformName = g.PlatformName,
+                        PlayedStatusName = g.PlayedStatusName,
+                        Released = g.Released,
+                        Started = g.Started,
+                        Finished = g.Finished,
+                        Grade = g.Grade,
+                        Critic = g.Critic,
+                        Score = g.Score,
+                        Story = g.Story,
+                        Completion = g.Completion,
+                        Logo = g.Logo,
+                        Cover = g.Cover,
+                        SteamAppId = g.SteamAppId,
+                        SteamPlaytimeForever = g.SteamPlaytimeForever,
+                        CreatedAt = g.CreatedAt,
+                        UpdatedAt = g.UpdatedAt
+                    }).ToList(),
                     Reason = "Games share the same words in their title (case-insensitive, punctuation ignored)"
                 });
             }
@@ -1239,7 +1281,28 @@ public class NetworkSyncService : INetworkSyncService
 
         var games = await _context.Games
             .Where(g => g.UserId == userId)
-            .Select(g => new { g.Id, g.Name })
+            .Select(g => new
+            {
+                g.Id,
+                g.Name,
+                StatusName = g.Status.Name,
+                PlatformName = g.Platform != null ? g.Platform.Name : null,
+                PlayedStatusName = g.PlayedStatus != null ? g.PlayedStatus.Name : null,
+                g.Released,
+                g.Started,
+                g.Finished,
+                g.Grade,
+                g.Critic,
+                g.Score,
+                g.Story,
+                g.Completion,
+                g.Logo,
+                g.Cover,
+                g.SteamAppId,
+                g.SteamPlaytimeForever,
+                g.CreatedAt,
+                g.UpdatedAt
+            })
             .ToListAsync();
 
         result.TotalGamesInDatabase = games.Count;
@@ -1257,7 +1320,28 @@ public class NetworkSyncService : INetworkSyncService
             result.DuplicateGroups.Add(new DatabaseDuplicateGroup
             {
                 NormalizedKey = group.Key,
-                Games = group.Select(g => new DatabaseDuplicateEntry { Id = g.Id, Name = g.Name }).ToList(),
+                Games = group.Select(g => new DatabaseDuplicateEntry
+                {
+                    Id = g.Id,
+                    Name = g.Name,
+                    StatusName = g.StatusName,
+                    PlatformName = g.PlatformName,
+                    PlayedStatusName = g.PlayedStatusName,
+                    Released = g.Released,
+                    Started = g.Started,
+                    Finished = g.Finished,
+                    Grade = g.Grade,
+                    Critic = g.Critic,
+                    Score = g.Score,
+                    Story = g.Story,
+                    Completion = g.Completion,
+                    Logo = g.Logo,
+                    Cover = g.Cover,
+                    SteamAppId = g.SteamAppId,
+                    SteamPlaytimeForever = g.SteamPlaytimeForever,
+                    CreatedAt = g.CreatedAt,
+                    UpdatedAt = g.UpdatedAt
+                }).ToList(),
                 Reason = "Games share the same words in their title (case-insensitive, punctuation ignored)"
             });
         }

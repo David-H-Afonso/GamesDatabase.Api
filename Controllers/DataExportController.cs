@@ -16,17 +16,20 @@ public class DataExportController : BaseApiController
     private readonly ILogger<DataExportController> _logger;
     private readonly IConfiguration _configuration;
     private readonly INetworkSyncService _networkSyncService;
+    private readonly IGameService _gameService;
 
     public DataExportController(
         IGameImportExportService importExportService,
         ILogger<DataExportController> logger,
         IConfiguration configuration,
-        INetworkSyncService networkSyncService)
+        INetworkSyncService networkSyncService,
+        IGameService gameService)
     {
         _importExportService = importExportService;
         _logger = logger;
         _configuration = configuration;
         _networkSyncService = networkSyncService;
+        _gameService = gameService;
     }
 
     [HttpPost("update-image-urls")]
@@ -89,6 +92,58 @@ public class DataExportController : BaseApiController
             _logger.LogError(ex, "Error analyzing database duplicates for user {UserId}", GetCurrentUserIdOrDefault(1));
             return StatusCode(500, new { message = "Error analyzing database duplicates", error = ex.Message });
         }
+    }
+
+    [HttpDelete("orphan-folder")]
+    [Authorize]
+    public IActionResult DeleteOrphanFolder([FromBody] DeleteOrphanFolderRequest request)
+    {
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (role != "Admin")
+            return StatusCode(403, new { message = "Orphan folder deletion requires admin privileges" });
+
+        if (request == null || string.IsNullOrWhiteSpace(request.FolderName))
+            return BadRequest(new { message = "Folder name is required" });
+
+        var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
+        if (string.IsNullOrWhiteSpace(networkSyncPath))
+            return StatusCode(500, new { message = "NetworkSync:NetworkPath is not configured" });
+
+        var userId = GetCurrentUserIdOrDefault(1);
+        var gamesRoot = Path.GetFullPath(Path.Combine(networkSyncPath, userId.ToString(), "Games"));
+        var folderPath = Path.GetFullPath(Path.Combine(gamesRoot, request.FolderName));
+
+        if (!folderPath.StartsWith(gamesRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Invalid folder path" });
+
+        if (!Directory.Exists(folderPath))
+            return NotFound(new { message = "Folder does not exist" });
+
+        try
+        {
+            Directory.Delete(folderPath, recursive: true);
+            _logger.LogInformation("Deleted orphan folder {FolderPath} for user {UserId}", folderPath, userId);
+            return Ok(new { folderName = request.FolderName, deleted = true, message = $"Carpeta eliminada: {request.FolderName}" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting orphan folder {FolderPath} for user {UserId}", folderPath, userId);
+            return StatusCode(500, new { message = "Error deleting orphan folder", error = ex.Message });
+        }
+    }
+
+    [HttpDelete("duplicate-games/{id:int}")]
+    [Authorize]
+    public async Task<IActionResult> DeleteDuplicateGame(int id)
+    {
+        var userId = GetCurrentUserIdOrDefault(1);
+        var deleted = await _gameService.DeleteGameAsync(id, userId);
+
+        if (!deleted)
+            return NotFound(new { message = "Game not found" });
+
+        _logger.LogInformation("Deleted duplicate game candidate {GameId} for user {UserId}", id, userId);
+        return Ok(new { gameId = id, deleted = true, message = $"Juego eliminado: #{id}" });
     }
 
     [HttpGet("full")]
