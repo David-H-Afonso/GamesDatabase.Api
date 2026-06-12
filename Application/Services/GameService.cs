@@ -853,6 +853,10 @@ public class GameService : IGameService
                 "completion" => parameters.SortDescending ? query.OrderByDescending(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "completionduration" => parameters.SortDescending ? query.OrderByDescending(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => (double?)g.Completion).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "status" => parameters.SortDescending ? query.OrderByDescending(g => g.Status.SortOrder).ThenByDescending(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
+                "platform" => OrderByPlatform(query, parameters.SortDescending),
+                "playedstatus" or "playstatus" => OrderByPlayedStatus(query, parameters.SortDescending),
+                "comment" => OrderByComment(query, parameters.SortDescending),
+                "playwith" => OrderByPlayWith(query, parameters.SortDescending),
                 "score" => parameters.SortDescending ? query.OrderByDescending(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "released" => parameters.SortDescending ? query.OrderByDescending(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "started" => parameters.SortDescending ? query.OrderByDescending(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
@@ -870,6 +874,50 @@ public class GameService : IGameService
         }
 
         return query;
+    }
+
+    private static IOrderedQueryable<Game> OrderByPlatform(IQueryable<Game> query, bool descending)
+    {
+        return descending
+            ? query.OrderByDescending(g => EF.Functions.Collate(g.Platform != null ? g.Platform.Name : string.Empty, "NOCASE"))
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+            : query.OrderBy(g => EF.Functions.Collate(g.Platform != null ? g.Platform.Name : string.Empty, "NOCASE"))
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"));
+    }
+
+    private static IOrderedQueryable<Game> OrderByPlayedStatus(IQueryable<Game> query, bool descending)
+    {
+        return descending
+            ? query.OrderByDescending(g => EF.Functions.Collate(g.PlayedStatus != null ? g.PlayedStatus.Name : string.Empty, "NOCASE"))
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+            : query.OrderBy(g => EF.Functions.Collate(g.PlayedStatus != null ? g.PlayedStatus.Name : string.Empty, "NOCASE"))
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"));
+    }
+
+    private static IOrderedQueryable<Game> OrderByComment(IQueryable<Game> query, bool descending)
+    {
+        return descending
+            ? query.OrderByDescending(g => EF.Functions.Collate(g.Comment ?? string.Empty, "NOCASE"))
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+            : query.OrderBy(g => EF.Functions.Collate(g.Comment ?? string.Empty, "NOCASE"))
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"));
+    }
+
+    private static IOrderedQueryable<Game> OrderByPlayWith(IQueryable<Game> query, bool descending)
+    {
+        return descending
+            ? query.OrderByDescending(g => g.GamePlayWiths
+                    .OrderBy(gpw => gpw.PlayWith.SortOrder)
+                    .ThenBy(gpw => EF.Functions.Collate(gpw.PlayWith.Name, "NOCASE"))
+                    .Select(gpw => EF.Functions.Collate(gpw.PlayWith.Name, "NOCASE"))
+                    .FirstOrDefault() ?? string.Empty)
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
+            : query.OrderBy(g => g.GamePlayWiths
+                    .OrderBy(gpw => gpw.PlayWith.SortOrder)
+                    .ThenBy(gpw => EF.Functions.Collate(gpw.PlayWith.Name, "NOCASE"))
+                    .Select(gpw => EF.Functions.Collate(gpw.PlayWith.Name, "NOCASE"))
+                    .FirstOrDefault() ?? string.Empty)
+                .ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"));
     }
 
     private async Task FillSteamAchievementStatsAsync(IEnumerable<GameDto> gameDtos, int userId)
