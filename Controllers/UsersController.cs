@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Common;
@@ -24,6 +25,7 @@ public class UsersController : ControllerBase
 
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [Consumes("application/json")]
     [Produces("application/json")]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
@@ -145,6 +147,7 @@ public class UsersController : ControllerBase
 
     [HttpPost("refresh")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [Consumes("application/json")]
     [Produces("application/json")]
     public async Task<ActionResult<RefreshTokenResponse>> Refresh([FromBody] RefreshTokenRequest request)

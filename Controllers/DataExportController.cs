@@ -73,7 +73,7 @@ public class DataExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error analyzing folders");
-            return StatusCode(500, new { message = "Error analyzing folders", error = ex.Message });
+            return StatusCode(500, new { message = "Error analyzing folders" });
         }
     }
 
@@ -90,7 +90,7 @@ public class DataExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error analyzing database duplicates for user {UserId}", GetCurrentUserIdOrDefault(1));
-            return StatusCode(500, new { message = "Error analyzing database duplicates", error = ex.Message });
+            return StatusCode(500, new { message = "Error analyzing database duplicates" });
         }
     }
 
@@ -128,7 +128,7 @@ public class DataExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting orphan folder {FolderPath} for user {UserId}", folderPath, userId);
-            return StatusCode(500, new { message = "Error deleting orphan folder", error = ex.Message });
+            return StatusCode(500, new { message = "Error deleting orphan folder" });
         }
     }
 
@@ -214,7 +214,7 @@ public class DataExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error exporting full database");
-            return StatusCode(500, new { message = "Error al exportar la base de datos completa", details = ex.Message });
+            return StatusCode(500, new { message = "Error al exportar la base de datos completa" });
         }
     }
 
@@ -235,15 +235,8 @@ public class DataExportController : BaseApiController
         }
         catch (Exception ex)
         {
-            var fullError = ex.Message;
-            if (ex.InnerException != null)
-            {
-                fullError += $" | Inner: {ex.InnerException.Message}";
-                if (ex.InnerException.InnerException != null)
-                    fullError += $" | Inner2: {ex.InnerException.InnerException.Message}";
-            }
             _logger.LogError(ex, "Error importing full database");
-            return StatusCode(500, new { message = "Error al importar la base de datos completa", details = fullError });
+            return StatusCode(500, new { message = "Error al importar la base de datos completa" });
         }
     }
 
@@ -293,7 +286,7 @@ public class DataExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in selective import");
-            return StatusCode(500, new { message = "Error during selective import", details = ex.Message });
+            return StatusCode(500, new { message = "Error during selective import" });
         }
     }
 

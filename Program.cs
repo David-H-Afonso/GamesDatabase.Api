@@ -20,6 +20,7 @@ builder.Services.AddGamesDatabasePersistence(builder.Configuration);
 builder.Services.AddGamesDatabaseCors(builder.Configuration, builder.Environment);
 builder.Services.AddGamesDatabaseAuth(builder.Configuration, builder.Environment);
 builder.Services.AddGamesDatabaseSwagger();
+builder.Services.AddGamesDatabaseRateLimiting();
 
 var app = builder.Build();
 
@@ -94,6 +95,7 @@ else
 app.UseAuthentication();
 app.UseUserContext();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 // Health check endpoint
 app.MapGet("/health", () => Results.Ok(new

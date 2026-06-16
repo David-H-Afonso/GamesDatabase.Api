@@ -21,10 +21,9 @@ public class ConfigController : BaseApiController
     }
 
     /// <summary>
-    /// Get network sync configuration (path only, no credentials)
-    /// Public endpoint - no authentication required
+    /// Get network sync configuration (path only, no credentials).
+    /// Requires authentication — the network path is internal infrastructure info.
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("network-sync")]
     public IActionResult GetNetworkSyncConfig()
     {

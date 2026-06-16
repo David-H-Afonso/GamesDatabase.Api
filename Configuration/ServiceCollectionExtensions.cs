@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using GamesDatabase.Api.Infrastructure.Persistence;
 using GamesDatabase.Api.Domain.Entities;
 using GamesDatabase.Api.Application.Services;
@@ -373,6 +375,27 @@ public static class ServiceCollectionExtensions
                 .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
                 .SetApplicationName("GamesDatabase");
         }
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds rate limiting policies for security-sensitive endpoints.
+    /// "auth" policy: 10 requests per minute per IP (login, refresh, Steam exchange).
+    /// </summary>
+    public static IServiceCollection AddGamesDatabaseRateLimiting(this IServiceCollection services)
+    {
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            options.AddFixedWindowLimiter("auth", limiterOptions =>
+            {
+                limiterOptions.PermitLimit = 10;
+                limiterOptions.Window = TimeSpan.FromMinutes(1);
+                limiterOptions.QueueLimit = 0;
+            });
+        });
 
         return services;
     }

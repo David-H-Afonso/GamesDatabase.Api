@@ -4,6 +4,7 @@ using GamesDatabase.Api.Infrastructure.Persistence;
 using GamesDatabase.Api.Application.Services.Steam;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -128,6 +129,7 @@ public class SteamAuthController : ControllerBase
     /// </summary>
     [HttpGet("exchange/{code}")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     public IActionResult Exchange(Guid code)
     {
         var result = _steamAuth.ConsumeLoginResult(code);
