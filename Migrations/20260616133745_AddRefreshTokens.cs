@@ -1,3 +1,4 @@
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,7 +6,6 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace GamesDatabase.Api.Migrations
 {
     /// <inheritdoc />
-    [Migration("20260616100000_AddRefreshTokens")]
     public partial class AddRefreshTokens : Migration
     {
         /// <inheritdoc />
@@ -55,7 +55,8 @@ namespace GamesDatabase.Api.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropTable(name: "refresh_token");
+            migrationBuilder.DropTable(
+                name: "refresh_token");
         }
     }
 }

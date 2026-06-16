@@ -93,6 +93,29 @@ public class DatabaseStartupHelper
         ExecuteRepairSql(conn, logger,
             "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_steam_match_dismissal_user_id_steam_app_id_game_id\" ON \"steam_match_dismissal\" (\"user_id\", \"steam_app_id\", \"game_id\");",
             "ensured steam match dismissal unique index exists");
+
+        // Refresh tokens table (JWT security)
+        ExecuteRepairSql(conn, logger, """
+            CREATE TABLE IF NOT EXISTS "refresh_token" (
+                "id" INTEGER NOT NULL CONSTRAINT "PK_refresh_token" PRIMARY KEY AUTOINCREMENT,
+                "user_id" INTEGER NOT NULL,
+                "token" TEXT NOT NULL,
+                "expires_at" TEXT NOT NULL,
+                "created_at" TEXT NOT NULL,
+                "revoked" INTEGER NOT NULL DEFAULT 0,
+                "revoked_at" TEXT NULL,
+                CONSTRAINT "FK_refresh_token_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+            );
+            """, "ensured refresh_token table exists");
+        ExecuteRepairSql(conn, logger,
+            "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_refresh_token_token\" ON \"refresh_token\" (\"token\");",
+            "ensured refresh_token token unique index exists");
+        ExecuteRepairSql(conn, logger,
+            "CREATE INDEX IF NOT EXISTS \"IX_refresh_token_user_id\" ON \"refresh_token\" (\"user_id\");",
+            "ensured refresh_token user_id index exists");
+        ExecuteRepairSql(conn, logger,
+            "CREATE INDEX IF NOT EXISTS \"IX_refresh_token_expires_at\" ON \"refresh_token\" (\"expires_at\");",
+            "ensured refresh_token expires_at index exists");
     }
 
     public async Task SeedDefaultDataAsync(GamesDbContext context)

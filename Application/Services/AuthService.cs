@@ -91,61 +91,84 @@ public class AuthService : IAuthService
 
     public async Task<string> GenerateAndStoreRefreshTokenAsync(int userId)
     {
-        // Lazily clean up expired tokens for this user (keep the table lean)
-        var cutoff = DateTime.UtcNow;
-        var expired = await _context.RefreshTokens
-            .Where(rt => rt.UserId == userId && (rt.Revoked || rt.ExpiresAt <= cutoff))
-            .ToListAsync();
-        if (expired.Count > 0)
-            _context.RefreshTokens.RemoveRange(expired);
-
-        var rawToken = GenerateRawToken();
-        var entity = new RefreshToken
+        try
         {
-            UserId = userId,
-            Token = rawToken,
-            ExpiresAt = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationDays),
-            CreatedAt = DateTime.UtcNow,
-            Revoked = false,
-        };
+            // Lazily clean up expired tokens for this user (keep the table lean)
+            var cutoff = DateTime.UtcNow;
+            var expired = await _context.RefreshTokens
+                .Where(rt => rt.UserId == userId && (rt.Revoked || rt.ExpiresAt <= cutoff))
+                .ToListAsync();
+            if (expired.Count > 0)
+                _context.RefreshTokens.RemoveRange(expired);
 
-        _context.RefreshTokens.Add(entity);
-        await _context.SaveChangesAsync();
+            var rawToken = GenerateRawToken();
+            var entity = new RefreshToken
+            {
+                UserId = userId,
+                Token = rawToken,
+                ExpiresAt = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationDays),
+                CreatedAt = DateTime.UtcNow,
+                Revoked = false,
+            };
 
-        return rawToken;
+            _context.RefreshTokens.Add(entity);
+            await _context.SaveChangesAsync();
+
+            return rawToken;
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            // Table may not exist yet (migration pending). Return empty so login still works
+            // with just the access token — refresh will be available after next deployment.
+            return string.Empty;
+        }
     }
 
     public async Task<(string AccessToken, string RefreshToken)?> RefreshAccessTokenAsync(string refreshToken)
     {
-        var entity = await _context.RefreshTokens
-            .Include(rt => rt.User)
-            .FirstOrDefaultAsync(rt => rt.Token == refreshToken);
+        try
+        {
+            var entity = await _context.RefreshTokens
+                .Include(rt => rt.User)
+                .FirstOrDefaultAsync(rt => rt.Token == refreshToken);
 
-        if (entity == null || entity.Revoked || entity.ExpiresAt <= DateTime.UtcNow)
+            if (entity == null || entity.Revoked || entity.ExpiresAt <= DateTime.UtcNow)
+                return null;
+
+            // Rotate: revoke old, issue new
+            entity.Revoked = true;
+            entity.RevokedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            var newAccessToken = GenerateToken(entity.User);
+            var newRefreshToken = await GenerateAndStoreRefreshTokenAsync(entity.UserId);
+
+            return (newAccessToken, newRefreshToken);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
             return null;
-
-        // Rotate: revoke old, issue new
-        entity.Revoked = true;
-        entity.RevokedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
-
-        var newAccessToken = GenerateToken(entity.User);
-        var newRefreshToken = await GenerateAndStoreRefreshTokenAsync(entity.UserId);
-
-        return (newAccessToken, newRefreshToken);
+        }
     }
 
     public async Task RevokeRefreshTokenAsync(string refreshToken)
     {
-        var entity = await _context.RefreshTokens
-            .FirstOrDefaultAsync(rt => rt.Token == refreshToken && !rt.Revoked);
+        try
+        {
+            var entity = await _context.RefreshTokens
+                .FirstOrDefaultAsync(rt => rt.Token == refreshToken && !rt.Revoked);
 
-        if (entity == null)
-            return;
+            if (entity == null)
+                return;
 
-        entity.Revoked = true;
-        entity.RevokedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+            entity.Revoked = true;
+            entity.RevokedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            // Table may not exist yet — ignore silently
+        }
     }
 
     // ── Password helpers ───────────────────────────────────────────────────────
