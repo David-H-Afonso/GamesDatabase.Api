@@ -118,6 +118,7 @@ public class GamesDbContext : DbContext
     public DbSet<SteamAppCache> SteamAppCaches { get; set; }
     public DbSet<SteamMatchDismissal> SteamMatchDismissals { get; set; }
     public DbSet<DuplicateGameDismissal> DuplicateGameDismissals { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -7,7 +7,14 @@ namespace GamesDatabase.Api.Application.Services.Steam;
 
 public class SteamAuthService : ISteamAuthService
 {
-    private static readonly ConcurrentDictionary<Guid, (int? UserId, string Mode, DateTime Expiry)> _nonces = new();
+    // ── Nonces (OpenID state tokens) ──────────────────────────────────────────
+    private static readonly ConcurrentDictionary<Guid, (int? UserId, string Mode, DateTime Expiry)>
+        _nonces = new();
+
+    // ── One-time login codes (replace JWT-in-URL anti-pattern) ───────────────
+    private static readonly ConcurrentDictionary<Guid, (SteamLoginResult Result, DateTime Expiry)>
+        _loginCodes = new();
+
     private const string SteamOpenIdEndpoint = "https://steamcommunity.com/openid/login";
     private readonly HttpClient _httpClient;
     private readonly ILogger<SteamAuthService> _logger;
@@ -17,6 +24,8 @@ public class SteamAuthService : ISteamAuthService
         _httpClient = httpClientFactory.CreateClient();
         _logger = logger;
     }
+
+    // ── Nonce helpers ─────────────────────────────────────────────────────────
 
     public Guid StoreNonce(int? userId, string mode)
     {
@@ -36,9 +45,30 @@ public class SteamAuthService : ISteamAuthService
         return null;
     }
 
+    // ── One-time login code ───────────────────────────────────────────────────
+
+    public Guid StoreLoginResult(SteamLoginResult result)
+    {
+        CleanExpiredLoginCodes();
+        var code = Guid.NewGuid();
+        _loginCodes[code] = (result, DateTime.UtcNow.AddMinutes(5));
+        return code;
+    }
+
+    public SteamLoginResult? ConsumeLoginResult(Guid code)
+    {
+        if (_loginCodes.TryRemove(code, out var entry))
+        {
+            if (entry.Expiry > DateTime.UtcNow)
+                return entry.Result;
+        }
+        return null;
+    }
+
+    // ── OpenID helpers ────────────────────────────────────────────────────────
+
     public string BuildLoginUrl(Guid nonce, string callbackUrl)
     {
-        // Use '&' if callbackUrl already contains query params, '?' otherwise
         var sep = callbackUrl.Contains('?') ? '&' : '?';
         var returnTo = $"{callbackUrl}{sep}nonce={nonce}";
         var realm = ExtractRealm(callbackUrl);
@@ -56,7 +86,6 @@ public class SteamAuthService : ISteamAuthService
 
     public async Task<string?> ValidateCallbackAsync(IQueryCollection queryParams)
     {
-        // Build validation params — change mode to check_authentication
         var postParams = new Dictionary<string, string>();
         foreach (var key in queryParams.Keys)
         {
@@ -70,7 +99,6 @@ public class SteamAuthService : ISteamAuthService
         postParams["openid.mode"] = "check_authentication";
 
         var content = new FormUrlEncodedContent(postParams);
-
         try
         {
             var response = await _httpClient.PostAsync(SteamOpenIdEndpoint, content);
@@ -88,19 +116,18 @@ public class SteamAuthService : ISteamAuthService
             return null;
         }
 
-        // Extract SteamID64 from claimed_id: https://steamcommunity.com/openid/id/76561198XXXXXXXXX
         if (queryParams.TryGetValue("openid.claimed_id", out var claimedId))
         {
             var claimedIdStr = claimedId.ToString();
             const string prefix = "https://steamcommunity.com/openid/id/";
             if (claimedIdStr.StartsWith(prefix))
-            {
                 return claimedIdStr[prefix.Length..];
-            }
         }
 
         return null;
     }
+
+    // ── Private ───────────────────────────────────────────────────────────────
 
     private static string ExtractRealm(string callbackUrl)
     {
@@ -110,8 +137,15 @@ public class SteamAuthService : ISteamAuthService
 
     private static void CleanExpiredNonces()
     {
-        var expired = _nonces.Where(kv => kv.Value.Expiry <= DateTime.UtcNow).Select(kv => kv.Key).ToList();
-        foreach (var key in expired)
+        var now = DateTime.UtcNow;
+        foreach (var key in _nonces.Where(kv => kv.Value.Expiry <= now).Select(kv => kv.Key).ToList())
             _nonces.TryRemove(key, out _);
+    }
+
+    private static void CleanExpiredLoginCodes()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var key in _loginCodes.Where(kv => kv.Value.Expiry <= now).Select(kv => kv.Key).ToList())
+            _loginCodes.TryRemove(key, out _);
     }
 }

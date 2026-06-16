@@ -48,6 +48,11 @@ public static class ServiceCollectionExtensions
             builder.Configuration["JwtSettings:ExpirationMinutes"] = expMinutes.ToString();
         }
 
+        if (int.TryParse(Environment.GetEnvironmentVariable("JWT_REFRESH_TOKEN_EXPIRATION_DAYS"), out var refreshDays))
+        {
+            builder.Configuration["JwtSettings:RefreshTokenExpirationDays"] = refreshDays.ToString();
+        }
+
         // Override Steam settings from environment variables
         OverrideFromEnv(builder, "SteamSettings:ApiKey", "STEAM_API_KEY");
         OverrideFromEnv(builder, "SteamSettings:CallbackBaseUrl", "STEAM_CALLBACK_BASE_URL");
@@ -86,10 +91,11 @@ public static class ServiceCollectionExtensions
             options.UseSqlite(connectionString);
             if (databaseSettings.EnableSensitiveDataLogging)
             {
+                // EnableSensitiveDataLogging and SQL console logging are only safe in development.
+                // In production they can expose query parameters (including user data) in logs.
                 options.EnableSensitiveDataLogging();
+                options.LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information);
             }
-            // Enable SQL query logging for debugging
-            options.LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information);
         });
 
         return services;
@@ -193,8 +199,11 @@ public static class ServiceCollectionExtensions
                 }
                 else
                 {
-                    // Default fallback when no origins are configured
-                    policy.AllowAnyOrigin()
+                    // No origins configured: deny all cross-origin requests.
+                    // AllowAnyOrigin with credentials is invalid per the CORS spec and
+                    // would create an open CORS policy that accepts any domain.
+                    // Log a warning — admins should set CORS_ALLOWED_ORIGINS.
+                    policy.WithOrigins("http://localhost:5173") // safe local-only fallback
                           .AllowAnyHeader()
                           .AllowAnyMethod();
                 }

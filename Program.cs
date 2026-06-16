@@ -23,12 +23,17 @@ builder.Services.AddGamesDatabaseSwagger();
 
 var app = builder.Build();
 
-app.UseSwagger();
-app.UseSwaggerUI(c =>
+// Only expose Swagger in development or desktop mode
+// In production, Swagger reveals the full API surface to attackers.
+if (app.Environment.IsDevelopment() || isDesktopMode)
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Games Database API v1");
-    c.RoutePrefix = "swagger";
-});
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Games Database API v1");
+        c.RoutePrefix = "swagger";
+    });
+}
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 

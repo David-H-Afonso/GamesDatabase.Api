@@ -17,9 +17,28 @@ public class LoginResponse
     public string Username { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public string Token { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
     public string? SteamId { get; set; }
     public string? SteamNickname { get; set; }
     public string? SteamAvatarUrl { get; set; }
+}
+
+public class RefreshTokenRequest
+{
+    [Required]
+    public string RefreshToken { get; set; } = string.Empty;
+}
+
+public class RefreshTokenResponse
+{
+    public string Token { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
+}
+
+public class LogoutRequest
+{
+    [Required]
+    public string RefreshToken { get; set; } = string.Empty;
 }
 
 public class CreateUserRequest

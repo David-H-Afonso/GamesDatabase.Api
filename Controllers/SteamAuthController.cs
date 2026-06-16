@@ -1,7 +1,6 @@
+using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Infrastructure.Persistence;
-using GamesDatabase.Api.Application.Services;
-using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Application.Services.Steam;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -43,7 +42,7 @@ public class SteamAuthController : ControllerBase
     /// <summary>
     /// Starts the Steam OpenID login/link flow.
     /// mode=login → no auth required, creates session on callback
-    /// mode=link → requires JWT, links Steam to existing account on callback
+    /// mode=link  → requires JWT, links Steam to existing account on callback
     /// </summary>
     [HttpGet("login")]
     [AllowAnonymous]
@@ -63,9 +62,6 @@ public class SteamAuthController : ControllerBase
 
         var nonce = _steamAuth.StoreNonce(userId, mode);
         var frontendBase = ResolveRequestedFrontendUrl(frontend_url) ?? GetFrontendBaseUrl();
-        // Use the same base as the frontend for the Steam realm/callback.
-        // The API is proxied through the frontend nginx, so the public URL for both is identical.
-        // Falling back to GetCallbackBaseUrl() only if we have no trusted frontend origin.
         var callbackBase = !string.IsNullOrEmpty(frontendBase) ? frontendBase : GetCallbackBaseUrl();
         var callbackUrl = $"{callbackBase}/api/auth/steam/callback" +
             $"?frontend_url={Uri.EscapeDataString(frontendBase)}";
@@ -76,7 +72,6 @@ public class SteamAuthController : ControllerBase
 
     /// <summary>
     /// Returns the Steam OpenID URL for the link flow (AJAX-friendly).
-    /// Requires JWT authentication so the Bearer token can be sent normally.
     /// </summary>
     [HttpGet("link-url")]
     [Authorize]
@@ -97,19 +92,18 @@ public class SteamAuthController : ControllerBase
     }
 
     /// <summary>
-    /// Steam OpenID callback. Steam redirects the browser here after login.
-    /// Validates the OpenID response and either creates a session or links the account.
+    /// Steam OpenID callback. Validates the OpenID response and either links
+    /// the account or stores a short-lived one-time code for token exchange.
+    /// The JWT is never put in the redirect URL — the frontend uses /exchange.
     /// </summary>
     [HttpGet("callback")]
     [AllowAnonymous]
     public async Task<IActionResult> Callback()
     {
-        // Recover frontend URL embedded in the return_to URL
         var frontendBase = Request.Query["frontend_url"].ToString();
         if (string.IsNullOrWhiteSpace(frontendBase))
             frontendBase = GetFrontendBaseUrl();
 
-        // Parse nonce appended by BuildLoginUrl to the return_to URL
         if (!Guid.TryParse(Request.Query["nonce"].ToString(), out var nonce))
             return Redirect(BuildFrontendErrorUrl(frontendBase, "invalid_nonce"));
 
@@ -127,25 +121,51 @@ public class SteamAuthController : ControllerBase
             return await HandleLoginAsync(steamId, frontendBase);
     }
 
+    /// <summary>
+    /// Exchanges a short-lived one-time code (issued by the Steam callback) for
+    /// the actual JWT access token + refresh token. The code expires in 5 minutes
+    /// and can only be used once, so the JWT is never transmitted through the URL.
+    /// </summary>
+    [HttpGet("exchange/{code}")]
+    [AllowAnonymous]
+    public IActionResult Exchange(Guid code)
+    {
+        var result = _steamAuth.ConsumeLoginResult(code);
+        if (result == null)
+            return BadRequest(new { message = "Invalid or expired Steam login code" });
+
+        return Ok(new
+        {
+            token = result.Token,
+            refreshToken = result.RefreshToken,
+            userId = result.UserId,
+            username = result.Username,
+            role = result.Role,
+            steamId = result.SteamId,
+            steamNickname = result.SteamNickname,
+            steamAvatarUrl = result.SteamAvatarUrl,
+        });
+    }
+
+    // ── Private handlers ──────────────────────────────────────────────────────
+
     private async Task<IActionResult> HandleLinkAsync(int userId, string steamId, string frontendBase)
     {
         var user = await _context.Users.FindAsync(userId);
         if (user == null)
             return Redirect(BuildFrontendErrorUrl(frontendBase, "user_not_found"));
 
-        // Check if this SteamID is already linked to another account
-        var existingLink = await _context.Users.FirstOrDefaultAsync(u => u.SteamId == steamId && u.Id != userId);
+        var existingLink = await _context.Users
+            .FirstOrDefaultAsync(u => u.SteamId == steamId && u.Id != userId);
         if (existingLink != null)
             return Redirect(BuildFrontendErrorUrl(frontendBase, "steam_already_linked"));
 
-        // Fetch Steam profile info
         var profile = await _steamApi.GetPlayerSummaryAsync(steamId);
 
         user.SteamId = steamId;
         user.SteamNickname = profile?.Nickname;
         user.SteamAvatarUrl = profile?.AvatarUrl;
         user.SteamLinkedAt = DateTime.UtcNow;
-
         await _context.SaveChangesAsync();
 
         var redirectUrl = $"{frontendBase}/#/steam-callback?steamLinked=true" +
@@ -162,22 +182,28 @@ public class SteamAuthController : ControllerBase
         if (user == null)
             return Redirect(BuildFrontendErrorUrl(frontendBase, "no_account_linked"));
 
-        var token = _authService.GenerateToken(user);
+        var accessToken = _authService.GenerateToken(user);
+        var refreshToken = await _authService.GenerateAndStoreRefreshTokenAsync(user.Id);
 
-        var redirectUrl = $"{frontendBase}/#/steam-callback" +
-            $"?token={Uri.EscapeDataString(token)}" +
-            $"&userId={user.Id}" +
-            $"&username={Uri.EscapeDataString(user.Username)}" +
-            $"&role={Uri.EscapeDataString(user.Role.ToString())}";
+        // Store tokens behind a one-time code — never put the JWT in the URL
+        var loginResult = new SteamLoginResult(
+            Token: accessToken,
+            RefreshToken: refreshToken,
+            UserId: user.Id,
+            Username: user.Username,
+            Role: user.Role.ToString(),
+            SteamId: user.SteamId,
+            SteamNickname: user.SteamNickname,
+            SteamAvatarUrl: user.SteamAvatarUrl);
 
-        return Redirect(redirectUrl);
+        var code = _steamAuth.StoreLoginResult(loginResult);
+
+        // Redirect with an opaque 5-minute code; the frontend exchanges it immediately
+        return Redirect($"{frontendBase}/#/steam-callback?code={code}");
     }
 
-    /// <summary>
-    /// Resolves the API's own base URL for building the Steam callback URL.
-    /// Uses explicit config when set; otherwise auto-detects from the incoming request
-    /// (supports X-Forwarded-Proto / X-Forwarded-Host for reverse proxies).
-    /// </summary>
+    // ── URL helpers ───────────────────────────────────────────────────────────
+
     private string GetCallbackBaseUrl()
     {
         if (!string.IsNullOrWhiteSpace(_settings.CallbackBaseUrl))
@@ -194,11 +220,6 @@ public class SteamAuthController : ControllerBase
         return $"{scheme}://{host}";
     }
 
-    /// <summary>
-    /// Resolves the frontend base URL for post-login redirects.
-    /// Uses explicit config when set; otherwise reads the Referer header
-    /// (browsers send this when window.location.href navigates to the API).
-    /// </summary>
     private string GetFrontendBaseUrl()
     {
         if (!string.IsNullOrWhiteSpace(_settings.FrontendBaseUrl))
@@ -215,10 +236,6 @@ public class SteamAuthController : ControllerBase
     private static string BuildFrontendErrorUrl(string frontendBase, string error)
         => $"{frontendBase}/#/steam-callback?error={Uri.EscapeDataString(error)}";
 
-    /// <summary>
-    /// Validates a client-supplied frontend_url against the CORS allowed origins list.
-    /// Returns the URL if it is trusted, null otherwise. Prevents open-redirect attacks.
-    /// </summary>
     private string? ResolveRequestedFrontendUrl(string? requestedUrl)
     {
         if (string.IsNullOrWhiteSpace(requestedUrl))
@@ -229,11 +246,9 @@ public class SteamAuthController : ControllerBase
 
         var origin = $"{uri.Scheme}://{uri.Authority}";
 
-        // Allow if it matches a configured CORS origin
         if (_corsSettings.AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
             return origin;
 
-        // Also allow if it matches the explicitly configured FrontendBaseUrl
         if (!string.IsNullOrWhiteSpace(_settings.FrontendBaseUrl) &&
             string.Equals(origin, _settings.FrontendBaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
             return origin;

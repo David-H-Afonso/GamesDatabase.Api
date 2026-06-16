@@ -35,6 +35,11 @@ obj/
 #wwwroot/
 .env
 
+# appsettings.Development.json contains a hardcoded JWT secret (known default).
+# Exclude it so the key is not committed to source control.
+# Use environment variables (JWT_SECRET_KEY) or a secrets manager for dev secrets.
+appsettings.Development.json
+
 # Rider
 .idea/
 *.sln.iml

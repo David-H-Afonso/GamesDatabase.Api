@@ -129,6 +129,41 @@ public class UsersController : ControllerBase
         return BadRequest(new { message = result.Error });
     }
 
+    [HttpPost("logout")]
+    [AllowAnonymous]
+    [Consumes("application/json")]
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
+    {
+        // Best-effort: revoke the refresh token so it can never be used again.
+        // The access token will expire on its own (60 min); we don't maintain an
+        // access-token blocklist to keep things stateless.
+        if (!string.IsNullOrWhiteSpace(request.RefreshToken))
+            await _authService.RevokeRefreshTokenAsync(request.RefreshToken);
+
+        return NoContent();
+    }
+
+    [HttpPost("refresh")]
+    [AllowAnonymous]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    public async Task<ActionResult<RefreshTokenResponse>> Refresh([FromBody] RefreshTokenRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.RefreshToken))
+            return BadRequest(new { message = "Refresh token is required" });
+
+        var result = await _authService.RefreshAccessTokenAsync(request.RefreshToken);
+
+        if (result == null)
+            return Unauthorized(new { message = "Invalid or expired refresh token" });
+
+        return Ok(new RefreshTokenResponse
+        {
+            Token = result.Value.AccessToken,
+            RefreshToken = result.Value.RefreshToken,
+        });
+    }
+
     [HttpGet("health")]
     [AllowAnonymous]
     public async Task<IActionResult> HealthCheck()
