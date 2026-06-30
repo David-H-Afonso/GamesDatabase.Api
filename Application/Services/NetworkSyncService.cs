@@ -1168,6 +1168,7 @@ public class NetworkSyncService : INetworkSyncService
                     Cover = g.Cover,
                     SteamAppId = g.SteamAppId,
                     SteamPlaytimeForever = g.SteamPlaytimeForever,
+                    ModifiedSinceExport = g.ModifiedSinceExport,
                     CreatedAt = g.CreatedAt,
                     UpdatedAt = g.UpdatedAt
                 })
@@ -1220,11 +1221,7 @@ public class NetworkSyncService : INetworkSyncService
             {
                 if (!expectedFolders.Contains(folder!))
                 {
-                    result.OrphanFolders.Add(new OrphanFolder
-                    {
-                        FolderName = folder!,
-                        FullPath = Path.Combine(userPath, folder!)
-                    });
+                    result.OrphanFolders.Add(BuildOrphanFolder(folder!, Path.Combine(userPath, folder!)));
                 }
             }
 
@@ -1274,6 +1271,49 @@ public class NetworkSyncService : INetworkSyncService
         }
     }
 
+    /// <summary>
+    /// Builds an <see cref="OrphanFolder"/> descriptor, enriching it with the reason it is
+    /// considered orphan plus creation/modification dates and total size when the filesystem
+    /// exposes that information. Any IO failure is swallowed so analysis never breaks.
+    /// </summary>
+    private OrphanFolder BuildOrphanFolder(string folderName, string fullPath)
+    {
+        var orphan = new OrphanFolder
+        {
+            FolderName = folderName,
+            FullPath = fullPath,
+            Reason = "La carpeta existe en el almacenamiento pero su nombre no coincide con ningún juego de la base de datos."
+        };
+
+        try
+        {
+            var info = new DirectoryInfo(fullPath);
+            if (info.Exists)
+            {
+                orphan.CreatedAt = info.CreationTimeUtc;
+                orphan.ModifiedAt = info.LastWriteTimeUtc;
+
+                long totalSize = 0;
+                var fileCount = 0;
+                foreach (var file in info.EnumerateFiles("*", SearchOption.AllDirectories))
+                {
+                    fileCount++;
+                    try { totalSize += file.Length; }
+                    catch { /* ignore unreadable file */ }
+                }
+
+                orphan.FileCount = fileCount;
+                orphan.SizeBytes = totalSize;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read metadata for orphan folder {Path}", fullPath);
+        }
+
+        return orphan;
+    }
+
     public async Task<DatabaseDuplicatesResult> AnalyzeDatabaseDuplicatesAsync(int userId)
     {
         var games = await _context.Games
@@ -1297,6 +1337,7 @@ public class NetworkSyncService : INetworkSyncService
                 Cover = g.Cover,
                 SteamAppId = g.SteamAppId,
                 SteamPlaytimeForever = g.SteamPlaytimeForever,
+                ModifiedSinceExport = g.ModifiedSinceExport,
                 CreatedAt = g.CreatedAt,
                 UpdatedAt = g.UpdatedAt
             })
@@ -1395,7 +1436,11 @@ public class NetworkSyncService : INetworkSyncService
             .Where(g => g.Count() > 1)
             .OrderBy(g => g.Min(game => game.Name));
 
-        foreach (var group in gamesByRoot)
+        var duplicateGroups = gamesByRoot.ToList();
+        var involvedGames = duplicateGroups.SelectMany(group => group).ToList();
+        var enrichment = await BuildDuplicateEnrichmentAsync(userId, involvedGames);
+
+        foreach (var group in duplicateGroups)
         {
             var groupEdges = edgesByRoot[group.Key];
             var hasFuzzy = groupEdges.Any(edge => edge.MatchType == "fuzzy");
@@ -1404,16 +1449,64 @@ public class NetworkSyncService : INetworkSyncService
             result.DuplicateGroups.Add(new DatabaseDuplicateGroup
             {
                 NormalizedKey = string.Join("|", group.Select(g => g.Id).OrderBy(id => id)),
-                Games = group.OrderBy(g => g.Name).Select(ToDuplicateEntry).ToList(),
+                Games = group.OrderBy(g => g.Name)
+                    .Select(g => ToDuplicateEntry(g, enrichment.GetValueOrDefault(g.Id)))
+                    .ToList(),
                 MatchType = hasFuzzy ? "fuzzy" : "exact",
                 Confidence = minConfidence,
                 Reason = hasFuzzy
                     ? "Nombres muy parecidos: posible typo o variante mínima. Puedes descartarlo si es un falso positivo."
-                    : "Games share the same words in their title (case-insensitive, punctuation ignored)"
+                    : "Coincidencia exacta: mismo título normalizado o el mismo Steam App ID."
             });
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds per-game enrichment data (expected export folder + persisted export status)
+    /// for the games that take part in duplicate groups, using a single export-cache query.
+    /// </summary>
+    private async Task<Dictionary<int, DuplicateEnrichment>> BuildDuplicateEnrichmentAsync(
+        int userId, IReadOnlyCollection<DuplicateCandidateGame> games)
+    {
+        var map = new Dictionary<int, DuplicateEnrichment>();
+        if (games.Count == 0)
+            return map;
+
+        var ids = games.Select(g => g.Id).ToList();
+        var caches = await _context.GameExportCaches
+            .Where(c => ids.Contains(c.GameId))
+            .ToDictionaryAsync(c => c.GameId);
+
+        string? gamesRoot = null;
+        var filesystemAvailable = false;
+        if (!string.IsNullOrWhiteSpace(_syncOptions.NetworkPath))
+        {
+            gamesRoot = Path.Combine(_syncOptions.NetworkPath, userId.ToString(), "Games");
+            try { filesystemAvailable = Directory.Exists(gamesRoot); }
+            catch { filesystemAvailable = false; }
+        }
+
+        foreach (var game in games)
+        {
+            var folderName = FolderNameHelper.MakeSafeFolderName(game.Name);
+            string? folderPath = gamesRoot != null && !string.IsNullOrEmpty(folderName)
+                ? Path.Combine(gamesRoot, folderName)
+                : null;
+
+            var folderExists = false;
+            if (filesystemAvailable && folderPath != null)
+            {
+                try { folderExists = Directory.Exists(folderPath); }
+                catch { folderExists = false; }
+            }
+
+            caches.TryGetValue(game.Id, out var cache);
+            map[game.Id] = new DuplicateEnrichment(folderName, folderPath, folderExists, filesystemAvailable, cache);
+        }
+
+        return map;
     }
 
     private async Task<HashSet<string>> GetDismissedDuplicatePairsAsync(int userId) =>
@@ -1426,6 +1519,14 @@ public class NetworkSyncService : INetworkSyncService
 
     private static DuplicateEdge? TryBuildDuplicateEdge(DuplicateCandidateGame a, DuplicateCandidateGame b)
     {
+        // Strongest signal: a shared external Steam App ID means it is the same game,
+        // even when the stored titles differ (e.g. "GOTY" vs base name).
+        if (a.SteamAppId.HasValue && b.SteamAppId.HasValue &&
+            a.SteamAppId.Value > 0 && a.SteamAppId.Value == b.SteamAppId.Value)
+        {
+            return new DuplicateEdge(a.Id, b.Id, "exact", 100);
+        }
+
         var aWords = GetNormalizedWords(a.Name);
         var bWords = GetNormalizedWords(b.Name);
         if (aWords.Length == 0 || bWords.Length == 0)
@@ -1550,7 +1651,7 @@ public class NetworkSyncService : INetworkSyncService
         return previous[target.Length];
     }
 
-    private static DatabaseDuplicateEntry ToDuplicateEntry(DuplicateCandidateGame game) => new()
+    private static DatabaseDuplicateEntry ToDuplicateEntry(DuplicateCandidateGame game, DuplicateEnrichment? enrichment) => new()
     {
         Id = game.Id,
         Name = game.Name,
@@ -1570,7 +1671,16 @@ public class NetworkSyncService : INetworkSyncService
         SteamAppId = game.SteamAppId,
         SteamPlaytimeForever = game.SteamPlaytimeForever,
         CreatedAt = game.CreatedAt,
-        UpdatedAt = game.UpdatedAt
+        UpdatedAt = game.UpdatedAt,
+        ModifiedSinceExport = game.ModifiedSinceExport,
+        FolderName = enrichment?.FolderName,
+        FolderPath = enrichment?.FolderPath,
+        FolderExists = enrichment?.FolderExists ?? false,
+        FilesystemChecked = enrichment?.FilesystemAvailable ?? false,
+        IsExported = enrichment?.Cache != null,
+        LastExportedAt = enrichment?.Cache?.LastExportedAt,
+        LogoDownloaded = enrichment?.Cache?.LogoDownloaded ?? false,
+        CoverDownloaded = enrichment?.Cache?.CoverDownloaded ?? false
     };
 
     private static List<(int A, int B)> BuildPairs(IReadOnlyList<int> ids)
@@ -1646,9 +1756,17 @@ public class NetworkSyncService : INetworkSyncService
         public string? Cover { get; set; }
         public int? SteamAppId { get; set; }
         public int? SteamPlaytimeForever { get; set; }
+        public bool ModifiedSinceExport { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
 
     private sealed record DuplicateEdge(int GameIdA, int GameIdB, string MatchType, int Confidence);
+
+    private sealed record DuplicateEnrichment(
+        string FolderName,
+        string? FolderPath,
+        bool FolderExists,
+        bool FilesystemAvailable,
+        GameExportCache? Cache);
 }

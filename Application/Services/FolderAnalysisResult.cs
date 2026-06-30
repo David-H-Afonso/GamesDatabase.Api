@@ -23,6 +23,16 @@ public class OrphanFolder
 {
     public string FolderName { get; set; } = string.Empty;
     public string FullPath { get; set; } = string.Empty;
+    /// <summary>Human-readable explanation of why the folder is considered orphan.</summary>
+    public string Reason { get; set; } = string.Empty;
+    /// <summary>Folder creation time (UTC), when the filesystem exposes it.</summary>
+    public DateTime? CreatedAt { get; set; }
+    /// <summary>Folder last-write time (UTC), when the filesystem exposes it.</summary>
+    public DateTime? ModifiedAt { get; set; }
+    /// <summary>Total size in bytes of the folder contents, when it can be computed.</summary>
+    public long? SizeBytes { get; set; }
+    /// <summary>Number of files contained in the folder (recursive), when available.</summary>
+    public int? FileCount { get; set; }
 }
 
 public class MissingGameFolder
@@ -72,6 +82,28 @@ public class DatabaseDuplicateEntry
     public int? SteamPlaytimeForever { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    // ── Folder / file relationships ──────────────────────────────────────────
+    /// <summary>Expected safe folder name for this game in the export structure.</summary>
+    public string? FolderName { get; set; }
+    /// <summary>Full path of the expected export folder, when the network path is configured.</summary>
+    public string? FolderPath { get; set; }
+    /// <summary>Whether the export folder physically exists on disk.</summary>
+    public bool FolderExists { get; set; }
+    /// <summary>Whether the filesystem could actually be inspected (network path reachable).</summary>
+    public bool FilesystemChecked { get; set; }
+
+    // ── Export status ────────────────────────────────────────────────────────
+    /// <summary>Whether the game has ever been exported (has an export cache entry).</summary>
+    public bool IsExported { get; set; }
+    /// <summary>Last time the game was exported, when known.</summary>
+    public DateTime? LastExportedAt { get; set; }
+    /// <summary>Whether the logo image was successfully exported/downloaded.</summary>
+    public bool LogoDownloaded { get; set; }
+    /// <summary>Whether the cover image was successfully exported/downloaded.</summary>
+    public bool CoverDownloaded { get; set; }
+    /// <summary>Whether the game has pending changes not yet exported.</summary>
+    public bool ModifiedSinceExport { get; set; }
 }
 
 public class DeleteOrphanFolderRequest
