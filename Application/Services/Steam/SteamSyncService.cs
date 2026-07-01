@@ -198,7 +198,7 @@ public class SteamSyncService : ISteamSyncService
                 criticProvider,
                 steamPlatform?.Id,
                 coverUrl,
-                resolvedLogoUrl ?? GetSteamLogoUrl(appId, coverUrl));
+                resolvedLogoUrl);
             newGame.SteamPlaytimeForever = ownedGame?.PlaytimeForever;
             newGame.SteamPlaytime2Weeks = ownedGame?.Playtime2Weeks;
             newGame.SteamLastSynced = DateTime.UtcNow;
@@ -287,7 +287,7 @@ public class SteamSyncService : ISteamSyncService
             criticProvider,
             steamPlatform?.Id,
             resolvedCoverUrl,
-            logoUrl: resolvedLogoUrl ?? GetSteamLogoUrl(appId, resolvedCoverUrl));
+            logoUrl: resolvedLogoUrl);
 
         _context.Games.Add(newGame);
         await _context.SaveChangesAsync();
@@ -338,18 +338,6 @@ public class SteamSyncService : ISteamSyncService
         {
             game.Released = normalizedReleaseDate;
         }
-    }
-
-    private static string GetSteamLogoUrl(int appId, string? headerImageUrl = null)
-    {
-        if (!string.IsNullOrWhiteSpace(headerImageUrl))
-        {
-            var logoFromHeader = headerImageUrl.Replace("/header.jpg", "/logo.png", StringComparison.OrdinalIgnoreCase);
-            if (!string.Equals(logoFromHeader, headerImageUrl, StringComparison.Ordinal))
-                return logoFromHeader;
-        }
-
-        return $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/logo.png";
     }
 
     private static bool ShouldReplaceWithCommunityIcon(string? logoUrl)
@@ -415,7 +403,22 @@ public class SteamSyncService : ISteamSyncService
             game.Cover = coverUrl;
 
         if (shouldResolveLogo)
-            game.Logo = !string.IsNullOrWhiteSpace(importItem?.LogoUrl) ? importItem.LogoUrl : GetSteamLogoUrl(appId, coverUrl);
+        {
+            if (!string.IsNullOrWhiteSpace(importItem?.LogoUrl))
+            {
+                game.Logo = importItem.LogoUrl;
+            }
+            else
+            {
+                // All automatic resolution attempts failed (community icon scraping returned nothing
+                // and no owned-game hash icon was available).
+                // Do NOT fall back to logo.png – that asset is absent for most Steam games and
+                // will only produce a permanent broken-image URL.
+                // Instead, clear any existing store-asset URL so the game shows no logo rather
+                // than a 404, and the next sync will retry the community icon.
+                game.Logo = null;
+            }
+        }
     }
 
     private async Task<SteamSyncResult> SyncGameInternalAsync(User user, Game game)
