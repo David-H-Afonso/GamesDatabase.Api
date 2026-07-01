@@ -343,8 +343,12 @@ public class SteamSyncService : ISteamSyncService
     private static bool ShouldReplaceWithCommunityIcon(string? logoUrl)
     {
         if (string.IsNullOrWhiteSpace(logoUrl)) return true;
-        // Community icon (hash-based jpg from steamcommunity) is what we want — keep it
+        // Community icons (hash-based jpg) are what we want — keep them.
+        // Steam serves these from two CDN path patterns:
+        //   Old: .../steamcommunity/public/images/apps/{appId}/{hash}.jpg
+        //   New: .../community_assets/images/apps/{appId}/{hash}.jpg  (Akamai, ~2025)
         if (logoUrl.Contains("steamcommunity/public/images/apps/", StringComparison.OrdinalIgnoreCase)) return false;
+        if (logoUrl.Contains("community_assets/images/apps/", StringComparison.OrdinalIgnoreCase)) return false;
 
         // logo.png, header.jpg and other store assets are NOT icons — replace them
         return logoUrl.Contains("store_item_assets/steam/apps/", StringComparison.OrdinalIgnoreCase)

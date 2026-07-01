@@ -24,8 +24,11 @@ public class SteamStoreService : ISteamStoreService
         PropertyNameCaseInsensitive = true
     };
 
+    // Steam serves community/library icons from two different CDN path patterns.
+    // Old format:  .../steamcommunity/public/images/apps/{appId}/{hash}.jpg
+    // New format:  .../community_assets/images/apps/{appId}/{hash}.jpg  (Akamai CDN, ~2025)
     private static readonly Regex CommunityIconUrlRegex = new(
-        @"https?://[^""'\s<>]+/steamcommunity/public/images/apps/(?<appId>\d+)/(?<hash>[a-f0-9]{32,64})\.jpg",
+        @"https?://[^""'\s<>]+/(?:steamcommunity/public/images|community_assets/images)/apps/(?<appId>\d+)/(?<hash>[a-f0-9]{32,64})\.jpg",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public SteamStoreService(IHttpClientFactory httpClientFactory, IOptions<SteamSettings> settings, GamesDbContext context, ILogger<SteamStoreService> logger)
