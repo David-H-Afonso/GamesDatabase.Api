@@ -94,6 +94,28 @@ public class DatabaseStartupHelper
             "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_steam_match_dismissal_user_id_steam_app_id_game_id\" ON \"steam_match_dismissal\" (\"user_id\", \"steam_app_id\", \"game_id\");",
             "ensured steam match dismissal unique index exists");
 
+        ExecuteRepairSql(conn, logger, """
+            CREATE TABLE IF NOT EXISTS "duplicate_game_dismissal" (
+                "id" INTEGER NOT NULL CONSTRAINT "PK_duplicate_game_dismissal" PRIMARY KEY AUTOINCREMENT,
+                "user_id" INTEGER NOT NULL,
+                "game_id_a" INTEGER NOT NULL,
+                "game_id_b" INTEGER NOT NULL,
+                "created_at" TEXT NOT NULL,
+                CONSTRAINT "FK_duplicate_game_dismissal_game_game_id_a" FOREIGN KEY ("game_id_a") REFERENCES "game" ("id") ON DELETE CASCADE,
+                CONSTRAINT "FK_duplicate_game_dismissal_game_game_id_b" FOREIGN KEY ("game_id_b") REFERENCES "game" ("id") ON DELETE CASCADE,
+                CONSTRAINT "FK_duplicate_game_dismissal_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+            );
+            """, "ensured duplicate_game_dismissal table exists");
+        ExecuteRepairSql(conn, logger,
+            "CREATE INDEX IF NOT EXISTS \"IX_duplicate_game_dismissal_game_id_a\" ON \"duplicate_game_dismissal\" (\"game_id_a\");",
+            "ensured duplicate game dismissal game_id_a index exists");
+        ExecuteRepairSql(conn, logger,
+            "CREATE INDEX IF NOT EXISTS \"IX_duplicate_game_dismissal_game_id_b\" ON \"duplicate_game_dismissal\" (\"game_id_b\");",
+            "ensured duplicate game dismissal game_id_b index exists");
+        ExecuteRepairSql(conn, logger,
+            "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_duplicate_game_dismissal_user_id_game_id_a_game_id_b\" ON \"duplicate_game_dismissal\" (\"user_id\", \"game_id_a\", \"game_id_b\");",
+            "ensured duplicate game dismissal unique index exists");
+
         // Refresh tokens table (JWT security)
         ExecuteRepairSql(conn, logger, """
             CREATE TABLE IF NOT EXISTS "refresh_token" (
