@@ -357,12 +357,15 @@ public class NetworkSyncService : INetworkSyncService
             bool logoFileMissing = !string.IsNullOrWhiteSpace(game.Logo) && !ImageFileExistsOnDisk(gamePath, "logo");
             bool heroFileMissing = !string.IsNullOrWhiteSpace(game.Hero) && !ImageFileExistsOnDisk(gamePath, "hero");
             bool coverFileMissing = !string.IsNullOrWhiteSpace(game.Cover) && !ImageFileExistsOnDisk(gamePath, "cover");
+            bool coverFileMayBeLegacyHero = !string.IsNullOrWhiteSpace(game.Cover) &&
+                                          !IsSelfReferencingUrl(game.Cover) &&
+                                          IsLegacyLocalCoverUrl(game.Hero);
             bool logoNeedsSync = !string.IsNullOrWhiteSpace(game.Logo) &&
                                  (cache == null || cache.LogoUrl != game.Logo || !cache.LogoDownloaded || logoFileMissing);
             bool heroNeedsSync = !string.IsNullOrWhiteSpace(game.Hero) &&
                                  (cache == null || cache.HeroUrl != game.Hero || !cache.HeroDownloaded || heroFileMissing);
             bool coverNeedsSync = !string.IsNullOrWhiteSpace(game.Cover) &&
-                                  (cache == null || cache.CoverUrl != game.Cover || !cache.CoverDownloaded || coverFileMissing);
+                                  (cache == null || cache.CoverUrl != game.Cover || !cache.CoverDownloaded || coverFileMissing || coverFileMayBeLegacyHero);
 
             if (!needsSync && !logoNeedsSync && !heroNeedsSync && !coverNeedsSync)
             {
@@ -1138,6 +1141,15 @@ public class NetworkSyncService : INetworkSyncService
             return true;
 
         return false;
+    }
+
+    private static bool IsLegacyLocalCoverUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        return url.Contains("/game-images/", StringComparison.OrdinalIgnoreCase) &&
+               url.Contains("/cover.", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -153,11 +153,26 @@ public class GameImportExportService : IGameImportExportService
                 {
                     foreach (var ext in extensions)
                     {
-                        var coverPath = Path.Combine(gamePath, $"cover{ext}");
-                        if (File.Exists(coverPath))
+                        var heroPath = Path.Combine(gamePath, $"hero{ext}");
+                        if (File.Exists(heroPath))
                         {
-                            heroUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
+                            heroUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/hero{ext}";
                             break;
+                        }
+                    }
+
+                    // Legacy exports stored the horizontal image as cover.* before Hero existed.
+                    // Use it only as a fallback when no hero.* has been written yet.
+                    if (heroUrl == null)
+                    {
+                        foreach (var ext in extensions)
+                        {
+                            var legacyCoverPath = Path.Combine(gamePath, $"cover{ext}");
+                            if (File.Exists(legacyCoverPath))
+                            {
+                                heroUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
+                                break;
+                            }
                         }
                     }
                 }
@@ -165,14 +180,47 @@ public class GameImportExportService : IGameImportExportService
                 {
                     heroUrl = await DetectImageUrlViaHttpAsync(
                         effectiveImageBaseUrl,
+                        $"game-images/{userId}/Games/{folderName}/hero",
+                        extensions);
+
+                    heroUrl ??= await DetectImageUrlViaHttpAsync(
+                        effectiveImageBaseUrl,
                         $"game-images/{userId}/Games/{folderName}/cover",
                         extensions);
                 }
-                heroUrl ??= $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover.png";
+                heroUrl ??= $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/hero.png";
 
                 if (game.Hero != heroUrl)
                 {
                     game.Hero = heroUrl;
+                    updated = true;
+                    alreadyCorrect = false;
+                }
+
+                string? coverUrl = null;
+                if (nasAccessible)
+                {
+                    foreach (var ext in extensions)
+                    {
+                        var coverPath = Path.Combine(gamePath, $"cover{ext}");
+                        if (File.Exists(coverPath))
+                        {
+                            coverUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    coverUrl = await DetectImageUrlViaHttpAsync(
+                        effectiveImageBaseUrl,
+                        $"game-images/{userId}/Games/{folderName}/cover",
+                        extensions);
+                }
+
+                if (coverUrl != null && game.Cover != coverUrl)
+                {
+                    game.Cover = coverUrl;
                     updated = true;
                     alreadyCorrect = false;
                 }
