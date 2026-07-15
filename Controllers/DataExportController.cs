@@ -56,15 +56,6 @@ public class DataExportController : BaseApiController
         return Ok(result);
     }
 
-    [HttpPost("copy-cover-to-hero")]
-    [Authorize]
-    public async Task<ActionResult<CopyCoverToHeroResult>> CopyCoverToHero([FromQuery] bool overwrite = false)
-    {
-        var userId = GetCurrentUserIdOrDefault(1);
-        var result = await _importExportService.CopyCoverToHeroAsync(userId, overwrite);
-        return Ok(result);
-    }
-
     [HttpGet("analyze-folders")]
     [Authorize]
     public async Task<ActionResult<FolderAnalysisResult>> AnalyzeFolders()
@@ -387,14 +378,4 @@ public class UpdateImageUrlsResult
     public List<string> Errors { get; set; } = new();
     public bool NasAccessible { get; set; }
     public string? NasWarning { get; set; }
-}
-
-public class CopyCoverToHeroResult
-{
-    public int TotalGames { get; set; }
-    public int UpdatedGames { get; set; }
-    public int SkippedNoCover { get; set; }
-    public int SkippedExistingHero { get; set; }
-    public int AlreadyCorrect { get; set; }
-    public string Message { get; set; } = string.Empty;
 }

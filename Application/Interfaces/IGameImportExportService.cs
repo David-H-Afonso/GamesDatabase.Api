@@ -7,7 +7,6 @@ namespace GamesDatabase.Api.Application.Interfaces;
 public interface IGameImportExportService
 {
     Task<UpdateImageUrlsResult> UpdateImageUrlsAsync(int userId, string? imageBaseUrl, string? networkSyncPath, string? configImageBaseUrl, string? networkUsername, string? networkPassword);
-    Task<CopyCoverToHeroResult> CopyCoverToHeroAsync(int userId, bool overwriteExistingHero = false);
     Task<FolderAnalysisResult> AnalyzeFoldersAsync(int userId);
     Task<DatabaseDuplicatesResult> AnalyzeDuplicateGamesAsync(int userId);
     Task<byte[]> ExportFullDatabaseAsync(int userId);

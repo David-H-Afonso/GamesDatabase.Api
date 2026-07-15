@@ -234,55 +234,6 @@ public class GameImportExportService : IGameImportExportService
         return result;
     }
 
-    public async Task<CopyCoverToHeroResult> CopyCoverToHeroAsync(int userId, bool overwriteExistingHero = false)
-    {
-        var games = await _context.Games
-            .Where(g => g.UserId == userId)
-            .ToListAsync();
-
-        var result = new CopyCoverToHeroResult
-        {
-            TotalGames = games.Count,
-        };
-
-        foreach (var game in games)
-        {
-            if (string.IsNullOrWhiteSpace(game.Cover))
-            {
-                result.SkippedNoCover++;
-                continue;
-            }
-
-            if (game.Hero == game.Cover)
-            {
-                result.AlreadyCorrect++;
-                continue;
-            }
-
-            if (!overwriteExistingHero && !string.IsNullOrWhiteSpace(game.Hero))
-            {
-                result.SkippedExistingHero++;
-                continue;
-            }
-
-            game.Hero = game.Cover;
-            result.UpdatedGames++;
-        }
-
-        if (result.UpdatedGames > 0)
-        {
-            await _context.SaveChangesAsync();
-            _logger.LogWarning(
-                "Manual Cover to Hero copy updated {UpdatedGames} games for user {UserId}. OverwriteExistingHero={OverwriteExistingHero}",
-                result.UpdatedGames,
-                userId,
-                overwriteExistingHero);
-        }
-
-        result.Message = $"Copied Cover to Hero for {result.UpdatedGames} games.";
-        return result;
-    }
-
     public async Task<FolderAnalysisResult> AnalyzeFoldersAsync(int userId)
     {
         return await _networkSyncService.AnalyzeFoldersAsync(userId);
