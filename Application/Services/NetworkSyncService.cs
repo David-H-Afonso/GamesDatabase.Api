@@ -352,13 +352,17 @@ public class NetworkSyncService : INetworkSyncService
             var cache = exportCaches.GetValueOrDefault(dbGame.Id);
             bool needsSync = fullSync || dbGame.ModifiedSinceExport || cache == null;
 
-            // Check images - sync if URL changed or if previous download failed
+            // Check images - sync if URL changed, previous download failed, or the physical file is missing.
+            // The cache can survive migrations/manual cleanup, but the NAS folder must be the source of truth.
+            bool logoFileMissing = !string.IsNullOrWhiteSpace(game.Logo) && !ImageFileExistsOnDisk(gamePath, "logo");
+            bool heroFileMissing = !string.IsNullOrWhiteSpace(game.Hero) && !ImageFileExistsOnDisk(gamePath, "hero");
+            bool coverFileMissing = !string.IsNullOrWhiteSpace(game.Cover) && !ImageFileExistsOnDisk(gamePath, "cover");
             bool logoNeedsSync = !string.IsNullOrWhiteSpace(game.Logo) &&
-                                 (cache == null || cache.LogoUrl != game.Logo || !cache.LogoDownloaded);
+                                 (cache == null || cache.LogoUrl != game.Logo || !cache.LogoDownloaded || logoFileMissing);
             bool heroNeedsSync = !string.IsNullOrWhiteSpace(game.Hero) &&
-                                 (cache == null || cache.HeroUrl != game.Hero || !cache.HeroDownloaded);
+                                 (cache == null || cache.HeroUrl != game.Hero || !cache.HeroDownloaded || heroFileMissing);
             bool coverNeedsSync = !string.IsNullOrWhiteSpace(game.Cover) &&
-                                  (cache == null || cache.CoverUrl != game.Cover || !cache.CoverDownloaded);
+                                  (cache == null || cache.CoverUrl != game.Cover || !cache.CoverDownloaded || coverFileMissing);
 
             if (!needsSync && !logoNeedsSync && !heroNeedsSync && !coverNeedsSync)
             {
@@ -499,8 +503,13 @@ public class NetworkSyncService : INetworkSyncService
 
                 if (isSelfReferencing)
                 {
-                    // Existing data can still point to /cover.* after the Hero migration.
-                    bool fileExists = ImageFileExistsOnDisk(gamePath, "hero") || ImageFileExistsOnDisk(gamePath, "cover");
+                    bool fileExists = ImageFileExistsOnDisk(gamePath, "hero");
+                    if (!fileExists && ImageFileExistsOnDisk(gamePath, "cover") && TryCopyImageFile(gamePath, "cover", "hero"))
+                    {
+                        fileExists = true;
+                        result.FilesWritten++;
+                        _logger.LogInformation("Copied legacy cover image to hero for '{Name}'", game.Name);
+                    }
                     if (fileExists)
                     {
                         if (cache != null) cache.HeroDownloaded = true;
@@ -1144,6 +1153,23 @@ public class NetworkSyncService : INetworkSyncService
             if (File.Exists(filePath))
                 return true;
         }
+        return false;
+    }
+
+    private static bool TryCopyImageFile(string gamePath, string fromPrefix, string toPrefix)
+    {
+        var imageExtensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico" };
+        foreach (var ext in imageExtensions)
+        {
+            var sourcePath = Path.Combine(gamePath, $"{fromPrefix}{ext}");
+            if (!File.Exists(sourcePath))
+                continue;
+
+            var destinationPath = Path.Combine(gamePath, $"{toPrefix}{ext}");
+            File.Copy(sourcePath, destinationPath, overwrite: true);
+            return true;
+        }
+
         return false;
     }
 
