@@ -148,7 +148,7 @@ public class GameImportExportService : IGameImportExportService
                     alreadyCorrect = false;
                 }
 
-                string? coverUrl = null;
+                string? heroUrl = null;
                 if (nasAccessible)
                 {
                     foreach (var ext in extensions)
@@ -156,23 +156,23 @@ public class GameImportExportService : IGameImportExportService
                         var coverPath = Path.Combine(gamePath, $"cover{ext}");
                         if (File.Exists(coverPath))
                         {
-                            coverUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
+                            heroUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover{ext}";
                             break;
                         }
                     }
                 }
                 else
                 {
-                    coverUrl = await DetectImageUrlViaHttpAsync(
+                    heroUrl = await DetectImageUrlViaHttpAsync(
                         effectiveImageBaseUrl,
                         $"game-images/{userId}/Games/{folderName}/cover",
                         extensions);
                 }
-                coverUrl ??= $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover.png";
+                heroUrl ??= $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/cover.png";
 
-                if (game.Cover != coverUrl)
+                if (game.Hero != heroUrl)
                 {
-                    game.Cover = coverUrl;
+                    game.Hero = heroUrl;
                     updated = true;
                     alreadyCorrect = false;
                 }
@@ -267,7 +267,7 @@ public class GameImportExportService : IGameImportExportService
             var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                 ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                 : "";
-            allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
+            allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Hero = g.Hero ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
         }
 
         var replayTypes = await _context.GameReplayTypes.Where(r => r.UserId == userId).OrderBy(r => r.SortOrder).ThenBy(r => EF.Functions.Collate(r.Name, "NOCASE")).ToListAsync();
@@ -338,6 +338,9 @@ public class GameImportExportService : IGameImportExportService
         var results = new { platformsImported = 0, platformsUpdated = 0, statusesImported = 0, statusesUpdated = 0, playWithsImported = 0, playWithsUpdated = 0, playedStatusesImported = 0, playedStatusesUpdated = 0, viewsImported = 0, viewsUpdated = 0, gamesImported = 0, gamesUpdated = 0, replayTypesImported = 0, replayTypesUpdated = 0, replaysImported = 0, replaysUpdated = 0, historyImported = 0, errors = new List<string>() };
         using var reader = new StreamReader(csvStream, Encoding.UTF8);
         using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture) { Delimiter = _exportSettings.CsvDelimiter, HeaderValidated = null, MissingFieldFound = null });
+        csv.Read();
+        csv.ReadHeader();
+        var hasHeroHeader = csv.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
         var allRecords = csv.GetRecords<FullExportModel>().ToList();
         var platforms = allRecords.Where(r => r.Type == "Platform").ToList();
         var statuses = allRecords.Where(r => r.Type == "Status").ToList();
@@ -493,7 +496,8 @@ public class GameImportExportService : IGameImportExportService
                     existing.Story = ParseNullableInt(record.Story);
                     existing.Comment = record.Comment;
                     existing.Logo = record.Logo;
-                    existing.Cover = record.Cover;
+                    existing.Hero = ResolveLegacyHero(record.Hero, record.Cover, hasHeroHeader);
+                    existing.Cover = ResolveLegacyCover(record.Hero, record.Cover, hasHeroHeader);
                     existing.IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var existingCbk) ? existingCbk : (bool?)null;
                     existing.KeyStoreUrl = record.KeyStoreUrl;
                     existing.SteamAppId = ParseNullableInt(record.SteamAppId);
@@ -537,7 +541,8 @@ public class GameImportExportService : IGameImportExportService
                         Story = ParseNullableInt(record.Story),
                         Comment = record.Comment,
                         Logo = record.Logo,
-                        Cover = record.Cover,
+                        Hero = ResolveLegacyHero(record.Hero, record.Cover, hasHeroHeader),
+                        Cover = ResolveLegacyCover(record.Hero, record.Cover, hasHeroHeader),
                         IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var newCbk) ? newCbk : (bool?)null,
                         KeyStoreUrl = record.KeyStoreUrl,
                         SteamAppId = ParseNullableInt(record.SteamAppId),
@@ -792,6 +797,7 @@ public class GameImportExportService : IGameImportExportService
                 Story = ApplyExportString(g.Story?.ToString() ?? "", "story", effectiveConfig),
                 Comment = ApplyExportString(g.Comment ?? "", "comment", effectiveConfig),
                 Logo = ApplyExportString(g.Logo ?? "", "logo", effectiveConfig),
+                Hero = ApplyExportString(g.Hero ?? "", "hero", effectiveConfig),
                 Cover = ApplyExportString(g.Cover ?? "", "cover", effectiveConfig),
                 IsCheaperByKey = ApplyExportString(g.IsCheaperByKey?.ToString() ?? "", "isCheaperByKey", effectiveConfig),
                 KeyStoreUrl = ApplyExportString(g.KeyStoreUrl ?? "", "keyStoreUrl", effectiveConfig),
@@ -821,6 +827,7 @@ public class GameImportExportService : IGameImportExportService
         }
 
         List<FullExportModel> gameRows;
+        bool hasHeroHeader;
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             Delimiter = _exportSettings.CsvDelimiter,
@@ -832,6 +839,9 @@ public class GameImportExportService : IGameImportExportService
         {
             using var reader = new StreamReader(csvFileStream, Encoding.UTF8);
             using var csvReader = new CsvReader(reader, csvConfig);
+            csvReader.Read();
+            csvReader.ReadHeader();
+            hasHeroHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
             gameRows = csvReader.GetRecords<FullExportModel>()
                 .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
                 .ToList();
@@ -840,6 +850,9 @@ public class GameImportExportService : IGameImportExportService
         {
             using var reader = new StringReader(csvText!);
             using var csvReader = new CsvReader(reader, csvConfig);
+            csvReader.Read();
+            csvReader.ReadHeader();
+            hasHeroHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
             gameRows = csvReader.GetRecords<FullExportModel>()
                 .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
                 .ToList();
@@ -894,7 +907,10 @@ public class GameImportExportService : IGameImportExportService
                 var resolvedStory = ResolveImportString(record.Story, "story", effectiveConfig);
                 var resolvedComment = ResolveImportString(record.Comment, "comment", effectiveConfig);
                 var resolvedLogo = ResolveImportString(record.Logo, "logo", effectiveConfig);
+                var resolvedHero = ResolveImportString(record.Hero, "hero", effectiveConfig);
                 var resolvedCover = ResolveImportString(record.Cover, "cover", effectiveConfig);
+                var normalizedHero = ResolveLegacyHero(resolvedHero, resolvedCover, hasHeroHeader);
+                var normalizedCover = ResolveLegacyCover(resolvedHero, resolvedCover, hasHeroHeader);
                 var resolvedIsCheaperByKey = ResolveImportString(record.IsCheaperByKey, "isCheaperByKey", effectiveConfig);
                 var resolvedKeyStoreUrl = ResolveImportString(record.KeyStoreUrl, "keyStoreUrl", effectiveConfig);
                 var resolvedSteamAppId = ResolveImportString(record.SteamAppId, "steamAppId", effectiveConfig);
@@ -956,7 +972,8 @@ public class GameImportExportService : IGameImportExportService
                     existing.Story = ParseNullableInt(resolvedStory);
                     existing.Comment = resolvedComment;
                     existing.Logo = resolvedLogo;
-                    existing.Cover = resolvedCover;
+                    existing.Hero = normalizedHero;
+                    existing.Cover = normalizedCover;
                     existing.IsCheaperByKey = isCheaperByKey;
                     existing.KeyStoreUrl = resolvedKeyStoreUrl;
                     existing.SteamAppId = ParseNullableInt(resolvedSteamAppId);
@@ -993,7 +1010,8 @@ public class GameImportExportService : IGameImportExportService
                         Story = ParseNullableInt(resolvedStory),
                         Comment = resolvedComment,
                         Logo = resolvedLogo,
-                        Cover = resolvedCover,
+                        Hero = normalizedHero,
+                        Cover = normalizedCover,
                         IsCheaperByKey = isCheaperByKey,
                         KeyStoreUrl = resolvedKeyStoreUrl,
                         SteamAppId = ParseNullableInt(resolvedSteamAppId),
@@ -1071,6 +1089,18 @@ public class GameImportExportService : IGameImportExportService
             "custom" => propOverride.CustomValue,
             _ => csvValue,
         };
+    }
+
+    private static string? ResolveLegacyHero(string? hero, string? cover, bool hasHeroHeader)
+    {
+        if (hasHeroHeader) return string.IsNullOrWhiteSpace(hero) ? null : hero;
+        return string.IsNullOrWhiteSpace(hero) ? (string.IsNullOrWhiteSpace(cover) ? null : cover) : hero;
+    }
+
+    private static string? ResolveLegacyCover(string? hero, string? cover, bool hasHeroHeader)
+    {
+        if (hasHeroHeader) return string.IsNullOrWhiteSpace(cover) ? null : cover;
+        return string.IsNullOrWhiteSpace(hero) ? null : (string.IsNullOrWhiteSpace(cover) ? null : cover);
     }
 
     private static int? ParseNullableInt(string? value)

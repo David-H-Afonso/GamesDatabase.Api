@@ -26,6 +26,7 @@ public static class MappingExtensions
             PlayWithIds = game.GamePlayWiths?.Select(gpw => gpw.PlayWithId).ToList() ?? new List<int>(),
             PlayedStatusId = game.PlayedStatusId,
             Logo = game.Logo,
+            Hero = game.Hero,
             Cover = game.Cover,
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
@@ -69,6 +70,7 @@ public static class MappingExtensions
             Comment = dto.Comment,
             PlayedStatusId = dto.PlayedStatusId,
             Logo = dto.Logo,
+            Hero = dto.Hero,
             Cover = dto.Cover,
             IsCheaperByKey = dto.IsCheaperByKey,
             KeyStoreUrl = dto.KeyStoreUrl,
@@ -99,6 +101,7 @@ public static class MappingExtensions
         if (dto.Comment != null) entity.Comment = dto.Comment;
         if (dto.PlayedStatusId.HasValue) entity.PlayedStatusId = dto.PlayedStatusId.Value;
         if (dto.Logo != null) entity.Logo = dto.Logo;
+        if (dto.Hero != null) entity.Hero = dto.Hero;
         if (dto.Cover != null) entity.Cover = dto.Cover;
 
         // Always update IsCheaperByKey if present in DTO (even if null, to allow clearing)

@@ -33,8 +33,9 @@ public class Game
     public string? Comment { get; set; }
     public int? PlayedStatusId { get; set; }
 
-    // Image paths for logo and cover
+    // Image URLs: logo, horizontal hero/banner, and vertical cover art.
     public string? Logo { get; set; }
+    public string? Hero { get; set; }
     public string? Cover { get; set; }
 
     // Price comparison fields

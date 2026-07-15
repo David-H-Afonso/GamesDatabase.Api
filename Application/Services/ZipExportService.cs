@@ -223,7 +223,7 @@ public class ZipExportService : IZipExportService
         var gameNames = games.Select(g => g.Name).ToList();
         var dbGames = await _context.Games
             .Where(g => gameNames.Contains(g.Name))
-            .Select(g => new { g.Id, g.Name, g.ModifiedSinceExport, g.Logo, g.Cover })
+            .Select(g => new { g.Id, g.Name, g.ModifiedSinceExport, g.Logo, g.Hero, g.Cover })
             .ToListAsync();
 
         var exportCaches = await _context.GameExportCaches
@@ -254,10 +254,12 @@ public class ZipExportService : IZipExportService
             // Check if images need retry
             bool logoNeedsRetry = !string.IsNullOrWhiteSpace(game.Logo) &&
                                   (cache == null || (!cache.LogoDownloaded && cache.LogoUrl == game.Logo));
+            bool heroNeedsRetry = !string.IsNullOrWhiteSpace(game.Hero) &&
+                                  (cache == null || (!cache.HeroDownloaded && cache.HeroUrl == game.Hero));
             bool coverNeedsRetry = !string.IsNullOrWhiteSpace(game.Cover) &&
                                    (cache == null || (!cache.CoverDownloaded && cache.CoverUrl == game.Cover));
 
-            if (!needsExport && !logoNeedsRetry && !coverNeedsRetry)
+            if (!needsExport && !logoNeedsRetry && !heroNeedsRetry && !coverNeedsRetry)
             {
                 _logger.LogDebug("Skipping '{Name}' - no changes since last export", game.Name);
                 stats.GamesSkipped++;
@@ -343,7 +345,36 @@ public class ZipExportService : IZipExportService
                 cache.LogoDownloaded = logoDownloaded;
             }
 
-            // Download and add cover
+            // Download and add hero
+            bool heroDownloaded = false;
+            if (!string.IsNullOrWhiteSpace(game.Hero) && (needsExport || heroNeedsRetry))
+            {
+                if (heroNeedsRetry)
+                {
+                    _logger.LogInformation("Retrying hero download for '{Name}'", game.Name);
+                    stats.ImagesRetried++;
+                }
+
+                var heroBytes = await SafeDownloadAsync(game.Hero);
+                if (heroBytes != null)
+                {
+                    var extension = GetExtensionFromUrl(game.Hero);
+                    var entry = archive.CreateEntry($"{basePath}/hero{extension}");
+                    using var entryStream = entry.Open();
+                    await entryStream.WriteAsync(heroBytes);
+                    heroDownloaded = true;
+                    stats.ImagesDownloaded++;
+                }
+                else
+                {
+                    stats.ImagesFailed++;
+                }
+
+                cache.HeroUrl = game.Hero;
+                cache.HeroDownloaded = heroDownloaded;
+            }
+
+            // Download and add vertical cover art
             bool coverDownloaded = false;
             if (!string.IsNullOrWhiteSpace(game.Cover) && (needsExport || coverNeedsRetry))
             {

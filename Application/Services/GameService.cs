@@ -316,6 +316,7 @@ public class GameService : IGameService
             Comment = game.Comment,
             PlayedStatusId = game.PlayedStatusId,
             Logo = game.Logo,
+            Hero = game.Hero,
             Cover = game.Cover,
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
@@ -428,6 +429,16 @@ public class GameService : IGameService
                 return GameServiceResult.BadRequest("Invalid logo URL format");
             }
             game.Logo = logoUrl;
+        }
+
+        if (gameDto.TryGetProperty("hero", out var heroElement))
+        {
+            var heroUrl = heroElement.ValueKind == JsonValueKind.Null ? null : heroElement.GetString();
+            if (!string.IsNullOrWhiteSpace(heroUrl) && !IsValidUrl(heroUrl))
+            {
+                return GameServiceResult.BadRequest("Invalid hero URL format");
+            }
+            game.Hero = heroUrl;
         }
 
         if (gameDto.TryGetProperty("cover", out var coverElement))
@@ -745,7 +756,7 @@ public class GameService : IGameService
         {
             query = query.Where(g =>
                 g.Status != null && g.Status.StatusType == SpecialStatusType.NotFulfilled ||
-                string.IsNullOrEmpty(g.Cover) ||
+                string.IsNullOrEmpty(g.Hero) ||
                 string.IsNullOrEmpty(g.Logo) ||
                 g.PlatformId == null
             );

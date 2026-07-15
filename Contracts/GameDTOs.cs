@@ -19,6 +19,7 @@ public class GameDto
     public List<int> PlayWithIds { get; set; } = new List<int>();
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
+    public string? Hero { get; set; }
     public string? Cover { get; set; }
 
     // Price comparison fields
@@ -71,6 +72,7 @@ public class GameCreateDto
     public List<int> PlayWithIds { get; set; } = new List<int>();
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
+    public string? Hero { get; set; }
     public string? Cover { get; set; }
 
     // Price comparison fields
@@ -103,6 +105,7 @@ public class GameUpdateDto
     public List<int>? PlayWithIds { get; set; }
     public int? PlayedStatusId { get; set; }
     public string? Logo { get; set; }
+    public string? Hero { get; set; }
     public string? Cover { get; set; }
 
     // Price comparison fields
