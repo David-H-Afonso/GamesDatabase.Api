@@ -135,8 +135,11 @@ public class GameHistoryService : IGameHistoryService
         if (game.PlayedStatusId.HasValue)
             Add("PlayedStatus", game.PlayedStatus?.Name ?? game.PlayedStatusId.ToString(), $"Estado de juego: {game.PlayedStatus?.Name ?? game.PlayedStatusId.ToString()}");
 
+        if (!string.IsNullOrEmpty(game.Hero))
+            Add("Hero", game.Hero, "Hero establecida");
+
         if (!string.IsNullOrEmpty(game.Cover))
-            Add("Cover", game.Cover, "Portada establecida");
+            Add("Cover", game.Cover, "Carátula establecida");
 
         if (!string.IsNullOrEmpty(game.Logo))
             Add("Logo", game.Logo, "Logo establecido");
@@ -279,11 +282,18 @@ public class GameHistoryService : IGameHistoryService
                 entries.Add(Changed("Logo", before.Logo, newVal, newVal == null ? "Logo eliminado" : "Logo actualizado")!);
         }
 
+        if (patch.TryGetProperty("hero", out var heroEl))
+        {
+            var newVal = heroEl.ValueKind == System.Text.Json.JsonValueKind.Null ? null : heroEl.GetString();
+            if (before.Hero != newVal)
+                entries.Add(Changed("Hero", before.Hero, newVal, newVal == null ? "Hero eliminada" : "Hero actualizada")!);
+        }
+
         if (patch.TryGetProperty("cover", out var coverEl))
         {
             var newVal = coverEl.ValueKind == System.Text.Json.JsonValueKind.Null ? null : coverEl.GetString();
             if (before.Cover != newVal)
-                entries.Add(Changed("Cover", before.Cover, newVal, newVal == null ? "Portada eliminada" : "Portada actualizada")!);
+                entries.Add(Changed("Cover", before.Cover, newVal, newVal == null ? "Carátula eliminada" : "Carátula actualizada")!);
         }
 
         if (patch.TryGetProperty("isCheaperByKey", out var isCheaperEl))

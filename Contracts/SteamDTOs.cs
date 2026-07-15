@@ -329,6 +329,7 @@ public class SteamImportGameRequest
 {
     public int AppId { get; set; }
     public string? LogoUrl { get; set; }
+    public string? HeroUrl { get; set; }
     public string? CoverUrl { get; set; }
 }
 
@@ -506,6 +507,7 @@ public class SteamStoreSearchItemDto
 {
     public int AppId { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? HeroUrl { get; set; }
     public string? CoverUrl { get; set; }
     public string? LogoUrl { get; set; }
     public string? Price { get; set; }
@@ -518,5 +520,6 @@ public class SteamAddStoreGameRequest
 {
     public int AppId { get; set; }
     public string? LogoUrl { get; set; }
+    public string? HeroUrl { get; set; }
     public string? CoverUrl { get; set; }
 }

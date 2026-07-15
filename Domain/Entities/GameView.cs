@@ -104,6 +104,7 @@ public enum FilterField
     Comment,
     Description,
     Logo,
+    Hero,
     Cover,
     CriticProvider,
     CreatedAt,

@@ -24,6 +24,8 @@ public class SteamSyncService : ISteamSyncService
         _logger = logger;
     }
 
+    private static string GetSteamLibraryCoverUrl(int appId) => $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/library_600x900.jpg";
+
     public async Task<SteamSyncResult> SyncGameAsync(int userId, int gameId)
     {
         var user = await _context.Users.FindAsync(userId);
@@ -176,8 +178,9 @@ public class SteamSyncService : ISteamSyncService
                 continue;
             }
 
-            // Use header image from store cache, fall back to standard CDN URL
-            var coverUrl = appDetails?.HeaderImageUrl ?? importItem.CoverUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+            // Use the horizontal Steam header as the game's hero image.
+            var heroUrl = appDetails?.HeaderImageUrl ?? importItem.HeroUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+            var coverUrl = importItem.CoverUrl ?? GetSteamLibraryCoverUrl(appId);
 
             var (criticScore, criticProvider) = await ResolveSteamCriticScoreAsync(appId, appDetails);
 
@@ -197,6 +200,7 @@ public class SteamSyncService : ISteamSyncService
                 criticScore,
                 criticProvider,
                 steamPlatform?.Id,
+                heroUrl,
                 coverUrl,
                 resolvedLogoUrl);
             newGame.SteamPlaytimeForever = ownedGame?.PlaytimeForever;
@@ -234,7 +238,7 @@ public class SteamSyncService : ISteamSyncService
         }
     }
 
-    public async Task<SteamImportedGameDto> AddStoreGameAsync(int userId, int appId, string? logoUrl = null, string? coverUrl = null)
+    public async Task<SteamImportedGameDto> AddStoreGameAsync(int userId, int appId, string? logoUrl = null, string? heroUrl = null, string? coverUrl = null)
     {
         // Check if already exists in GDB
         var existing = await _context.Games
@@ -252,7 +256,8 @@ public class SteamSyncService : ISteamSyncService
         // Fetch store details
         var appDetails = await _steamStore.GetOrCacheAppDetailsAsync(appId);
         var gameName = appDetails?.Name ?? $"Steam App {appId}";
-        var resolvedCoverUrl = appDetails?.HeaderImageUrl ?? coverUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+        var resolvedHeroUrl = appDetails?.HeaderImageUrl ?? heroUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+        var resolvedCoverUrl = coverUrl ?? GetSteamLibraryCoverUrl(appId);
 
         // Find Steam platform
         var steamPlatform = await _context.GamePlatforms
@@ -286,6 +291,7 @@ public class SteamSyncService : ISteamSyncService
             criticScore,
             criticProvider,
             steamPlatform?.Id,
+            resolvedHeroUrl,
             resolvedCoverUrl,
             logoUrl: resolvedLogoUrl);
 
@@ -309,6 +315,7 @@ public class SteamSyncService : ISteamSyncService
         int? criticScore,
         string? criticProvider,
         int? platformId,
+        string? heroUrl,
         string? coverUrl,
         string? logoUrl)
     {
@@ -322,6 +329,7 @@ public class SteamSyncService : ISteamSyncService
             Released = GameDateNormalizer.NormalizeSteamReleaseDate(appDetails?.ReleaseDate),
             PlayWithIds = [],
             Logo = logoUrl,
+            Hero = heroUrl,
             Cover = coverUrl,
             SteamAppId = appId
         };
@@ -378,9 +386,10 @@ public class SteamSyncService : ISteamSyncService
 
         var appId = game.SteamAppId.Value;
         var shouldResolveLogo = ShouldReplaceWithCommunityIcon(game.Logo);
+        var shouldResolveHero = string.IsNullOrWhiteSpace(game.Hero);
         var shouldResolveCover = string.IsNullOrWhiteSpace(game.Cover);
 
-        if (!shouldResolveCover && !shouldResolveLogo) return;
+        if (!shouldResolveHero && !shouldResolveCover && !shouldResolveLogo) return;
 
         // Try the community icon from the store page (actual game icon, best quality available)
         if (shouldResolveLogo)
@@ -398,13 +407,15 @@ public class SteamSyncService : ISteamSyncService
             }
         }
 
-        if (!shouldResolveCover && !shouldResolveLogo) return;
+        if (!shouldResolveHero && !shouldResolveCover && !shouldResolveLogo) return;
 
         var appDetails = await _steamStore.GetOrCacheAppDetailsAsync(appId);
-        var coverUrl = appDetails?.HeaderImageUrl ?? importItem?.CoverUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
+
+        if (shouldResolveHero)
+            game.Hero = appDetails?.HeaderImageUrl ?? importItem?.HeroUrl ?? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
 
         if (shouldResolveCover)
-            game.Cover = coverUrl;
+            game.Cover = importItem?.CoverUrl ?? GetSteamLibraryCoverUrl(appId);
 
         if (shouldResolveLogo)
         {

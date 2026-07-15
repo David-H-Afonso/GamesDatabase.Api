@@ -342,6 +342,7 @@ public class FullExportModel
     public string? Story { get; set; }
     public string? Comment { get; set; }
     public string? Logo { get; set; }
+    public string? Hero { get; set; }
     public string? Cover { get; set; }
     [Name("IsCheaperByKey")]
     public string? IsCheaperByKey { get; set; }

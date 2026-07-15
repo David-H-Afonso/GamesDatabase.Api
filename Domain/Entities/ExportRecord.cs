@@ -70,6 +70,9 @@ public class ExportRecord
     [Name("Logo")]
     public string? Logo { get; set; }
 
+    [Name("Hero")]
+    public string? Hero { get; set; }
+
     [Name("Cover")]
     public string? Cover { get; set; }
 

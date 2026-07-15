@@ -147,6 +147,7 @@ public class ViewFilterService : IViewFilterService
             FilterField.Comment => Expression.Property(parameter, nameof(Game.Comment)),
             FilterField.Description => Expression.Property(parameter, nameof(Game.Comment)),
             FilterField.Logo => Expression.Property(parameter, nameof(Game.Logo)),
+            FilterField.Hero => Expression.Property(parameter, nameof(Game.Hero)),
             FilterField.Cover => Expression.Property(parameter, nameof(Game.Cover)),
             FilterField.CreatedAt => Expression.Property(parameter, nameof(Game.CreatedAt)),
             FilterField.UpdatedAt => Expression.Property(parameter, nameof(Game.UpdatedAt)),

@@ -77,6 +77,7 @@ public class DatabaseDuplicateEntry
     public int? Story { get; set; }
     public int? Completion { get; set; }
     public string? Logo { get; set; }
+    public string? Hero { get; set; }
     public string? Cover { get; set; }
     public int? SteamAppId { get; set; }
     public int? SteamPlaytimeForever { get; set; }
@@ -100,7 +101,9 @@ public class DatabaseDuplicateEntry
     public DateTime? LastExportedAt { get; set; }
     /// <summary>Whether the logo image was successfully exported/downloaded.</summary>
     public bool LogoDownloaded { get; set; }
-    /// <summary>Whether the cover image was successfully exported/downloaded.</summary>
+    /// <summary>Whether the hero image was successfully exported/downloaded.</summary>
+    public bool HeroDownloaded { get; set; }
+    /// <summary>Whether the vertical cover image was successfully exported/downloaded.</summary>
     public bool CoverDownloaded { get; set; }
     /// <summary>Whether the game has pending changes not yet exported.</summary>
     public bool ModifiedSinceExport { get; set; }

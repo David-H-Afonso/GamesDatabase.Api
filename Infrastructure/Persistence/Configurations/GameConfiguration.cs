@@ -27,6 +27,7 @@ public class GameConfiguration : IEntityTypeConfiguration<Game>
         entity.Property(e => e.Comment).HasColumnName("comment");
         entity.Property(e => e.PlayedStatusId).HasColumnName("played_status_id");
         entity.Property(e => e.Logo).HasColumnName("logo");
+        entity.Property(e => e.Hero).HasColumnName("hero");
         entity.Property(e => e.Cover).HasColumnName("cover");
         entity.Property(e => e.SteamAppId).HasColumnName("steam_app_id");
         entity.Property(e => e.SteamPlaytimeForever).HasColumnName("steam_playtime_forever");

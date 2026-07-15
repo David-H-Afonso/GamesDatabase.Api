@@ -8,8 +8,10 @@ public class GameExportCache
 
     public DateTime LastExportedAt { get; set; }
     public bool LogoDownloaded { get; set; }
+    public bool HeroDownloaded { get; set; }
     public bool CoverDownloaded { get; set; }
     public string? LogoUrl { get; set; }
+    public string? HeroUrl { get; set; }
     public string? CoverUrl { get; set; }
 
     public DateTime CreatedAt { get; set; }

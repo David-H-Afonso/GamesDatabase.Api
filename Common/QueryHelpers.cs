@@ -36,7 +36,7 @@ public class GameQueryParameters : QueryParameters
     public bool? IsCheaperByKey { get; set; }
 
     /// <summary>
-    /// Filter incomplete games: not fulfilled, no cover, no logo, or no platform
+    /// Filter incomplete games: not fulfilled, no hero, no logo, or no platform
     /// </summary>
     public bool? ShowIncomplete { get; set; }
 

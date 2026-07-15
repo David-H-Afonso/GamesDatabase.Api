@@ -165,6 +165,7 @@ public class BackupScheduleService : BackgroundService
                     Story = g.Story?.ToString() ?? "",
                     Comment = g.Comment ?? "",
                     Logo = g.Logo ?? "",
+                    Hero = g.Hero ?? "",
                     Cover = g.Cover ?? "",
                     IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "",
                     KeyStoreUrl = g.KeyStoreUrl ?? "",

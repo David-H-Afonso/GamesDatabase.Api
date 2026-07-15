@@ -229,7 +229,7 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
-        var result = await _steamSync.AddStoreGameAsync(userId.Value, request.AppId, request.LogoUrl, request.CoverUrl);
+        var result = await _steamSync.AddStoreGameAsync(userId.Value, request.AppId, request.LogoUrl, request.HeroUrl, request.CoverUrl);
         return Ok(result);
     }
 }

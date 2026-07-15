@@ -31,6 +31,8 @@ public class SteamStoreService : ISteamStoreService
         @"https?://[^""'\s<>]+/(?:steamcommunity/public/images|community_assets/images)/apps/(?<appId>\d+)/(?<hash>[a-f0-9]{32,64})\.jpg",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static string GetSteamLibraryCoverUrl(int appId) => $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/library_600x900.jpg";
+
     public SteamStoreService(IHttpClientFactory httpClientFactory, IOptions<SteamSettings> settings, GamesDbContext context, ILogger<SteamStoreService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
@@ -179,7 +181,8 @@ public class SteamStoreService : ISteamStoreService
                 {
                     AppId = i.Id,
                     Name = i.Name,
-                    CoverUrl = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{i.Id}/header.jpg",
+                    HeroUrl = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{i.Id}/header.jpg",
+                    CoverUrl = GetSteamLibraryCoverUrl(i.Id),
                     LogoUrl = i.TinyImage,
                     Price = i.Price?.FinalFormatted,
                     DiscountPercent = i.Price?.DiscountPercent > 0 ? i.Price.DiscountPercent : null,

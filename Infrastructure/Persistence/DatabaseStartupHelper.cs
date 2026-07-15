@@ -30,6 +30,19 @@ public class DatabaseStartupHelper
         EnsureColumn(conn, logger, "game", "steam_finished_rejected_value", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "steam_started_rejected_value", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "IsManuallyCompleted", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, logger, "game", "hero", "TEXT NULL");
+        EnsureColumn(conn, logger, "game_export_cache", "hero_url", "TEXT NULL");
+        EnsureColumn(conn, logger, "game_export_cache", "hero_downloaded", "INTEGER NOT NULL DEFAULT 0");
+
+        ExecuteRepairSql(conn, logger,
+            "UPDATE game SET hero = cover WHERE hero IS NULL AND cover IS NOT NULL;",
+            "migrated legacy game.cover values into game.hero when missing");
+        ExecuteRepairSql(conn, logger,
+            "UPDATE game_export_cache SET hero_url = cover_url WHERE hero_url IS NULL AND cover_url IS NOT NULL;",
+            "migrated legacy export-cache cover_url values into hero_url when missing");
+        ExecuteRepairSql(conn, logger,
+            "UPDATE game_export_cache SET hero_downloaded = cover_downloaded WHERE hero_downloaded = 0 AND cover_downloaded = 1;",
+            "migrated legacy export-cache cover_downloaded values into hero_downloaded when missing");
 
         ExecuteRepairSql(conn, logger, """
             CREATE TABLE IF NOT EXISTS "steam_achievement" (

@@ -312,7 +312,7 @@ public class NetworkSyncService : INetworkSyncService
         var gameNames = games.Select(g => g.Name).ToList();
         var dbGames = await _context.Games
             .Where(g => gameNames.Contains(g.Name) && g.UserId == userId)
-            .Select(g => new { g.Id, g.Name, g.ModifiedSinceExport, g.Logo, g.Cover })
+            .Select(g => new { g.Id, g.Name, g.ModifiedSinceExport, g.Logo, g.Hero, g.Cover })
             .ToListAsync();
 
         var exportCaches = await _context.GameExportCaches
@@ -355,10 +355,12 @@ public class NetworkSyncService : INetworkSyncService
             // Check images - sync if URL changed or if previous download failed
             bool logoNeedsSync = !string.IsNullOrWhiteSpace(game.Logo) &&
                                  (cache == null || cache.LogoUrl != game.Logo || !cache.LogoDownloaded);
+            bool heroNeedsSync = !string.IsNullOrWhiteSpace(game.Hero) &&
+                                 (cache == null || cache.HeroUrl != game.Hero || !cache.HeroDownloaded);
             bool coverNeedsSync = !string.IsNullOrWhiteSpace(game.Cover) &&
                                   (cache == null || cache.CoverUrl != game.Cover || !cache.CoverDownloaded);
 
-            if (!needsSync && !logoNeedsSync && !coverNeedsSync)
+            if (!needsSync && !logoNeedsSync && !heroNeedsSync && !coverNeedsSync)
             {
                 _logger.LogDebug("Skipping '{Name}' - no changes since last sync", game.Name);
                 result.GamesSkipped++;
@@ -489,7 +491,63 @@ public class NetworkSyncService : INetworkSyncService
                 if (cache != null) cache.LogoUrl = game.Logo;
             }
 
-            // Sync cover
+            // Sync hero
+            if (!string.IsNullOrWhiteSpace(game.Hero) && (needsSync || heroNeedsSync))
+            {
+                bool urlChanged = cache?.HeroUrl != game.Hero;
+                bool isSelfReferencing = IsSelfReferencingUrl(game.Hero);
+
+                if (isSelfReferencing)
+                {
+                    // Existing data can still point to /cover.* after the Hero migration.
+                    bool fileExists = ImageFileExistsOnDisk(gamePath, "hero") || ImageFileExistsOnDisk(gamePath, "cover");
+                    if (fileExists)
+                    {
+                        if (cache != null) cache.HeroDownloaded = true;
+                        result.ImagesSynced++;
+                        _logger.LogDebug("Skipping self-referencing hero for '{Name}' - file exists on NAS", game.Name);
+                    }
+                    else
+                    {
+                        if (cache != null) cache.HeroDownloaded = false;
+                        result.ImagesFailed++;
+                        failedImageTypes.Add("hero");
+                        _logger.LogWarning("Self-referencing hero for '{Name}' but file missing on NAS", game.Name);
+                    }
+                }
+                else
+                {
+                    await ApplyRateLimitAsync(game.Hero, domainLastRequest, minDelayBetweenRequestsMs);
+
+                    var heroBytes = await SafeDownloadAsync(game.Hero, attempt: 1, maxAttempts: 1);
+                    if (heroBytes != null)
+                    {
+                        if (urlChanged && cache?.HeroUrl != null)
+                        {
+                            DeleteOldImageFiles(gamePath, "hero");
+                        }
+                        var extension = GetExtensionFromUrl(game.Hero);
+                        var heroPath = Path.Combine(gamePath, $"hero{extension}");
+                        await File.WriteAllBytesAsync(heroPath, heroBytes);
+                        if (cache != null) cache.HeroDownloaded = true;
+                        result.ImagesSynced++;
+                        result.FilesWritten++;
+                        _logger.LogDebug("Downloaded hero for '{Name}'", game.Name);
+                    }
+                    else
+                    {
+                        if (cache != null) cache.HeroDownloaded = false;
+                        result.ImagesFailed++;
+                        failedImageTypes.Add("hero");
+                        failedImageRetries.Add((game, dbGame.Id, gamePath, "hero", game.Hero, cache));
+                        _logger.LogWarning("Failed to download hero for '{Name}' - existing files preserved", game.Name);
+                    }
+                }
+
+                if (cache != null) cache.HeroUrl = game.Hero;
+            }
+
+            // Sync vertical cover art
             if (!string.IsNullOrWhiteSpace(game.Cover) && (needsSync || coverNeedsSync))
             {
                 bool urlChanged = cache?.CoverUrl != game.Cover;
@@ -626,6 +684,10 @@ public class NetworkSyncService : INetworkSyncService
                         if (imageType == "logo")
                         {
                             if (cache != null) cache.LogoDownloaded = true;
+                        }
+                        else if (imageType == "hero")
+                        {
+                            if (cache != null) cache.HeroDownloaded = true;
                         }
                         else if (imageType == "cover")
                         {
@@ -1165,6 +1227,7 @@ public class NetworkSyncService : INetworkSyncService
                     Story = g.Story,
                     Completion = g.Completion,
                     Logo = g.Logo,
+                    Hero = g.Hero,
                     Cover = g.Cover,
                     SteamAppId = g.SteamAppId,
                     SteamPlaytimeForever = g.SteamPlaytimeForever,
@@ -1334,6 +1397,7 @@ public class NetworkSyncService : INetworkSyncService
                 Story = g.Story,
                 Completion = g.Completion,
                 Logo = g.Logo,
+                Hero = g.Hero,
                 Cover = g.Cover,
                 SteamAppId = g.SteamAppId,
                 SteamPlaytimeForever = g.SteamPlaytimeForever,
@@ -1667,6 +1731,7 @@ public class NetworkSyncService : INetworkSyncService
         Story = game.Story,
         Completion = game.Completion,
         Logo = game.Logo,
+        Hero = game.Hero,
         Cover = game.Cover,
         SteamAppId = game.SteamAppId,
         SteamPlaytimeForever = game.SteamPlaytimeForever,
@@ -1680,6 +1745,7 @@ public class NetworkSyncService : INetworkSyncService
         IsExported = enrichment?.Cache != null,
         LastExportedAt = enrichment?.Cache?.LastExportedAt,
         LogoDownloaded = enrichment?.Cache?.LogoDownloaded ?? false,
+        HeroDownloaded = enrichment?.Cache?.HeroDownloaded ?? false,
         CoverDownloaded = enrichment?.Cache?.CoverDownloaded ?? false
     };
 
@@ -1753,6 +1819,7 @@ public class NetworkSyncService : INetworkSyncService
         public int? Story { get; set; }
         public int? Completion { get; set; }
         public string? Logo { get; set; }
+        public string? Hero { get; set; }
         public string? Cover { get; set; }
         public int? SteamAppId { get; set; }
         public int? SteamPlaytimeForever { get; set; }
