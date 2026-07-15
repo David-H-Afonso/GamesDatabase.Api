@@ -507,12 +507,6 @@ public class NetworkSyncService : INetworkSyncService
                 if (isSelfReferencing)
                 {
                     bool fileExists = ImageFileExistsOnDisk(gamePath, "hero");
-                    if (!fileExists && ImageFileExistsOnDisk(gamePath, "cover") && TryCopyImageFile(gamePath, "cover", "hero"))
-                    {
-                        fileExists = true;
-                        result.FilesWritten++;
-                        _logger.LogInformation("Copied legacy cover image to hero for '{Name}'", game.Name);
-                    }
                     if (fileExists)
                     {
                         if (cache != null) cache.HeroDownloaded = true;
@@ -1165,23 +1159,6 @@ public class NetworkSyncService : INetworkSyncService
             if (File.Exists(filePath))
                 return true;
         }
-        return false;
-    }
-
-    private static bool TryCopyImageFile(string gamePath, string fromPrefix, string toPrefix)
-    {
-        var imageExtensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico" };
-        foreach (var ext in imageExtensions)
-        {
-            var sourcePath = Path.Combine(gamePath, $"{fromPrefix}{ext}");
-            if (!File.Exists(sourcePath))
-                continue;
-
-            var destinationPath = Path.Combine(gamePath, $"{toPrefix}{ext}");
-            File.Copy(sourcePath, destinationPath, overwrite: true);
-            return true;
-        }
-
         return false;
     }
 
