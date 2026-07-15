@@ -60,10 +60,6 @@ public class DataExportController : BaseApiController
     [Authorize]
     public async Task<ActionResult<CopyCoverToHeroResult>> CopyCoverToHero([FromQuery] bool overwrite = false)
     {
-        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (role != "Admin")
-            return StatusCode(403, new { message = "Copying Cover to Hero requires admin privileges" });
-
         var userId = GetCurrentUserIdOrDefault(1);
         var result = await _importExportService.CopyCoverToHeroAsync(userId, overwrite);
         return Ok(result);
