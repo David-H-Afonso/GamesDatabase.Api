@@ -12,6 +12,7 @@ namespace GamesDatabase.Api.Controllers;
 public class ImageProxyController : ControllerBase
 {
     private static readonly WebpEncoder _encoder = new() { Quality = 75 };
+    private static readonly string[] _supportedImageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".ico", ".bmp"];
 
     // Used when the UNC network path is inaccessible — falls back to fetching
     // the raw image from the NAS HTTP server configured in ImageSettings:BaseUrl.
@@ -38,13 +39,16 @@ public class ImageProxyController : ControllerBase
         CancellationToken ct = default)
     {
         var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
-        if (string.IsNullOrWhiteSpace(networkSyncPath))
-            return NotFound();
-
         // Prevent infinite proxy loop: if this request came from our own NAS fallback,
         // don't attempt another fallback — just 404 immediately.
         if (Request.Headers.ContainsKey("X-Image-Proxy"))
             return NotFound();
+
+        if (!IsSafeRelativeImagePath(imagePath))
+            return BadRequest("Invalid image path.");
+
+        if (string.IsNullOrWhiteSpace(networkSyncPath))
+            return await ProxyFromNasHttpAsync(imagePath, ct);
 
         var rootFull = Path.GetFullPath(networkSyncPath);
         var requestedFull = Path.GetFullPath(Path.Combine(networkSyncPath, imagePath));
@@ -53,6 +57,8 @@ public class ImageProxyController : ControllerBase
         {
             return BadRequest("Invalid image path.");
         }
+
+        requestedFull = ResolveExistingImagePath(requestedFull) ?? requestedFull;
 
         if (!System.IO.File.Exists(requestedFull))
             return await ProxyFromNasHttpAsync(imagePath, ct);
@@ -71,10 +77,11 @@ public class ImageProxyController : ControllerBase
         if (ifNoneMatch == eTag)
             return StatusCode(304);
 
-        var cacheDir = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(imagePath) ?? "");
+        var resolvedRelativePath = Path.GetRelativePath(rootFull, requestedFull);
+        var cacheDir = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(resolvedRelativePath) ?? "");
         // Include ticks + file size in the cache filename so a replaced file (even with
         // preserved timestamp) always gets a fresh cache entry without timestamp comparisons.
-        var cacheFile = $"{Path.GetFileNameWithoutExtension(imagePath)}_{sourceLastModified.Ticks}_{sourceInfo.Length}_{w}x{h}.webp";
+        var cacheFile = $"{Path.GetFileNameWithoutExtension(resolvedRelativePath)}_{sourceLastModified.Ticks}_{sourceInfo.Length}_{w}x{h}.webp";
         var cachePath = Path.Combine(cacheDir, cacheFile);
 
         if (System.IO.File.Exists(cachePath))
@@ -86,7 +93,7 @@ public class ImageProxyController : ControllerBase
         // Delete any stale cache entries for this image (different ticks/size).
         if (Directory.Exists(cacheDir))
         {
-            var baseName = Path.GetFileNameWithoutExtension(imagePath) + "_";
+            var baseName = Path.GetFileNameWithoutExtension(resolvedRelativePath) + "_";
             foreach (var stale in Directory.EnumerateFiles(cacheDir, $"{baseName}*.webp"))
                 try { System.IO.File.Delete(stale); } catch { }
         }
@@ -141,7 +148,7 @@ public class ImageProxyController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Image optimisation failed for {Path}; falling back to original", imagePath);
+            _logger.LogWarning(ex, "Image optimisation failed for {Path}; falling back to original", resolvedRelativePath);
             SetCacheHeaders(eTag, sourceLastModified);
             var mimeType = GetMimeType(requestedFull);
             return PhysicalFile(requestedFull, mimeType);
@@ -156,18 +163,29 @@ public class ImageProxyController : ControllerBase
         if (string.IsNullOrWhiteSpace(nasHttpBase))
             return NotFound();
 
-        var url = $"{nasHttpBase}/game-images/{imagePath}";
+        if (!IsSafeRelativeImagePath(imagePath))
+            return BadRequest("Invalid image path.");
+
+        var candidatePaths = GetImagePathCandidates(imagePath);
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.TryAddWithoutValidation("X-Image-Proxy", "true");
-            using var resp = await _nasHttpFallback.SendAsync(request, ct);
-            if (!resp.IsSuccessStatusCode)
-                return NotFound();
+            var addLoopPreventionHeader = IsSameRequestHost(nasHttpBase);
+            foreach (var candidatePath in candidatePaths)
+            {
+                var url = $"{nasHttpBase}/game-images/{ToUrlPath(candidatePath)}";
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                if (addLoopPreventionHeader)
+                    request.Headers.TryAddWithoutValidation("X-Image-Proxy", "true");
+                using var resp = await _nasHttpFallback.SendAsync(request, ct);
+                if (!resp.IsSuccessStatusCode)
+                    continue;
 
-            var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
-            var contentType = resp.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-            return File(bytes, contentType);
+                var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+                var contentType = resp.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+                return File(bytes, contentType);
+            }
+
+            return NotFound();
         }
         catch (Exception ex)
         {
@@ -175,6 +193,60 @@ public class ImageProxyController : ControllerBase
             return NotFound();
         }
     }
+
+    private bool IsSameRequestHost(string baseUrl) =>
+        Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
+        && string.Equals(uri.Host, Request.Host.Host, StringComparison.OrdinalIgnoreCase)
+        && uri.Port == Request.Host.Port;
+
+    private static string? ResolveExistingImagePath(string requestedFull)
+    {
+        if (System.IO.File.Exists(requestedFull))
+            return requestedFull;
+
+        foreach (var candidate in GetImagePathCandidates(requestedFull).Skip(1))
+        {
+            if (System.IO.File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> GetImagePathCandidates(string path)
+    {
+        yield return path;
+
+        var directory = Path.GetDirectoryName(path);
+        var fileName = Path.GetFileNameWithoutExtension(path);
+        if (string.IsNullOrWhiteSpace(fileName))
+            yield break;
+
+        foreach (var extension in _supportedImageExtensions)
+        {
+            var candidate = string.IsNullOrEmpty(directory)
+                ? fileName + extension
+                : Path.Combine(directory, fileName + extension);
+
+            if (!string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase))
+                yield return candidate;
+        }
+    }
+
+    private static bool IsSafeRelativeImagePath(string imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath) || Path.IsPathRooted(imagePath))
+            return false;
+
+        return imagePath
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .All(segment => segment != "." && segment != "..");
+    }
+
+    private static string ToUrlPath(string imagePath) =>
+        string.Join('/', imagePath
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(Uri.EscapeDataString));
 
     private static async Task<byte[]?> ExtractLargestIcoFrameAsync(string path, CancellationToken ct)
     {
