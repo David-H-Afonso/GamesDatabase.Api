@@ -25,6 +25,7 @@ public class GameDto
     // Price comparison fields
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
+    public bool Favorite { get; set; }
 
     // Steam integration
     public int? SteamAppId { get; set; }
@@ -78,6 +79,7 @@ public class GameCreateDto
     // Price comparison fields
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
+    public bool? Favorite { get; set; }
 
     // Steam integration
     public int? SteamAppId { get; set; }
@@ -111,6 +113,7 @@ public class GameUpdateDto
     // Price comparison fields
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
+    public bool? Favorite { get; set; }
 
     // Steam integration
     public int? SteamAppId { get; set; }
@@ -128,6 +131,7 @@ public class BulkUpdateGameDto
     public int[]? PlayWithIds { get; set; }
     public int? PlayedStatusId { get; set; }
     public bool? IsCheaperByKey { get; set; }
+    public bool? Favorite { get; set; }
 }
 
 public class BulkUpdateResult

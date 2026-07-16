@@ -320,6 +320,7 @@ public class GameService : IGameService
             Cover = game.Cover,
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
+            Favorite = game.Favorite,
             ManualPlaytimeMinutes = game.ManualPlaytimeMinutes,
             IsManuallyCompleted = game.IsManuallyCompleted
         };
@@ -456,6 +457,11 @@ public class GameService : IGameService
             game.IsCheaperByKey = isCheaperByKeyElement.ValueKind == JsonValueKind.Null ? null : isCheaperByKeyElement.GetBoolean();
         }
 
+        if (gameDto.TryGetProperty("favorite", out var favoriteElement))
+        {
+            game.Favorite = favoriteElement.ValueKind != JsonValueKind.Null && favoriteElement.GetBoolean();
+        }
+
         if (gameDto.TryGetProperty("keyStoreUrl", out var keyStoreUrlElement))
         {
             var keyStoreUrl = keyStoreUrlElement.ValueKind == JsonValueKind.Null ? null : keyStoreUrlElement.GetString();
@@ -582,6 +588,12 @@ public class GameService : IGameService
             if (bulkUpdate.IsCheaperByKey.HasValue)
             {
                 game.IsCheaperByKey = bulkUpdate.IsCheaperByKey.Value;
+                updated = true;
+            }
+
+            if (bulkUpdate.Favorite.HasValue)
+            {
+                game.Favorite = bulkUpdate.Favorite.Value;
                 updated = true;
             }
 
@@ -752,6 +764,11 @@ public class GameService : IGameService
             query = query.Where(g => g.IsCheaperByKey == parameters.IsCheaperByKey.Value);
         }
 
+        if (parameters.Favorite.HasValue)
+        {
+            query = query.Where(g => g.Favorite == parameters.Favorite.Value);
+        }
+
         if (parameters.ShowIncomplete == true)
         {
             query = query.Where(g =>
@@ -868,6 +885,7 @@ public class GameService : IGameService
                 "playedstatus" or "playstatus" => OrderByPlayedStatus(query, parameters.SortDescending),
                 "comment" => OrderByComment(query, parameters.SortDescending),
                 "playwith" => OrderByPlayWith(query, parameters.SortDescending),
+                "favorite" or "favourite" => parameters.SortDescending ? query.OrderByDescending(g => g.Favorite).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Favorite).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "score" => parameters.SortDescending ? query.OrderByDescending(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => (double?)g.Score).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "released" => parameters.SortDescending ? query.OrderByDescending(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Released).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "started" => parameters.SortDescending ? query.OrderByDescending(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Started).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),

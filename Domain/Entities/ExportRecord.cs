@@ -82,6 +82,9 @@ public class ExportRecord
     [Name("KeyStoreUrl")]
     public string? KeyStoreUrl { get; set; }
 
+    [Name("Favorite")]
+    public string? Favorite { get; set; }
+
     [Name("SteamAppId")]
     public string? SteamAppId { get; set; }
 

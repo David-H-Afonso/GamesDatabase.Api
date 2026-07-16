@@ -400,6 +400,7 @@ public class NetworkSyncService : INetworkSyncService
                     Story = game.Story ?? "",
                     Comment = game.Comment ?? "",
                     Description = game.Description ?? "",
+                    Favorite = game.Favorite ?? "",
                     SteamAppId = game.SteamAppId ?? "",
                     SteamPlaytimeForever = game.SteamPlaytimeForever ?? "",
                     SteamPlaytime2Weeks = game.SteamPlaytime2Weeks ?? "",

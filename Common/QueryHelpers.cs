@@ -36,6 +36,11 @@ public class GameQueryParameters : QueryParameters
     public bool? IsCheaperByKey { get; set; }
 
     /// <summary>
+    /// Filter by favorite games. true = only favorites, false = only non-favorites, null = all
+    /// </summary>
+    public bool? Favorite { get; set; }
+
+    /// <summary>
     /// Filter incomplete games: not fulfilled, no hero, no logo, or no platform
     /// </summary>
     public bool? ShowIncomplete { get; set; }

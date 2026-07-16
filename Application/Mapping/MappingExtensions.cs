@@ -30,6 +30,7 @@ public static class MappingExtensions
             Cover = game.Cover,
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
+            Favorite = game.Favorite,
             SteamAppId = game.SteamAppId,
             SteamPlaytimeForever = game.SteamPlaytimeForever,
             SteamPlaytime2Weeks = game.SteamPlaytime2Weeks,
@@ -74,6 +75,7 @@ public static class MappingExtensions
             Cover = dto.Cover,
             IsCheaperByKey = dto.IsCheaperByKey,
             KeyStoreUrl = dto.KeyStoreUrl,
+            Favorite = dto.Favorite ?? false,
             SteamAppId = dto.SteamAppId,
             ManualPlaytimeMinutes = dto.ManualPlaytimeMinutes,
             IsManuallyCompleted = dto.IsManuallyCompleted ?? false
@@ -106,6 +108,7 @@ public static class MappingExtensions
 
         // Always update IsCheaperByKey if present in DTO (even if null, to allow clearing)
         entity.IsCheaperByKey = dto.IsCheaperByKey;
+        if (dto.Favorite.HasValue) entity.Favorite = dto.Favorite.Value;
 
         if (dto.KeyStoreUrl != null) entity.KeyStoreUrl = dto.KeyStoreUrl;
         if (dto.SteamAppId.HasValue) entity.SteamAppId = dto.SteamAppId.Value;

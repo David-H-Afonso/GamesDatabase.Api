@@ -147,6 +147,9 @@ public class GameHistoryService : IGameHistoryService
         if (game.IsCheaperByKey.HasValue)
             Add("IsCheaperByKey", game.IsCheaperByKey.Value ? "Sí" : "No", $"Más barato por clave: {(game.IsCheaperByKey.Value ? "Sí" : "No")}");
 
+        if (game.Favorite)
+            Add("Favorite", "Sí", "Marcado como favorito");
+
         if (!string.IsNullOrEmpty(game.KeyStoreUrl))
             Add("KeyStoreUrl", game.KeyStoreUrl, "URL de tienda de claves establecida");
 
@@ -301,6 +304,13 @@ public class GameHistoryService : IGameHistoryService
             var newVal = isCheaperEl.ValueKind == System.Text.Json.JsonValueKind.Null ? (bool?)null : isCheaperEl.GetBoolean();
             if (before.IsCheaperByKey != newVal)
                 entries.Add(Changed("IsCheaperByKey", before.IsCheaperByKey?.ToString(), newVal?.ToString(), $"Más barato por clave: {before.IsCheaperByKey?.ToString() ?? "—"} → {newVal?.ToString() ?? "—"}")!);
+        }
+
+        if (patch.TryGetProperty("favorite", out var favoriteEl))
+        {
+            var newVal = favoriteEl.ValueKind != System.Text.Json.JsonValueKind.Null && favoriteEl.GetBoolean();
+            if (before.Favorite != newVal)
+                entries.Add(Changed("Favorite", before.Favorite ? "True" : "False", newVal ? "True" : "False", $"Favorito: {(before.Favorite ? "Sí" : "No")} → {(newVal ? "Sí" : "No")}")!);
         }
 
         if (patch.TryGetProperty("keyStoreUrl", out var keyStoreEl))

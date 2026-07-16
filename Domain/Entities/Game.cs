@@ -42,6 +42,8 @@ public class Game
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
 
+    public bool Favorite { get; set; } = false;
+
     // Steam integration
     public int? SteamAppId { get; set; }
     public int? SteamPlaytimeForever { get; set; }

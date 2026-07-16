@@ -295,7 +295,7 @@ public class GameImportExportService : IGameImportExportService
             var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                 ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                 : "";
-            allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Hero = g.Hero ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
+            allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Hero = g.Hero ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", Favorite = g.Favorite.ToString(), SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
         }
 
         var replayTypes = await _context.GameReplayTypes.Where(r => r.UserId == userId).OrderBy(r => r.SortOrder).ThenBy(r => EF.Functions.Collate(r.Name, "NOCASE")).ToListAsync();
@@ -369,6 +369,7 @@ public class GameImportExportService : IGameImportExportService
         csv.Read();
         csv.ReadHeader();
         var hasHeroHeader = csv.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
+        var hasFavoriteHeader = csv.HeaderRecord?.Any(header => string.Equals(header, "Favorite", StringComparison.OrdinalIgnoreCase)) == true;
         var allRecords = csv.GetRecords<FullExportModel>().ToList();
         var platforms = allRecords.Where(r => r.Type == "Platform").ToList();
         var statuses = allRecords.Where(r => r.Type == "Status").ToList();
@@ -528,6 +529,8 @@ public class GameImportExportService : IGameImportExportService
                     existing.Cover = ResolveLegacyCover(record.Hero, record.Cover, hasHeroHeader);
                     existing.IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var existingCbk) ? existingCbk : (bool?)null;
                     existing.KeyStoreUrl = record.KeyStoreUrl;
+                    if (hasFavoriteHeader)
+                        existing.Favorite = bool.TryParse(record.Favorite, out var existingFavorite) && existingFavorite;
                     existing.SteamAppId = ParseNullableInt(record.SteamAppId);
                     existing.SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever);
                     existing.SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks);
@@ -573,6 +576,7 @@ public class GameImportExportService : IGameImportExportService
                         Cover = ResolveLegacyCover(record.Hero, record.Cover, hasHeroHeader),
                         IsCheaperByKey = bool.TryParse(record.IsCheaperByKey, out var newCbk) ? newCbk : (bool?)null,
                         KeyStoreUrl = record.KeyStoreUrl,
+                        Favorite = hasFavoriteHeader && bool.TryParse(record.Favorite, out var newFavorite) && newFavorite,
                         SteamAppId = ParseNullableInt(record.SteamAppId),
                         SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever),
                         SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks),
@@ -829,6 +833,7 @@ public class GameImportExportService : IGameImportExportService
                 Cover = ApplyExportString(g.Cover ?? "", "cover", effectiveConfig),
                 IsCheaperByKey = ApplyExportString(g.IsCheaperByKey?.ToString() ?? "", "isCheaperByKey", effectiveConfig),
                 KeyStoreUrl = ApplyExportString(g.KeyStoreUrl ?? "", "keyStoreUrl", effectiveConfig),
+                Favorite = ApplyExportString(g.Favorite.ToString(), "favorite", effectiveConfig),
                 SteamAppId = ApplyExportString(g.SteamAppId?.ToString() ?? "", "steamAppId", effectiveConfig),
                 SteamPlaytimeForever = ApplyExportString(g.SteamPlaytimeForever?.ToString() ?? "", "steamPlaytimeForever", effectiveConfig),
                 SteamPlaytime2Weeks = ApplyExportString(g.SteamPlaytime2Weeks?.ToString() ?? "", "steamPlaytime2Weeks", effectiveConfig),
@@ -856,6 +861,7 @@ public class GameImportExportService : IGameImportExportService
 
         List<FullExportModel> gameRows;
         bool hasHeroHeader;
+        bool hasFavoriteHeader;
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             Delimiter = _exportSettings.CsvDelimiter,
@@ -870,6 +876,7 @@ public class GameImportExportService : IGameImportExportService
             csvReader.Read();
             csvReader.ReadHeader();
             hasHeroHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
+            hasFavoriteHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Favorite", StringComparison.OrdinalIgnoreCase)) == true;
             gameRows = csvReader.GetRecords<FullExportModel>()
                 .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
                 .ToList();
@@ -881,6 +888,7 @@ public class GameImportExportService : IGameImportExportService
             csvReader.Read();
             csvReader.ReadHeader();
             hasHeroHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
+            hasFavoriteHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Favorite", StringComparison.OrdinalIgnoreCase)) == true;
             gameRows = csvReader.GetRecords<FullExportModel>()
                 .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
                 .ToList();
@@ -941,6 +949,7 @@ public class GameImportExportService : IGameImportExportService
                 var normalizedCover = ResolveLegacyCover(resolvedHero, resolvedCover, hasHeroHeader);
                 var resolvedIsCheaperByKey = ResolveImportString(record.IsCheaperByKey, "isCheaperByKey", effectiveConfig);
                 var resolvedKeyStoreUrl = ResolveImportString(record.KeyStoreUrl, "keyStoreUrl", effectiveConfig);
+                var resolvedFavorite = hasFavoriteHeader ? ResolveImportString(record.Favorite, "favorite", effectiveConfig) : null;
                 var resolvedSteamAppId = ResolveImportString(record.SteamAppId, "steamAppId", effectiveConfig);
                 var resolvedSteamPlaytimeForever = ResolveImportString(record.SteamPlaytimeForever, "steamPlaytimeForever", effectiveConfig);
                 var resolvedSteamPlaytime2Weeks = ResolveImportString(record.SteamPlaytime2Weeks, "steamPlaytime2Weeks", effectiveConfig);
@@ -981,6 +990,10 @@ public class GameImportExportService : IGameImportExportService
                 if (!string.IsNullOrWhiteSpace(resolvedIsCheaperByKey))
                     isCheaperByKey = bool.TryParse(resolvedIsCheaperByKey, out var boolVal) ? boolVal : (bool?)null;
 
+                bool favorite = false;
+                if (hasFavoriteHeader && !string.IsNullOrWhiteSpace(resolvedFavorite))
+                    favorite = bool.TryParse(resolvedFavorite, out var favoriteVal) && favoriteVal;
+
                 var existing = await _context.Games
                     .Include(g => g.GamePlayWiths)
                     .FirstOrDefaultAsync(g => g.Name.ToLower() == record.Name.ToLower() && g.UserId == userId);
@@ -1004,6 +1017,8 @@ public class GameImportExportService : IGameImportExportService
                     existing.Cover = normalizedCover;
                     existing.IsCheaperByKey = isCheaperByKey;
                     existing.KeyStoreUrl = resolvedKeyStoreUrl;
+                    if (hasFavoriteHeader)
+                        existing.Favorite = favorite;
                     existing.SteamAppId = ParseNullableInt(resolvedSteamAppId);
                     existing.SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever);
                     existing.SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks);
@@ -1042,6 +1057,7 @@ public class GameImportExportService : IGameImportExportService
                         Cover = normalizedCover,
                         IsCheaperByKey = isCheaperByKey,
                         KeyStoreUrl = resolvedKeyStoreUrl,
+                        Favorite = favorite,
                         SteamAppId = ParseNullableInt(resolvedSteamAppId),
                         SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever),
                         SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks),

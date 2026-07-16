@@ -29,6 +29,7 @@ public class GameConfiguration : IEntityTypeConfiguration<Game>
         entity.Property(e => e.Logo).HasColumnName("logo");
         entity.Property(e => e.Hero).HasColumnName("hero");
         entity.Property(e => e.Cover).HasColumnName("cover");
+        entity.Property(e => e.Favorite).HasColumnName("favorite").HasDefaultValue(false);
         entity.Property(e => e.SteamAppId).HasColumnName("steam_app_id");
         entity.Property(e => e.SteamPlaytimeForever).HasColumnName("steam_playtime_forever");
         entity.Property(e => e.SteamPlaytime2Weeks).HasColumnName("steam_playtime_2weeks");

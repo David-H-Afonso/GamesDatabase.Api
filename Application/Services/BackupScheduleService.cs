@@ -169,6 +169,7 @@ public class BackupScheduleService : BackgroundService
                     Cover = g.Cover ?? "",
                     IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "",
                     KeyStoreUrl = g.KeyStoreUrl ?? "",
+                    Favorite = g.Favorite.ToString(),
                     SteamAppId = g.SteamAppId?.ToString() ?? "",
                     SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "",
                     SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "",

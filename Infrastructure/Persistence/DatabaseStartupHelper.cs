@@ -31,6 +31,7 @@ public class DatabaseStartupHelper
         EnsureColumn(conn, logger, "game", "steam_started_rejected_value", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "IsManuallyCompleted", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, logger, "game", "hero", "TEXT NULL");
+        EnsureColumn(conn, logger, "game", "favorite", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, logger, "game_export_cache", "hero_url", "TEXT NULL");
         EnsureColumn(conn, logger, "game_export_cache", "hero_downloaded", "INTEGER NOT NULL DEFAULT 0");
 
