@@ -7,7 +7,9 @@ namespace GamesDatabase.Api.Application.Interfaces;
 public interface IGameService
 {
     Task<GameServiceResult<PagedResult<GameDto>>> GetGamesAsync(GameQueryParameters parameters, int userId);
+    Task<GameSummaryDto> GetSummaryAsync(int userId);
     Task<GameDto?> GetGameByIdAsync(int id, int userId);
+    Task<GameServiceResult<GameDto>> UpdateGameStatusAsync(int id, int statusId, int userId);
     Task<GameServiceResult<GameDto>> CreateGameAsync(GameCreateDto dto, int userId);
     Task<GameServiceResult> UpdateGameAsync(int id, JsonElement body, int userId);
     Task<bool> DeleteGameAsync(int id, int userId);

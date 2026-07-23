@@ -119,6 +119,10 @@ public class GamesDbContext : DbContext
     public DbSet<SteamMatchDismissal> SteamMatchDismissals { get; set; }
     public DbSet<DuplicateGameDismissal> DuplicateGameDismissals { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
+    public DbSet<HouseholdConnection> HouseholdConnections { get; set; }
+    public DbSet<HouseholdAuthorizationCode> HouseholdAuthorizationCodes { get; set; }
+    public DbSet<HouseholdAccessToken> HouseholdAccessTokens { get; set; }
+    public DbSet<HouseholdRefreshToken> HouseholdRefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

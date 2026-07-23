@@ -4,6 +4,8 @@ using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Common;
 using GamesDatabase.Api.Application.Interfaces;
 using System.Text.Json;
+using GamesDatabase.Api.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -29,6 +31,23 @@ public class GamesController : BaseApiController
             return BadRequest(result.Error);
 
         return Ok(result.Data);
+    }
+
+    /// <summary>
+    /// Small, ownership-scoped read model for server-to-server integrations.
+    /// </summary>
+    [HttpGet("summary")]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + HouseholdAccessTokenDefaults.AuthenticationScheme)]
+    public async Task<ActionResult<GameSummaryDto>> GetSummary()
+    {
+        if (!CurrentUserId.HasValue)
+            return Unauthorized(new { message = "User authentication required." });
+
+        if (!HasRequiredIntegrationScope("games.read"))
+            return Forbid();
+
+        var userId = CurrentUserId.Value;
+        return Ok(await _gameService.GetSummaryAsync(userId));
     }
 
     [HttpGet("{id}")]
@@ -57,6 +76,35 @@ public class GamesController : BaseApiController
 
         return NoContent();
     }
+
+    /// <summary>
+    /// Updates only the status field and records the change in game history.
+    /// </summary>
+    [HttpPatch("{id}/status")]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + HouseholdAccessTokenDefaults.AuthenticationScheme)]
+    public async Task<ActionResult<GameDto>> PatchStatus(int id, [FromBody] GameStatusPatchDto request)
+    {
+        if (!CurrentUserId.HasValue)
+            return Unauthorized(new { message = "User authentication required." });
+
+        if (!HasRequiredIntegrationScope("games.status.write"))
+            return Forbid();
+
+        var userId = CurrentUserId.Value;
+        var result = await _gameService.UpdateGameStatusAsync(id, request.StatusId, userId);
+
+        if (result.NotFound)
+            return NotFound();
+
+        if (!result.Success)
+            return BadRequest(new { error = result.Error });
+
+        return Ok(result.Data);
+    }
+
+    private bool HasRequiredIntegrationScope(string scope) =>
+        !User.HasClaim(HouseholdAccessTokenDefaults.IntegrationClaim, "true") ||
+        User.HasClaim(HouseholdAccessTokenDefaults.ScopeClaim, scope);
 
     [HttpPost]
     public async Task<ActionResult<GameDto>> PostGame(GameCreateDto gameDto)

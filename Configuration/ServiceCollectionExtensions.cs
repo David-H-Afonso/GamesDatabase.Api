@@ -7,6 +7,8 @@ using GamesDatabase.Api.Domain.Entities;
 using GamesDatabase.Api.Application.Services;
 using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Application.Services.Steam;
+using GamesDatabase.Api.Authentication;
+using Microsoft.AspNetCore.Authentication;
 
 namespace GamesDatabase.Api.Configuration;
 
@@ -14,6 +16,11 @@ public static class ServiceCollectionExtensions
 {
     public static WebApplicationBuilder LoadEnvironmentFile(this WebApplicationBuilder builder)
     {
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            return builder;
+        }
+
         var envFilePath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
         if (File.Exists(envFilePath))
         {
@@ -41,6 +48,8 @@ public static class ServiceCollectionExtensions
         OverrideFromEnv(builder, "NetworkSync:Username", "NETWORK_SYNC_USERNAME");
         OverrideFromEnv(builder, "NetworkSync:Password", "NETWORK_SYNC_PASSWORD");
 
+        OverrideFromEnv(builder, "DatabaseSettings:DatabasePath", "GAMESDATABASE_DB_PATH");
+
         // Override JWT settings from environment variables
         OverrideFromEnv(builder, "JwtSettings:SecretKey", "JWT_SECRET_KEY");
         OverrideFromEnv(builder, "JwtSettings:Issuer", "JWT_ISSUER");
@@ -60,6 +69,14 @@ public static class ServiceCollectionExtensions
         OverrideFromEnv(builder, "SteamSettings:CallbackBaseUrl", "STEAM_CALLBACK_BASE_URL");
         OverrideFromEnv(builder, "SteamSettings:FrontendBaseUrl", "STEAM_FRONTEND_BASE_URL");
 
+        // Registered Household client configuration. These values are backend-only,
+        // but unlike the removed static service token they contain no credential.
+        OverrideFromEnv(builder, "HouseholdIntegration:ClientId", "HOUSEHOLD_CLIENT_ID");
+        OverrideFromEnv(builder, "HouseholdIntegration:RedirectUris", "HOUSEHOLD_REDIRECT_URIS");
+        OverrideFromEnv(builder, "HouseholdIntegration:AccessTokenMinutes", "HOUSEHOLD_ACCESS_TOKEN_MINUTES");
+        OverrideFromEnv(builder, "HouseholdIntegration:RefreshTokenDays", "HOUSEHOLD_REFRESH_TOKEN_DAYS");
+        OverrideFromEnv(builder, "HouseholdIntegration:AuthorizationCodeMinutes", "HOUSEHOLD_AUTHORIZATION_CODE_MINUTES");
+
         return builder;
     }
 
@@ -72,6 +89,14 @@ public static class ServiceCollectionExtensions
         services.Configure<DataExportOptions>(configuration.GetSection(DataExportOptions.SectionName));
         services.Configure<NetworkSyncOptions>(configuration.GetSection(NetworkSyncOptions.SectionName));
         services.Configure<SteamSettings>(configuration.GetSection(SteamSettings.SectionName));
+        services.AddOptions<HouseholdIntegrationOptions>()
+            .Bind(configuration.GetSection(HouseholdIntegrationOptions.SectionName))
+            .Validate(options => !string.IsNullOrWhiteSpace(options.ClientId), "Household client ID is required.")
+            .Validate(options => options.GetRedirectUris().Count > 0, "At least one exact Household redirect URI is required.")
+            .Validate(options => options.AccessTokenMinutes is > 0 and <= 60, "Household access-token lifetime must be 1-60 minutes.")
+            .Validate(options => options.RefreshTokenDays is > 0 and <= 90, "Household refresh-token lifetime must be 1-90 days.")
+            .Validate(options => options.AuthorizationCodeMinutes is > 0 and <= 10, "Household authorization-code lifetime must be 1-10 minutes.")
+            .ValidateOnStart();
 
         return services;
     }
@@ -140,19 +165,6 @@ public static class ServiceCollectionExtensions
 
                 options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
                 {
-                    OnMessageReceived = context =>
-                    {
-                        if (environment.IsDevelopment())
-                        {
-                            var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                            var authHeader = context.Request.Headers["Authorization"].ToString();
-                            if (!string.IsNullOrEmpty(authHeader))
-                            {
-                                logger.LogDebug($"Authorization Header received: {authHeader.Substring(0, Math.Min(30, authHeader.Length))}...");
-                            }
-                        }
-                        return Task.CompletedTask;
-                    },
                     OnAuthenticationFailed = context =>
                     {
                         var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
@@ -178,7 +190,10 @@ public static class ServiceCollectionExtensions
                         return Task.CompletedTask;
                     }
                 };
-            });
+            })
+            .AddScheme<AuthenticationSchemeOptions, HouseholdAccessTokenHandler>(
+                HouseholdAccessTokenDefaults.AuthenticationScheme,
+                _ => { });
 
         services.AddAuthorization();
 
@@ -282,6 +297,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGameViewService, GameViewService>();
         services.AddScoped<IGameImportExportService, GameImportExportService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IHouseholdIntegrationService, HouseholdIntegrationService>();
         services.AddHttpClient();
         services.AddScoped<IZipExportService, ZipExportService>();
         services.AddScoped<INetworkSyncService, NetworkSyncService>();
@@ -392,6 +408,13 @@ public static class ServiceCollectionExtensions
             options.AddFixedWindowLimiter("auth", limiterOptions =>
             {
                 limiterOptions.PermitLimit = 10;
+                limiterOptions.Window = TimeSpan.FromMinutes(1);
+                limiterOptions.QueueLimit = 0;
+            });
+
+            options.AddFixedWindowLimiter("integration", limiterOptions =>
+            {
+                limiterOptions.PermitLimit = 60;
                 limiterOptions.Window = TimeSpan.FromMinutes(1);
                 limiterOptions.QueueLimit = 0;
             });

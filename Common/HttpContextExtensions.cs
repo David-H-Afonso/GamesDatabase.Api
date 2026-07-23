@@ -8,6 +8,13 @@ public static class HttpContextHelper
         {
             return id;
         }
+
+        var claim = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(claim, out var claimUserId))
+        {
+            return claimUserId;
+        }
+
         return null;
     }
 

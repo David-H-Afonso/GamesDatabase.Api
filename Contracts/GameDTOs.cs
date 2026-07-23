@@ -134,6 +134,26 @@ public class BulkUpdateGameDto
     public bool? Favorite { get; set; }
 }
 
+public class GameSummaryDto
+{
+    public int TotalGames { get; set; }
+    public DateTime? LastUpdatedAt { get; set; }
+    public List<GameSummaryStatusDto> ByStatus { get; set; } = new();
+}
+
+public class GameSummaryStatusDto
+{
+    public int StatusId { get; set; }
+    public string StatusName { get; set; } = string.Empty;
+    public int Count { get; set; }
+}
+
+public class GameStatusPatchDto
+{
+    [System.ComponentModel.DataAnnotations.Range(1, int.MaxValue)]
+    public int StatusId { get; set; }
+}
+
 public class BulkUpdateResult
 {
     public int UpdatedCount { get; set; }

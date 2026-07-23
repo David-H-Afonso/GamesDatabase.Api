@@ -145,6 +145,38 @@ public class GameService : IGameService
         });
     }
 
+    public async Task<GameSummaryDto> GetSummaryAsync(int userId)
+    {
+        var games = _context.Games
+            .AsNoTracking()
+            .Where(g => g.UserId == userId);
+
+        var counts = await games
+            .GroupBy(g => g.StatusId)
+            .Select(group => new { StatusId = group.Key, Count = group.Count() })
+            .ToListAsync();
+
+        var statusNames = await _context.GameStatuses
+            .AsNoTracking()
+            .Where(status => status.UserId == userId && counts.Select(item => item.StatusId).Contains(status.Id))
+            .ToDictionaryAsync(status => status.Id, status => status.Name);
+
+        return new GameSummaryDto
+        {
+            TotalGames = counts.Sum(item => item.Count),
+            LastUpdatedAt = await games.Select(game => (DateTime?)game.UpdatedAt).MaxAsync(),
+            ByStatus = counts
+                .OrderBy(item => statusNames.TryGetValue(item.StatusId, out var name) ? name : string.Empty)
+                .Select(item => new GameSummaryStatusDto
+                {
+                    StatusId = item.StatusId,
+                    StatusName = statusNames.TryGetValue(item.StatusId, out var name) ? name : item.StatusId.ToString(),
+                    Count = item.Count
+                })
+                .ToList()
+        };
+    }
+
     public async Task<GameDto?> GetGameByIdAsync(int id, int userId)
     {
         var game = await _context.Games
@@ -163,6 +195,41 @@ public class GameService : IGameService
         await FillSteamAchievementStatsAsync(new[] { gameDto }, userId);
 
         return gameDto;
+    }
+
+    public async Task<GameServiceResult<GameDto>> UpdateGameStatusAsync(int id, int statusId, int userId)
+    {
+        var gameExists = await _context.Games.AnyAsync(game => game.Id == id && game.UserId == userId);
+        if (!gameExists)
+        {
+            return GameServiceResult<GameDto>.NotFoundResult();
+        }
+
+        var statusExists = await _context.GameStatuses.AnyAsync(status => status.Id == statusId && status.UserId == userId);
+        if (!statusExists)
+        {
+            return GameServiceResult<GameDto>.BadRequest("Invalid StatusId for current user");
+        }
+
+        var updateResult = await UpdateGameAsync(
+            id,
+            JsonSerializer.SerializeToElement(new { statusId }),
+            userId);
+
+        if (updateResult.NotFound)
+        {
+            return GameServiceResult<GameDto>.NotFoundResult();
+        }
+
+        if (!updateResult.Success)
+        {
+            return GameServiceResult<GameDto>.BadRequest(updateResult.Error ?? "Unable to update game status");
+        }
+
+        var updatedGame = await GetGameByIdAsync(id, userId);
+        return updatedGame is null
+            ? GameServiceResult<GameDto>.NotFoundResult()
+            : GameServiceResult<GameDto>.Ok(updatedGame);
     }
 
     public async Task<GameServiceResult<GameDto>> CreateGameAsync(GameCreateDto gameDto, int userId)
