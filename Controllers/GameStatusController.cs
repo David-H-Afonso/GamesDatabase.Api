@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Application.Interfaces;
+using GamesDatabase.Api.Authentication;
 using GamesDatabase.Api.Common;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -27,9 +29,16 @@ public class GameStatusController : BaseApiController
     }
 
     [HttpGet("active")]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + HouseholdAccessTokenDefaults.AuthenticationScheme)]
     public async Task<ActionResult<IEnumerable<GameStatusDto>>> GetActiveGameStatuses()
     {
-        var userId = GetCurrentUserIdOrDefault(1);
+        if (!CurrentUserId.HasValue)
+            return Unauthorized(new { message = "User authentication required." });
+
+        if (!HasRequiredIntegrationScope("games.read"))
+            return Forbid();
+
+        var userId = CurrentUserId.Value;
         var result = await _catalogService.GetActiveStatusesAsync(userId);
         return Ok(result);
     }

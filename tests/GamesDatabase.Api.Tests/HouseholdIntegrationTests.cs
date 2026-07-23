@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using GamesDatabase.Api.Common;
 using GamesDatabase.Api.Contracts;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
@@ -130,7 +131,7 @@ public sealed class HouseholdIntegrationTests : IClassFixture<GamesDatabaseApiFa
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync(
             $"/api/games/{_factory.UserAGameId}/status",
             new { statusId = _factory.UserAAlternateStatusId })).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/games")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/games")).StatusCode);
 
         var writeOnly = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.status.write" });
         var writeClient = CreateClient(writeOnly.AccessToken);
@@ -138,6 +139,67 @@ public sealed class HouseholdIntegrationTests : IClassFixture<GamesDatabaseApiFa
         Assert.Equal(HttpStatusCode.OK, (await writeClient.PatchAsJsonAsync(
             $"/api/games/{_factory.UserAGameId}/status",
             new { statusId = _factory.UserAAlternateStatusId })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Games_list_supports_filters_and_is_scoped_to_connection_user()
+    {
+        var pair = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.read" });
+        var client = CreateClient(pair.AccessToken);
+        var ownGame = await client.GetFromJsonAsync<GameDto>($"/api/games/{_factory.UserAGameId}");
+
+        var games = await client.GetFromJsonAsync<PagedResult<GameDto>>("/api/games?page=1&pageSize=1&search=Game");
+        Assert.NotNull(games);
+        Assert.Equal(1, games.TotalCount);
+        Assert.Equal(1, games.Page);
+        Assert.Equal(1, games.PageSize);
+        Assert.Equal(_factory.UserAGameId, Assert.Single(games.Data).Id);
+
+        var filtered = await client.GetFromJsonAsync<PagedResult<GameDto>>(
+            $"/api/games?search=Game%20A&statusId={ownGame!.StatusId}");
+        Assert.NotNull(filtered);
+        Assert.Equal(_factory.UserAGameId, Assert.Single(filtered.Data).Id);
+        Assert.DoesNotContain(filtered.Data, game => game.Id == _factory.UserBGameId);
+    }
+
+    [Fact]
+    public async Task Game_detail_is_scoped_to_connection_user()
+    {
+        var pair = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.read" });
+        var client = CreateClient(pair.AccessToken);
+
+        var ownResponse = await client.GetAsync($"/api/games/{_factory.UserAGameId}");
+        Assert.Equal(HttpStatusCode.OK, ownResponse.StatusCode);
+        var ownGame = await ownResponse.Content.ReadFromJsonAsync<GameDto>();
+        Assert.Equal(_factory.UserAGameId, ownGame!.Id);
+
+        var otherResponse = await client.GetAsync($"/api/games/{_factory.UserBGameId}");
+        Assert.Equal(HttpStatusCode.NotFound, otherResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Active_statuses_are_scoped_to_connection_user()
+    {
+        var pair = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.read" });
+        var client = CreateClient(pair.AccessToken);
+
+        var statuses = await client.GetFromJsonAsync<List<GameStatusDto>>("/api/GameStatus/active");
+        Assert.NotNull(statuses);
+        Assert.Equal(2, statuses.Count);
+        Assert.Contains(statuses, status => status.Name == "Backlog A");
+        Assert.Contains(statuses, status => status.Name == "Playing A");
+        Assert.DoesNotContain(statuses, status => status.Name == "Backlog B");
+    }
+
+    [Fact]
+    public async Task Source_read_endpoints_require_games_read_scope()
+    {
+        var pair = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.status.write" });
+        var client = CreateClient(pair.AccessToken);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/games")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/games/{_factory.UserAGameId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/GameStatus/active")).StatusCode);
     }
 
     [Fact]

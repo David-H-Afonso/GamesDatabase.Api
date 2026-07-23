@@ -22,9 +22,16 @@ public class GamesController : BaseApiController
     }
 
     [HttpGet]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + HouseholdAccessTokenDefaults.AuthenticationScheme)]
     public async Task<ActionResult<PagedResult<GameDto>>> GetGames([FromQuery] GameQueryParameters parameters)
     {
-        var userId = GetCurrentUserIdOrDefault(1);
+        if (!CurrentUserId.HasValue)
+            return Unauthorized(new { message = "User authentication required." });
+
+        if (!HasRequiredIntegrationScope("games.read"))
+            return Forbid();
+
+        var userId = CurrentUserId.Value;
         var result = await _gameService.GetGamesAsync(parameters, userId);
 
         if (!result.Success)
@@ -51,9 +58,16 @@ public class GamesController : BaseApiController
     }
 
     [HttpGet("{id}")]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + HouseholdAccessTokenDefaults.AuthenticationScheme)]
     public async Task<ActionResult<GameDto>> GetGame(int id)
     {
-        var userId = GetCurrentUserIdOrDefault(1);
+        if (!CurrentUserId.HasValue)
+            return Unauthorized(new { message = "User authentication required." });
+
+        if (!HasRequiredIntegrationScope("games.read"))
+            return Forbid();
+
+        var userId = CurrentUserId.Value;
         var gameDto = await _gameService.GetGameByIdAsync(id, userId);
 
         if (gameDto == null)
@@ -101,10 +115,6 @@ public class GamesController : BaseApiController
 
         return Ok(result.Data);
     }
-
-    private bool HasRequiredIntegrationScope(string scope) =>
-        !User.HasClaim(HouseholdAccessTokenDefaults.IntegrationClaim, "true") ||
-        User.HasClaim(HouseholdAccessTokenDefaults.ScopeClaim, scope);
 
     [HttpPost]
     public async Task<ActionResult<GameDto>> PostGame(GameCreateDto gameDto)

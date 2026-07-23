@@ -35,12 +35,15 @@ state. Denial returns the registered callback with `error=access_denied` and the
 | `POST /api/integrations/household/v1/token` | Public, rate limited | Exchange PKCE code or rotate refresh token |
 | `POST /api/integrations/household/v1/revoke` | Token in body, rate limited | Idempotently revoke the identified connection |
 | `GET /api/integrations/household/v1/me` | Integration access token | Read connection/account identity and scopes |
+| `GET /api/games` | Web JWT or integration access token | Integration requires `games.read`; results and filters are source-user scoped |
+| `GET /api/games/{id}` | Web JWT or integration access token | Integration requires `games.read`; source-user scoped |
 | `GET /api/games/summary` | Web JWT or integration access token | Integration requires `games.read` |
+| `GET /api/GameStatus/active` | Web JWT or integration access token | Integration requires `games.read`; source-user scoped |
 | `PATCH /api/games/{id}/status` | Web JWT or integration access token | Integration requires `games.status.write` |
 
 Integration access tokens are opaque and use a dedicated authentication scheme. They are
-not Games Database web JWTs and are rejected by all other game, admin, export, delete,
-bulk, import, scan, and Steam-management endpoints.
+not Games Database web JWTs and are rejected by endpoints outside this allowlist, including
+other game, admin, export, delete, bulk, import, scan, and Steam-management endpoints.
 
 ## Storage and rotation
 
