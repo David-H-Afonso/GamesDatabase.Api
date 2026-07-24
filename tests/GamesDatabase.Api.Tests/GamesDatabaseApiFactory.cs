@@ -18,6 +18,7 @@ public sealed class GamesDatabaseApiFactory : WebApplicationFactory<Program>
 
     public int UserAGameId { get; private set; }
     public int UserBGameId { get; private set; }
+    public int UserAInitialStatusId { get; private set; }
     public int UserAAlternateStatusId { get; private set; }
 
     public GamesDatabaseApiFactory()
@@ -86,6 +87,7 @@ public sealed class GamesDatabaseApiFactory : WebApplicationFactory<Program>
 
             UserAGameId = gameA.Id;
             UserBGameId = gameB.Id;
+            UserAInitialStatusId = userAStatus.Id;
             UserAAlternateStatusId = userAAlternateStatus.Id;
             _seeded = true;
         }

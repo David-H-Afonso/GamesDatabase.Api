@@ -6,8 +6,11 @@ using System.Text;
 using System.Text.Json;
 using GamesDatabase.Api.Common;
 using GamesDatabase.Api.Contracts;
+using GamesDatabase.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace GamesDatabase.Api.Tests;
@@ -223,6 +226,100 @@ public sealed class HouseholdIntegrationTests : IClassFixture<GamesDatabaseApiFa
         Assert.Equal(pair.ConnectionId, me.ConnectionId);
     }
 
+    [Fact]
+    public async Task Status_patch_commits_status_and_history_for_household_integration()
+    {
+        await ResetUserAGameStatusAsync();
+        var pair = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.status.write" });
+        var response = await CreateClient(pair.AccessToken).PatchAsJsonAsync(
+            $"/api/games/{_factory.UserAGameId}/status",
+            new { statusId = _factory.UserAAlternateStatusId });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<GameDto>();
+        Assert.Equal(_factory.UserAAlternateStatusId, result!.StatusId);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+        var game = await context.Games.AsNoTracking().SingleAsync(item => item.Id == _factory.UserAGameId);
+        var history = await context.GameHistoryEntries.AsNoTracking()
+            .SingleAsync(item => item.GameId == _factory.UserAGameId && item.Field == "Status");
+
+        Assert.Equal(_factory.UserAAlternateStatusId, game.StatusId);
+        Assert.Equal("Backlog A", history.OldValue);
+        Assert.Equal("Playing A", history.NewValue);
+        Assert.Equal("Updated", history.ActionType);
+    }
+
+    [Fact]
+    public async Task Status_patch_rolls_back_when_history_insert_fails()
+    {
+        await ResetUserAGameStatusAsync();
+        var pair = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.status.write" });
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+            await context.Database.ExecuteSqlRawAsync("""
+                CREATE TRIGGER fail_status_history
+                BEFORE INSERT ON game_history_entry
+                WHEN NEW.field = 'Status'
+                BEGIN
+                    SELECT RAISE(FAIL, 'forced history failure');
+                END;
+                """);
+        }
+
+        try
+        {
+            var response = await CreateClient(pair.AccessToken).PatchAsJsonAsync(
+                $"/api/games/{_factory.UserAGameId}/status",
+                new { statusId = _factory.UserAAlternateStatusId });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+            await using var scope = _factory.Services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+            var game = await context.Games.AsNoTracking().SingleAsync(item => item.Id == _factory.UserAGameId);
+            var historyExists = await context.GameHistoryEntries.AsNoTracking()
+                .AnyAsync(item => item.GameId == _factory.UserAGameId && item.Field == "Status");
+
+            Assert.Equal(_factory.UserAInitialStatusId, game.StatusId);
+            Assert.False(historyExists);
+        }
+        finally
+        {
+            await using var scope = _factory.Services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+            await context.Database.ExecuteSqlRawAsync("DROP TRIGGER IF EXISTS fail_status_history");
+        }
+    }
+
+    [Fact]
+    public async Task Status_patch_rejects_invalid_status_without_mutation()
+    {
+        await ResetUserAGameStatusAsync();
+        var pair = await AuthorizeAndExchangeAsync("HouseholdUserA", new[] { "games.status.write" });
+        var response = await CreateClient(pair.AccessToken).PatchAsJsonAsync(
+            $"/api/games/{_factory.UserAGameId}/status",
+            new { statusId = int.MaxValue });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertUserAGameUnchangedAsync();
+    }
+
+    [Fact]
+    public async Task Status_patch_requires_authentication()
+    {
+        await ResetUserAGameStatusAsync();
+        var response = await CreateClient().PatchAsJsonAsync(
+            $"/api/games/{_factory.UserAGameId}/status",
+            new { statusId = _factory.UserAAlternateStatusId });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        await AssertUserAGameUnchangedAsync();
+    }
+
     private async Task<HouseholdTokenResponse> AuthorizeAndExchangeAsync(string username, string[] scopes)
     {
         var code = await AuthorizeAsync(username, scopes);
@@ -277,6 +374,33 @@ public sealed class HouseholdIntegrationTests : IClassFixture<GamesDatabaseApiFa
 
     private async Task<HttpResponseMessage> GetMeAsync(string accessToken) =>
         await CreateClient(accessToken).GetAsync("/api/integrations/household/v1/me");
+
+    private async Task ResetUserAGameStatusAsync()
+    {
+        await _factory.EnsureSeededAsync();
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+        var game = await context.Games.SingleAsync(item => item.Id == _factory.UserAGameId);
+        var history = await context.GameHistoryEntries
+            .Where(item => item.GameId == _factory.UserAGameId)
+            .ToListAsync();
+
+        game.StatusId = _factory.UserAInitialStatusId;
+        context.GameHistoryEntries.RemoveRange(history);
+        await context.SaveChangesAsync();
+    }
+
+    private async Task AssertUserAGameUnchangedAsync()
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+        var game = await context.Games.AsNoTracking().SingleAsync(item => item.Id == _factory.UserAGameId);
+        var historyExists = await context.GameHistoryEntries.AsNoTracking()
+            .AnyAsync(item => item.GameId == _factory.UserAGameId && item.Field == "Status");
+
+        Assert.Equal(_factory.UserAInitialStatusId, game.StatusId);
+        Assert.False(historyExists);
+    }
 
     private HttpClient CreateClient(string? bearer = null)
     {

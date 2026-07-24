@@ -211,6 +211,7 @@ public class GameService : IGameService
             return GameServiceResult<GameDto>.BadRequest("Invalid StatusId for current user");
         }
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
         var updateResult = await UpdateGameAsync(
             id,
             JsonSerializer.SerializeToElement(new { statusId }),
@@ -218,13 +219,17 @@ public class GameService : IGameService
 
         if (updateResult.NotFound)
         {
+            await transaction.RollbackAsync();
             return GameServiceResult<GameDto>.NotFoundResult();
         }
 
         if (!updateResult.Success)
         {
+            await transaction.RollbackAsync();
             return GameServiceResult<GameDto>.BadRequest(updateResult.Error ?? "Unable to update game status");
         }
+
+        await transaction.CommitAsync();
 
         var updatedGame = await GetGameByIdAsync(id, userId);
         return updatedGame is null
