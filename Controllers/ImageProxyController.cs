@@ -297,7 +297,7 @@ public class ImageProxyController : ControllerBase
         //             without blocking render, while a background conditional GET (If-None-Match)
         //             refreshes the cache entry. Changed images appear on the very next visit
         //             after the background revalidation completes — no 200-request waterfall.
-        Response.Headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=604800";
+            Response.Headers["Cache-Control"] = "public, max-age=3600, stale-while-revalidate=604800";
         Response.Headers["ETag"] = eTag;
         Response.Headers["Last-Modified"] = lastModified.ToString("R");
     }
