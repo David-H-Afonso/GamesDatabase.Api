@@ -3,6 +3,18 @@ using GamesDatabase.Api.Domain.Entities;
 
 namespace GamesDatabase.Api.Contracts;
 
+/// <summary>
+/// Anonymous initial-setup state. `DefaultCredentialsAvailable` is true only
+/// while the seeded default admin still has no password. The default username
+/// is exposed only in that state and only because it is the well-known
+/// bootstrap value, never a real, user-chosen account.
+/// </summary>
+public class SetupStatusDto
+{
+    public bool DefaultCredentialsAvailable { get; set; }
+    public string? DefaultUsername { get; set; }
+}
+
 public class LoginRequest
 {
     [Required]

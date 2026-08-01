@@ -167,6 +167,15 @@ public class UsersController : ControllerBase
         });
     }
 
+    [HttpGet("setup-status")]
+    [AllowAnonymous]
+    [Produces("application/json")]
+    public async Task<ActionResult<SetupStatusDto>> GetSetupStatus()
+    {
+        var status = await _userService.GetSetupStatusAsync();
+        return Ok(status);
+    }
+
     [HttpGet("health")]
     [AllowAnonymous]
     public async Task<IActionResult> HealthCheck()

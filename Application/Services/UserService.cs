@@ -233,6 +233,23 @@ public class UserService : IUserService
         return await _context.Database.CanConnectAsync();
     }
 
+    public async Task<SetupStatusDto> GetSetupStatusAsync()
+    {
+        // The bootstrap admin is seeded as IsDefault with a null password hash.
+        // Once it gains a password (or is removed/renamed), setup is considered
+        // complete and the default-credentials hint must no longer be offered.
+        var defaultAdmin = await _context.Users
+            .Where(u => u.IsDefault && u.Role == UserRole.Admin && u.PasswordHash == null)
+            .Select(u => new { u.Username })
+            .FirstOrDefaultAsync();
+
+        return new SetupStatusDto
+        {
+            DefaultCredentialsAvailable = defaultAdmin != null,
+            DefaultUsername = defaultAdmin?.Username,
+        };
+    }
+
     private async Task SeedUserDefaultDataAsync(int userId)
     {
         var platforms = new List<GamePlatform>

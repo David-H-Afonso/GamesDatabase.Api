@@ -11,4 +11,11 @@ public interface IUserService
     Task<CatalogServiceResult> DeleteUserAsync(int id, int currentUserId);
     Task<CatalogServiceResult> ChangePasswordAsync(int id, ChangePasswordRequest request, int currentUserId);
     Task<bool> HealthCheckAsync();
+
+    /// <summary>
+    /// Returns whether the app is still in initial-setup state, i.e. the seeded
+    /// default admin exists and has no password, so the login screen may safely
+    /// offer the passwordless bootstrap sign-in. Never exposes real usernames.
+    /// </summary>
+    Task<SetupStatusDto> GetSetupStatusAsync();
 }
