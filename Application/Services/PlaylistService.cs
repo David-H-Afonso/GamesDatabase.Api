@@ -285,6 +285,8 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         if (rules.MaxCritic.HasValue) query = query.Where(game => game.Critic <= rules.MaxCritic.Value);
         if (rules.MinScore.HasValue) query = query.Where(game => game.Score >= rules.MinScore.Value);
         if (rules.MaxScore.HasValue) query = query.Where(game => game.Score <= rules.MaxScore.Value);
+        if (rules.ReleasedFromYear.HasValue) query = query.Where(game => game.Released != null && game.Released.StartsWith(rules.ReleasedFromYear.Value.ToString()));
+        if (rules.ReleasedToYear.HasValue) query = query.Where(game => game.Released != null && string.Compare(game.Released, $"{rules.ReleasedToYear.Value + 1}-01-01", StringComparison.Ordinal) < 0);
         if (rules.HasSteam.HasValue) query = rules.HasSteam.Value ? query.Where(game => game.SteamAppId.HasValue) : query.Where(game => !game.SteamAppId.HasValue);
         if (rules.FullCompletion.HasValue) query = rules.FullCompletion.Value ? query.Where(game => game.Completion == 100 || game.IsManuallyCompleted) : query.Where(game => game.Completion != 100 && !game.IsManuallyCompleted);
         var games = await query.ToListAsync();
