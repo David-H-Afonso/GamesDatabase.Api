@@ -295,6 +295,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGameService, GameService>();
         services.AddScoped<ICatalogService, CatalogService>();
         services.AddScoped<IGameViewService, GameViewService>();
+        services.AddScoped<IPlaylistService, PlaylistService>();
         services.AddScoped<IGameImportExportService, GameImportExportService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IHouseholdIntegrationService, HouseholdIntegrationService>();

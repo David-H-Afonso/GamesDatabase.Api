@@ -26,7 +26,7 @@ public class GamesDbContext : DbContext
     private void UpdateTimestamps()
     {
         var entities = ChangeTracker.Entries()
-            .Where(e => e.Entity is Game or GameView or User or GameReplay);
+            .Where(e => e.Entity is Game or GameView or Playlist or User or GameReplay);
 
         foreach (var entry in entities)
         {
@@ -41,6 +41,11 @@ public class GamesDbContext : DbContext
                 {
                     view.CreatedAt = DateTime.UtcNow;
                     view.UpdatedAt = DateTime.UtcNow;
+                }
+                else if (entry.Entity is Playlist playlist)
+                {
+                    playlist.CreatedAt = DateTime.UtcNow;
+                    playlist.UpdatedAt = DateTime.UtcNow;
                 }
                 else if (entry.Entity is User user)
                 {
@@ -87,6 +92,20 @@ public class GamesDbContext : DbContext
 
                     entry.Property("CreatedAt").IsModified = false;
                 }
+                else if (entry.Entity is Playlist playlist)
+                {
+                    playlist.UpdatedAt = DateTime.UtcNow;
+                    var modifiedProperties = entry.Properties
+                        .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt")
+                        .ToList();
+
+                    if (modifiedProperties.Any())
+                    {
+                        playlist.ModifiedSinceExport = true;
+                    }
+
+                    entry.Property("CreatedAt").IsModified = false;
+                }
                 else if (entry.Entity is User user)
                 {
                     user.UpdatedAt = DateTime.UtcNow;
@@ -107,6 +126,8 @@ public class GamesDbContext : DbContext
     public DbSet<GamePlayedStatus> GamePlayedStatuses { get; set; }
     public DbSet<GameStatus> GameStatuses { get; set; }
     public DbSet<GameView> GameViews { get; set; }
+    public DbSet<Playlist> Playlists { get; set; }
+    public DbSet<PlaylistItem> PlaylistItems { get; set; }
     public DbSet<GamePlayWithMapping> GamePlayWithMappings { get; set; }
     public DbSet<GameExportCache> GameExportCaches { get; set; }
     public DbSet<GameViewExportCache> GameViewExportCaches { get; set; }

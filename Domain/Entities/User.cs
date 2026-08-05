@@ -52,6 +52,8 @@ public class User
     [JsonIgnore]
     public virtual ICollection<GameView> Views { get; set; } = new List<GameView>();
     [JsonIgnore]
+    public virtual ICollection<Playlist> Playlists { get; set; } = new List<Playlist>();
+    [JsonIgnore]
     public virtual ICollection<GameReplayType> ReplayTypes { get; set; } = new List<GameReplayType>();
     [JsonIgnore]
     public virtual ICollection<GameReplay> Replays { get; set; } = new List<GameReplay>();
