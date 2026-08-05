@@ -114,4 +114,25 @@ public class ExportRecord
 
     [Name("CreatedBy")]
     public string? CreatedBy { get; set; }
+
+    [Name("PlaylistId")]
+    public string? PlaylistId { get; set; }
+
+    [Name("PlaylistName")]
+    public string? PlaylistName { get; set; }
+
+    [Name("PlaylistHeroUrl")]
+    public string? PlaylistHeroUrl { get; set; }
+
+    [Name("PlaylistCoverUrl")]
+    public string? PlaylistCoverUrl { get; set; }
+
+    [Name("PlaylistLogoUrl")]
+    public string? PlaylistLogoUrl { get; set; }
+
+    [Name("GameId")]
+    public string? GameId { get; set; }
+
+    [Name("Position")]
+    public string? Position { get; set; }
 }

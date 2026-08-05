@@ -102,6 +102,8 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
 
         var position = await context.PlaylistItems.Where(item => item.PlaylistId == id).MaxAsync(item => (int?)item.Position) ?? -1;
         context.PlaylistItems.Add(new PlaylistItem { PlaylistId = id, GameId = dto.GameId, Position = position + 1 });
+        playlist.UpdatedAt = DateTime.UtcNow;
+        playlist.ModifiedSinceExport = true;
         await context.SaveChangesAsync();
         return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(id, userId))!);
     }
@@ -113,6 +115,8 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
             .FirstOrDefaultAsync(candidate => candidate.Id == itemId && candidate.PlaylistId == id && candidate.Playlist.UserId == userId);
         if (item is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Elemento de playlist no encontrado.");
         context.PlaylistItems.Remove(item);
+        item.Playlist.UpdatedAt = DateTime.UtcNow;
+        item.Playlist.ModifiedSinceExport = true;
         await context.SaveChangesAsync();
         await NormalizeItemPositionsAsync(id);
         return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(id, userId))!);
@@ -126,6 +130,8 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         if (playlist.Items.Count != dto.OrderedIds.Count || playlist.Items.Any(item => !dto.OrderedIds.Contains(item.Id)))
             return CatalogServiceResult.NotFoundResult("Una o más posiciones no existen.");
         foreach (var item in playlist.Items) item.Position = dto.OrderedIds.IndexOf(item.Id);
+        playlist.UpdatedAt = DateTime.UtcNow;
+        playlist.ModifiedSinceExport = true;
         await context.SaveChangesAsync();
         return CatalogServiceResult.Ok();
     }

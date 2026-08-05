@@ -118,6 +118,7 @@ public class NetworkSyncService : INetworkSyncService
 
             // 5. Sync Games
             await SyncGamesAsync(userId, records, fullSync, result);
+            await SyncPlaylistsAsync(userId, records, fullSync, result);
 
             stopwatch.Stop();
             result.Success = true;
@@ -293,6 +294,27 @@ public class NetworkSyncService : INetworkSyncService
         if (await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "Views.json"), views))
             settingsSynced++;
 
+        var playlistRows = records.Where(r => r.Type == "Playlist").ToList();
+        var playlistItems = records.Where(r => r.Type == "PlaylistItem").ToList();
+        var playlists = playlistRows.Select(playlist => new
+        {
+            Id = ParseInt(playlist.PlaylistId),
+            Name = playlist.Name,
+            Description = playlist.Description ?? "",
+            HeroUrl = playlist.PlaylistHeroUrl ?? "",
+            CoverUrl = playlist.PlaylistCoverUrl ?? "",
+            LogoUrl = playlist.PlaylistLogoUrl ?? "",
+            SortOrder = ParseInt(playlist.SortOrder) ?? 0,
+            Games = playlistItems
+                .Where(item => string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
+                    || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal))
+                .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
+                .Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 })
+                .ToList()
+        }).ToList();
+        if (await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "Playlists.json"), playlists))
+            settingsSynced++;
+
         if (settingsSynced > 0)
             _logger.LogInformation("Synced {Count} settings files that changed", settingsSynced);
         else
@@ -300,6 +322,177 @@ public class NetworkSyncService : INetworkSyncService
 
         return settingsSynced;
     }
+
+    private async Task SyncPlaylistsAsync(int userId, List<ExportRecord> records, bool fullSync, NetworkSyncResult result)
+    {
+        var playlistRows = records.Where(record => record.Type == "Playlist").ToList();
+        var itemRows = records.Where(record => record.Type == "PlaylistItem").ToList();
+        result.TotalPlaylists = playlistRows.Count;
+        if (playlistRows.Count == 0) return;
+
+        var userPath = Path.Combine(_syncOptions.NetworkPath, userId.ToString());
+        var playlistsPath = Path.Combine(userPath, "Playlists");
+        Directory.CreateDirectory(playlistsPath);
+        var games = records.Where(record => record.Type == "Game").ToDictionary(record => record.Name, StringComparer.Ordinal);
+        var dbPlaylists = await _context.Playlists
+            .Where(playlist => playlist.UserId == userId)
+            .Include(playlist => playlist.Items)
+                .ThenInclude(item => item.Game)
+            .ToDictionaryAsync(playlist => playlist.Name, StringComparer.Ordinal);
+        var imageBase = _syncOptions.ImageBaseUrl?.TrimEnd('/') ?? string.Empty;
+
+        foreach (var playlist in playlistRows.OrderBy(record => ParseInt(record.SortOrder) ?? int.MaxValue))
+        {
+            var folderName = FolderNameHelper.MakeSafeFolderName(playlist.Name);
+            if (string.IsNullOrWhiteSpace(folderName)) folderName = "Unknown_Playlist";
+            var playlistPath = Path.Combine(playlistsPath, folderName);
+            Directory.CreateDirectory(playlistPath);
+
+            dbPlaylists.TryGetValue(playlist.Name, out var dbPlaylist);
+
+            var items = itemRows
+                .Where(item => string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
+                    || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal))
+                .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
+                .ToList();
+            var firstGame = items.Select(item => games.GetValueOrDefault(item.Name)).FirstOrDefault(game => game is not null);
+            var imageOverrides = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["hero"] = ResolvePlaylistOverride(dbPlaylist?.HeroUrl, playlist.PlaylistHeroUrl),
+                ["cover"] = ResolvePlaylistOverride(dbPlaylist?.CoverUrl, playlist.PlaylistCoverUrl),
+                ["logo"] = ResolvePlaylistOverride(dbPlaylist?.LogoUrl, playlist.PlaylistLogoUrl)
+            };
+            var imageSources = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["hero"] = imageOverrides["hero"] ?? firstGame?.Hero,
+                ["cover"] = imageOverrides["cover"] ?? firstGame?.Cover,
+                ["logo"] = imageOverrides["logo"] ?? firstGame?.Logo
+            };
+
+            var internalUrls = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["hero"] = dbPlaylist?.HeroUrl,
+                ["cover"] = dbPlaylist?.CoverUrl,
+                ["logo"] = dbPlaylist?.LogoUrl
+            };
+
+            var info = new
+            {
+                Name = playlist.Name,
+                Description = playlist.Description ?? "",
+                SortOrder = ParseInt(playlist.SortOrder) ?? 0,
+                HeroUrl = playlist.PlaylistHeroUrl ?? "",
+                CoverUrl = playlist.PlaylistCoverUrl ?? "",
+                LogoUrl = playlist.PlaylistLogoUrl ?? "",
+                Games = items.Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 }).ToList()
+            };
+            var wroteImage = false;
+            foreach (var (imageType, url) in imageSources)
+            {
+                if (string.IsNullOrWhiteSpace(url)) continue;
+                var selfReferencing = IsSelfReferencingUrl(url);
+                if (!fullSync && ImageFileExistsOnDisk(playlistPath, imageType))
+                {
+                    internalUrls[imageType] = url;
+                    continue;
+                }
+
+                if (selfReferencing && ImageFileExistsOnDisk(playlistPath, imageType))
+                {
+                    internalUrls[imageType] = url;
+                    continue;
+                }
+
+                var bytes = await SafeDownloadAsync(url, attempt: 1, maxAttempts: 1);
+                if (bytes is null)
+                {
+                    result.ImagesFailed++;
+                    continue;
+                }
+
+                DeleteOldImageFiles(playlistPath, imageType);
+                await File.WriteAllBytesAsync(Path.Combine(playlistPath, $"{imageType}{GetExtensionFromUrl(url)}"), bytes);
+                internalUrls[imageType] = BuildInternalImageUrl(imageBase, userId, folderName, imageType, GetExtensionFromUrl(url));
+                result.ImagesSynced++;
+                result.PlaylistImagesSynced++;
+                result.FilesWritten++;
+                wroteImage = true;
+            }
+
+            if (dbPlaylist is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(imageOverrides["hero"])) dbPlaylist.HeroUrl = internalUrls["hero"];
+                if (!string.IsNullOrWhiteSpace(imageOverrides["cover"])) dbPlaylist.CoverUrl = internalUrls["cover"];
+                if (!string.IsNullOrWhiteSpace(imageOverrides["logo"])) dbPlaylist.LogoUrl = internalUrls["logo"];
+                dbPlaylist.ModifiedSinceExport = false;
+            }
+
+            var finalInfo = new
+            {
+                Name = playlist.Name,
+                Description = playlist.Description ?? "",
+                SortOrder = ParseInt(playlist.SortOrder) ?? 0,
+                HeroUrl = internalUrls["hero"] ?? "",
+                CoverUrl = internalUrls["cover"] ?? "",
+                LogoUrl = internalUrls["logo"] ?? "",
+                Games = items.Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 }).ToList()
+            };
+            var infoWritten = await WriteJsonToFileIfChangedAsync(Path.Combine(playlistPath, "info.json"), finalInfo);
+            if (infoWritten || wroteImage) result.FilesWritten++;
+            if (infoWritten || wroteImage) result.PlaylistsSynced++;
+        }
+
+        await _context.SaveChangesAsync();
+        await WritePlaylistSettingsAsync(userId, playlistRows, itemRows, dbPlaylists, games);
+    }
+
+    private async Task WritePlaylistSettingsAsync(
+        int userId,
+        IReadOnlyCollection<ExportRecord> playlistRows,
+        IReadOnlyCollection<ExportRecord> itemRows,
+        IReadOnlyDictionary<string, Playlist> dbPlaylists,
+        IReadOnlyDictionary<string, ExportRecord> games)
+    {
+        var settingsPath = Path.Combine(_syncOptions.NetworkPath, userId.ToString(), "Settings");
+        var playlists = playlistRows.Select(playlist =>
+        {
+            dbPlaylists.TryGetValue(playlist.Name, out var dbPlaylist);
+            return new
+            {
+                Id = dbPlaylist?.Id ?? ParseInt(playlist.PlaylistId),
+                Name = playlist.Name,
+                Description = playlist.Description ?? "",
+                HeroUrl = dbPlaylist?.HeroUrl ?? "",
+                CoverUrl = dbPlaylist?.CoverUrl ?? "",
+                LogoUrl = dbPlaylist?.LogoUrl ?? "",
+                SortOrder = dbPlaylist?.SortOrder ?? ParseInt(playlist.SortOrder) ?? 0,
+                Games = itemRows
+                    .Where(item => string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
+                        || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal))
+                    .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
+                    .Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 })
+                    .ToList()
+            };
+        }).ToList();
+
+        await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "Playlists.json"), playlists);
+    }
+
+    private static string BuildInternalImageUrl(string imageBase, int userId, string folderName, string imageType, string extension)
+    {
+        var prefix = string.IsNullOrWhiteSpace(imageBase) ? string.Empty : $"{imageBase}/";
+        return $"{prefix}game-images/{userId}/Playlists/{folderName}/{imageType}{extension}";
+    }
+
+    private static string? ResolvePlaylistOverride(string? databaseUrl, string? exportedUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(databaseUrl) && !IsGeneratedPlaylistUrl(databaseUrl)) return databaseUrl;
+        if (!string.IsNullOrWhiteSpace(exportedUrl) && !IsGeneratedPlaylistUrl(exportedUrl)) return exportedUrl;
+        return null;
+    }
+
+    private static bool IsGeneratedPlaylistUrl(string? url) =>
+        !string.IsNullOrWhiteSpace(url) && url.Contains("/game-images/", StringComparison.OrdinalIgnoreCase) && url.Contains("/Playlists/", StringComparison.OrdinalIgnoreCase);
 
     private async Task SyncGamesAsync(int userId, List<ExportRecord> records, bool fullSync, NetworkSyncResult result)
     {

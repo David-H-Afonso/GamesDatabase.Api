@@ -120,7 +120,10 @@ public class ExportController : BaseApiController
                         imagesSynced = result.ImagesSynced,
                         imagesRetried = result.ImagesRetried,
                         imagesFailed = result.ImagesFailed,
-                        filesWritten = result.FilesWritten
+                        filesWritten = result.FilesWritten,
+                        totalPlaylists = result.TotalPlaylists,
+                        playlistsSynced = result.PlaylistsSynced,
+                        playlistImagesSynced = result.PlaylistImagesSynced
                     }
                 });
             }
@@ -152,7 +155,10 @@ public class ExportController : BaseApiController
                     imagesSynced = result.ImagesSynced,
                     imagesRetried = result.ImagesRetried,
                     imagesFailed = result.ImagesFailed,
-                    filesWritten = result.FilesWritten
+                    filesWritten = result.FilesWritten,
+                    totalPlaylists = result.TotalPlaylists,
+                    playlistsSynced = result.PlaylistsSynced,
+                    playlistImagesSynced = result.PlaylistImagesSynced
                 },
                 failedImages = result.FailedImages.Select(f => new
                 {
@@ -239,7 +245,10 @@ public class ExportController : BaseApiController
                         imagesSynced = result.ImagesSynced,
                         imagesRetried = result.ImagesRetried,
                         imagesFailed = result.ImagesFailed,
-                        filesWritten = result.FilesWritten
+                        filesWritten = result.FilesWritten,
+                        totalPlaylists = result.TotalPlaylists,
+                        playlistsSynced = result.PlaylistsSynced,
+                        playlistImagesSynced = result.PlaylistImagesSynced
                     }
                 });
             }
@@ -268,7 +277,10 @@ public class ExportController : BaseApiController
                     imagesSynced = result.ImagesSynced,
                     imagesRetried = result.ImagesRetried,
                     imagesFailed = result.ImagesFailed,
-                    filesWritten = result.FilesWritten
+                    filesWritten = result.FilesWritten,
+                    totalPlaylists = result.TotalPlaylists,
+                    playlistsSynced = result.PlaylistsSynced,
+                    playlistImagesSynced = result.PlaylistImagesSynced
                 },
                 failedImages = result.FailedImages.Any() ? result.FailedImages.Select(f => new
                 {

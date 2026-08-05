@@ -11,6 +11,9 @@ public class NetworkSyncResult
     public int ImagesRetried { get; set; }
     public int ImagesFailed { get; set; }
     public int FilesWritten { get; set; }
+    public int TotalPlaylists { get; set; }
+    public int PlaylistsSynced { get; set; }
+    public int PlaylistImagesSynced { get; set; }
     public string? ErrorMessage { get; set; }
     public List<FailedImageInfo> FailedImages { get; set; } = new();
 }

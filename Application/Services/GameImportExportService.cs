@@ -77,6 +77,7 @@ public class GameImportExportService : IGameImportExportService
 
         var userPath = Path.Combine(networkSyncPath, userId.ToString());
         var gamesPath = Path.Combine(userPath, "Games");
+        var playlistsPath = Path.Combine(userPath, "Playlists");
 
         var nasAccessible = Directory.Exists(networkSyncPath) && Directory.Exists(gamesPath);
         result.NasAccessible = nasAccessible;
@@ -94,6 +95,9 @@ public class GameImportExportService : IGameImportExportService
 
         var games = await _context.Games
             .Where(g => g.UserId == userId)
+            .ToListAsync();
+        var playlists = await _context.Playlists
+            .Where(playlist => playlist.UserId == userId)
             .ToListAsync();
 
         result.TotalGames = games.Count;
@@ -225,7 +229,28 @@ public class GameImportExportService : IGameImportExportService
             }
         }
 
-        if (result.UpdatedGames > 0)
+        var playlistImagesUpdated = false;
+        foreach (var playlist in playlists)
+        {
+            var folderName = FolderNameHelper.MakeSafeFolderName(playlist.Name);
+            if (string.IsNullOrWhiteSpace(folderName)) folderName = "Unknown_Playlist";
+            var playlistPath = Path.Combine(playlistsPath, folderName);
+            if (!Directory.Exists(playlistPath)) continue;
+
+            foreach (var type in new[] { "logo", "hero", "cover" })
+            {
+                var extension = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".ico" }
+                    .FirstOrDefault(candidate => File.Exists(Path.Combine(playlistPath, $"{type}{candidate}")));
+                if (extension is null) continue;
+
+                var internalUrl = $"{effectiveImageBaseUrl}/game-images/{userId}/Playlists/{folderName}/{type}{extension}";
+                if (type == "logo" && !string.IsNullOrWhiteSpace(playlist.LogoUrl) && !IsGeneratedPlaylistUrl(playlist.LogoUrl)) { playlist.LogoUrl = internalUrl; playlistImagesUpdated = true; }
+                if (type == "hero" && !string.IsNullOrWhiteSpace(playlist.HeroUrl) && !IsGeneratedPlaylistUrl(playlist.HeroUrl)) { playlist.HeroUrl = internalUrl; playlistImagesUpdated = true; }
+                if (type == "cover" && !string.IsNullOrWhiteSpace(playlist.CoverUrl) && !IsGeneratedPlaylistUrl(playlist.CoverUrl)) { playlist.CoverUrl = internalUrl; playlistImagesUpdated = true; }
+            }
+        }
+
+        if (result.UpdatedGames > 0 || playlistImagesUpdated)
         {
             await _context.SaveChangesAsync();
             _logger.LogInformation("Updated image URLs for {Count} games", result.UpdatedGames);
@@ -1266,6 +1291,9 @@ public class GameImportExportService : IGameImportExportService
         if (hasHeroHeader) return string.IsNullOrWhiteSpace(cover) ? null : cover;
         return string.IsNullOrWhiteSpace(hero) ? null : (string.IsNullOrWhiteSpace(cover) ? null : cover);
     }
+
+    private static bool IsGeneratedPlaylistUrl(string? url) =>
+        !string.IsNullOrWhiteSpace(url) && url.Contains("/game-images/", StringComparison.OrdinalIgnoreCase) && url.Contains("/Playlists/", StringComparison.OrdinalIgnoreCase);
 
     private static int? ParseNullableInt(string? value)
     {

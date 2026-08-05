@@ -73,6 +73,9 @@ public class ZipExportService : IZipExportService
 
             // Add games
             await AddGamesAsync(archive, records, fullExport, stats);
+
+            // Add playlists and their ordered game references/assets.
+            await AddPlaylistsAsync(archive, records, fullExport);
         }
 
         stopwatch.Stop();
@@ -209,7 +212,68 @@ public class ZipExportService : IZipExportService
             .ToList();
         await AddJsonToZip(archive, "Games Database/Settings/Views.json", views);
 
+        var playlists = records.Where(r => r.Type == "Playlist").Select(playlist => new
+        {
+            Id = ParseInt(playlist.PlaylistId),
+            Name = playlist.Name,
+            Description = playlist.Description ?? "",
+            HeroUrl = playlist.PlaylistHeroUrl ?? "",
+            CoverUrl = playlist.PlaylistCoverUrl ?? "",
+            LogoUrl = playlist.PlaylistLogoUrl ?? "",
+            SortOrder = ParseInt(playlist.SortOrder) ?? 0,
+            Games = records.Where(item => item.Type == "PlaylistItem"
+                    && (string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
+                        || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal)))
+                .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
+                .Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 })
+                .ToList()
+        }).ToList();
+        await AddJsonToZip(archive, "Games Database/Settings/Playlists.json", playlists);
+
         _logger.LogInformation("Added settings files");
+    }
+
+    private async Task AddPlaylistsAsync(ZipArchive archive, List<ExportRecord> records, bool fullExport)
+    {
+        var playlists = records.Where(record => record.Type == "Playlist").ToList();
+        var games = records.Where(record => record.Type == "Game").ToDictionary(record => record.Name, StringComparer.Ordinal);
+        foreach (var playlist in playlists)
+        {
+            var folderName = MakeSafeFolderName(playlist.Name);
+            var basePath = $"Games Database/Playlists/{folderName}";
+            var items = records.Where(item => item.Type == "PlaylistItem"
+                    && (string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
+                        || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal)))
+                .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
+                .ToList();
+            var firstGame = items.Select(item => games.GetValueOrDefault(item.Name)).FirstOrDefault(game => game is not null);
+            var imageSources = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["hero"] = string.IsNullOrWhiteSpace(playlist.PlaylistHeroUrl) ? firstGame?.Hero : playlist.PlaylistHeroUrl,
+                ["cover"] = string.IsNullOrWhiteSpace(playlist.PlaylistCoverUrl) ? firstGame?.Cover : playlist.PlaylistCoverUrl,
+                ["logo"] = string.IsNullOrWhiteSpace(playlist.PlaylistLogoUrl) ? firstGame?.Logo : playlist.PlaylistLogoUrl
+            };
+            await AddJsonToZip(archive, $"{basePath}/info.json", new
+            {
+                Name = playlist.Name,
+                Description = playlist.Description ?? "",
+                SortOrder = ParseInt(playlist.SortOrder) ?? 0,
+                HeroUrl = playlist.PlaylistHeroUrl ?? "",
+                CoverUrl = playlist.PlaylistCoverUrl ?? "",
+                LogoUrl = playlist.PlaylistLogoUrl ?? "",
+                Games = items.Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 }).ToList()
+            });
+
+            foreach (var (imageType, url) in imageSources)
+            {
+                if (string.IsNullOrWhiteSpace(url)) continue;
+                var bytes = await SafeDownloadAsync(url);
+                if (bytes is null) continue;
+                var entry = archive.CreateEntry($"{basePath}/{imageType}{GetExtensionFromUrl(url)}");
+                using var stream = entry.Open();
+                await stream.WriteAsync(bytes);
+            }
+        }
     }
 
     private async Task AddGamesAsync(ZipArchive archive, List<ExportRecord> records, bool fullExport, ZipExportResult stats)
