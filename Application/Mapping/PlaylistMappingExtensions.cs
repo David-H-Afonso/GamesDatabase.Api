@@ -1,5 +1,6 @@
 using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Domain.Entities;
+using System.Text.Json;
 
 namespace GamesDatabase.Api.Application.Mapping;
 
@@ -19,6 +20,8 @@ public static class PlaylistMappingExtensions
             HeroUrlOverride = playlist.HeroUrl,
             CoverUrlOverride = playlist.CoverUrl,
             LogoUrlOverride = playlist.LogoUrl,
+            IsAutomatic = playlist.IsAutomatic,
+            Rules = playlist.ParseRules(),
             SortOrder = playlist.SortOrder,
             GameCount = playlist.Items.Count,
             UpdatedAt = playlist.UpdatedAt
@@ -39,6 +42,8 @@ public static class PlaylistMappingExtensions
             HeroUrlOverride = playlist.HeroUrl,
             CoverUrlOverride = playlist.CoverUrl,
             LogoUrlOverride = playlist.LogoUrl,
+            IsAutomatic = playlist.IsAutomatic,
+            Rules = playlist.ParseRules(),
             SortOrder = playlist.SortOrder,
             GameCount = playlist.Items.Count,
             CreatedAt = playlist.CreatedAt,
@@ -58,4 +63,9 @@ public static class PlaylistMappingExtensions
     }
 
     private static string? Resolve(string? custom, string? fallback) => string.IsNullOrWhiteSpace(custom) ? fallback : custom;
+
+    private static PlaylistRulesDto? ParseRules(this Playlist playlist) =>
+        playlist.IsAutomatic && !string.IsNullOrWhiteSpace(playlist.RulesJson)
+            ? JsonSerializer.Deserialize<PlaylistRulesDto>(playlist.RulesJson)
+            : null;
 }

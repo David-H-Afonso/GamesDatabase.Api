@@ -23,6 +23,9 @@ public class Playlist
     [MaxLength(2000)]
     public string? LogoUrl { get; set; }
 
+    public bool IsAutomatic { get; set; }
+    public string? RulesJson { get; set; }
+
     public int SortOrder { get; set; }
     public int UserId { get; set; }
     public DateTime CreatedAt { get; set; }

@@ -4,6 +4,7 @@ using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Domain.Entities;
 using GamesDatabase.Api.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace GamesDatabase.Api.Application.Services;
 
@@ -16,12 +17,14 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
             .OrderBy(playlist => playlist.SortOrder)
             .ThenBy(playlist => playlist.Name)
             .ToListAsync();
+        foreach (var playlist in playlists) await HydrateAutomaticItemsAsync(playlist, userId);
         return playlists.Select(playlist => playlist.ToSummaryDto()).ToList();
     }
 
     public async Task<PlaylistDto?> GetPlaylistByIdAsync(int id, int userId)
     {
         var playlist = await PlaylistQuery().FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
+        if (playlist is not null) await HydrateAutomaticItemsAsync(playlist, userId);
         return playlist?.ToDto();
     }
 
@@ -41,7 +44,9 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
             HeroUrl = dto.HeroUrl,
             CoverUrl = dto.CoverUrl,
             LogoUrl = dto.LogoUrl,
-            SortOrder = maxOrder + 1
+            SortOrder = maxOrder + 1,
+            IsAutomatic = dto.IsAutomatic,
+            RulesJson = dto.IsAutomatic ? JsonSerializer.Serialize(dto.Rules ?? new PlaylistRulesDto()) : null
         };
         context.Playlists.Add(playlist);
         await context.SaveChangesAsync();
@@ -66,6 +71,8 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         playlist.HeroUrl = dto.HeroUrl;
         playlist.CoverUrl = dto.CoverUrl;
         playlist.LogoUrl = dto.LogoUrl;
+        if (dto.IsAutomatic.HasValue) playlist.IsAutomatic = dto.IsAutomatic.Value;
+        if (dto.Rules is not null || dto.IsAutomatic == false) playlist.RulesJson = playlist.IsAutomatic ? JsonSerializer.Serialize(dto.Rules ?? new PlaylistRulesDto()) : null;
         await context.SaveChangesAsync();
         return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(id, userId))!);
     }
@@ -95,6 +102,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
     {
         var playlist = await context.Playlists.FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
         if (playlist is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Playlist no encontrada.");
+        if (playlist.IsAutomatic) return CatalogServiceResult<PlaylistDto>.BadRequest("Las playlists automáticas se llenan mediante sus reglas.");
         var game = await context.Games.FirstOrDefaultAsync(item => item.Id == dto.GameId && item.UserId == userId);
         if (game is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Juego no encontrado.");
         if (await context.PlaylistItems.AnyAsync(item => item.PlaylistId == id && item.GameId == dto.GameId))
@@ -114,6 +122,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
             .Include(candidate => candidate.Playlist)
             .FirstOrDefaultAsync(candidate => candidate.Id == itemId && candidate.PlaylistId == id && candidate.Playlist.UserId == userId);
         if (item is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Elemento de playlist no encontrado.");
+        if (item.Playlist.IsAutomatic) return CatalogServiceResult<PlaylistDto>.BadRequest("Las playlists automáticas se llenan mediante sus reglas.");
         context.PlaylistItems.Remove(item);
         item.Playlist.UpdatedAt = DateTime.UtcNow;
         item.Playlist.ModifiedSinceExport = true;
@@ -127,6 +136,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         if (!HasUniqueIds(dto.OrderedIds)) return CatalogServiceResult.BadRequest("OrderedIds debe contener todos los elementos una sola vez.");
         var playlist = await context.Playlists.Include(item => item.Items).FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
         if (playlist is null) return CatalogServiceResult.NotFoundResult("Playlist no encontrada.");
+        if (playlist.IsAutomatic) return CatalogServiceResult.BadRequest("Las playlists automáticas se ordenan mediante sus reglas.");
         if (playlist.Items.Count != dto.OrderedIds.Count || playlist.Items.Any(item => !dto.OrderedIds.Contains(item.Id)))
             return CatalogServiceResult.NotFoundResult("Una o más posiciones no existen.");
         foreach (var item in playlist.Items) item.Position = dto.OrderedIds.IndexOf(item.Id);
@@ -229,6 +239,47 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.Platform)
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.PlayedStatus)
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.GamePlayWiths).ThenInclude(mapping => mapping.PlayWith);
+
+    private async Task HydrateAutomaticItemsAsync(Playlist playlist, int userId)
+    {
+        if (!playlist.IsAutomatic) return;
+        var rules = string.IsNullOrWhiteSpace(playlist.RulesJson)
+            ? new PlaylistRulesDto()
+            : JsonSerializer.Deserialize<PlaylistRulesDto>(playlist.RulesJson) ?? new PlaylistRulesDto();
+        var query = context.Games.AsNoTracking()
+            .Include(game => game.Status)
+            .Include(game => game.Platform)
+            .Include(game => game.PlayedStatus)
+            .Include(game => game.GamePlayWiths).ThenInclude(mapping => mapping.PlayWith)
+            .Where(game => game.UserId == userId);
+        if (!string.IsNullOrWhiteSpace(rules.Search)) query = query.Where(game => game.Name.Contains(rules.Search));
+        if (rules.StatusIds.Count > 0) query = query.Where(game => rules.StatusIds.Contains(game.StatusId));
+        if (rules.PlatformIds.Count > 0) query = query.Where(game => game.PlatformId.HasValue && rules.PlatformIds.Contains(game.PlatformId.Value));
+        if (rules.PlayedStatusIds.Count > 0) query = query.Where(game => game.PlayedStatusId.HasValue && rules.PlayedStatusIds.Contains(game.PlayedStatusId.Value));
+        if (rules.Favorite.HasValue) query = query.Where(game => game.Favorite == rules.Favorite.Value);
+        if (rules.MinGrade.HasValue) query = query.Where(game => game.Grade >= rules.MinGrade.Value);
+        if (rules.MaxGrade.HasValue) query = query.Where(game => game.Grade <= rules.MaxGrade.Value);
+        if (rules.MinCritic.HasValue) query = query.Where(game => game.Critic >= rules.MinCritic.Value);
+        if (rules.MaxCritic.HasValue) query = query.Where(game => game.Critic <= rules.MaxCritic.Value);
+        if (rules.MinScore.HasValue) query = query.Where(game => game.Score >= rules.MinScore.Value);
+        if (rules.MaxScore.HasValue) query = query.Where(game => game.Score <= rules.MaxScore.Value);
+        if (rules.HasSteam.HasValue) query = rules.HasSteam.Value ? query.Where(game => game.SteamAppId.HasValue) : query.Where(game => !game.SteamAppId.HasValue);
+        if (rules.FullCompletion.HasValue) query = rules.FullCompletion.Value ? query.Where(game => game.Completion == 100 || game.IsManuallyCompleted) : query.Where(game => game.Completion != 100 && !game.IsManuallyCompleted);
+        var games = await query.ToListAsync();
+        IEnumerable<Game> ordered = rules.SortBy.ToLowerInvariant() switch
+        {
+            "name" => games.OrderBy(game => game.Name),
+            "grade" => games.OrderBy(game => game.Grade),
+            "critic" => games.OrderBy(game => game.Critic),
+            "score" => games.OrderBy(game => game.Score),
+            "released" => games.OrderBy(game => game.Released),
+            "updated" => games.OrderBy(game => game.UpdatedAt),
+            _ => games.OrderBy(game => game.Id)
+        };
+        if (rules.SortDescending) ordered = ordered.Reverse();
+        if (rules.Limit is > 0) ordered = ordered.Take(rules.Limit.Value);
+        playlist.Items = ordered.Select((game, position) => new PlaylistItem { Id = game.Id, PlaylistId = playlist.Id, GameId = game.Id, Position = position, Game = game, Playlist = playlist }).ToList();
+    }
 
     private async Task NormalizePlaylistOrdersAsync(int userId)
     {

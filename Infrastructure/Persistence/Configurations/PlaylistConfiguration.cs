@@ -16,6 +16,8 @@ public sealed class PlaylistConfiguration : IEntityTypeConfiguration<Playlist>
         entity.Property(item => item.HeroUrl).HasColumnName("hero_url").HasMaxLength(2000);
         entity.Property(item => item.CoverUrl).HasColumnName("cover_url").HasMaxLength(2000);
         entity.Property(item => item.LogoUrl).HasColumnName("logo_url").HasMaxLength(2000);
+        entity.Property(item => item.IsAutomatic).HasColumnName("is_automatic").HasDefaultValue(false);
+        entity.Property(item => item.RulesJson).HasColumnName("rules_json");
         entity.Property(item => item.SortOrder).HasColumnName("sort_order");
         entity.Property(item => item.UserId).HasColumnName("user_id").IsRequired();
         entity.Property(item => item.CreatedAt).HasColumnName("created_at");
