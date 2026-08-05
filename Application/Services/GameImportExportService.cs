@@ -281,6 +281,43 @@ public class GameImportExportService : IGameImportExportService
                 CreatedBy = v.CreatedBy ?? ""
             });
         }
+
+        var playlists = await _context.Playlists
+            .Where(playlist => playlist.UserId == userId)
+            .Include(playlist => playlist.Items)
+                .ThenInclude(item => item.Game)
+            .OrderBy(playlist => playlist.SortOrder)
+            .ThenBy(playlist => EF.Functions.Collate(playlist.Name, "NOCASE"))
+            .ToListAsync();
+        foreach (var playlist in playlists)
+        {
+            allRecords.Add(new FullExportModel
+            {
+                Type = "Playlist",
+                Name = playlist.Name,
+                Description = playlist.Description ?? "",
+                PlaylistId = playlist.Id.ToString(CultureInfo.InvariantCulture),
+                PlaylistName = playlist.Name,
+                PlaylistHeroUrl = playlist.HeroUrl ?? "",
+                PlaylistCoverUrl = playlist.CoverUrl ?? "",
+                PlaylistLogoUrl = playlist.LogoUrl ?? "",
+                SortOrder = playlist.SortOrder.ToString(CultureInfo.InvariantCulture)
+            });
+
+            foreach (var item in playlist.Items.OrderBy(item => item.Position).ThenBy(item => item.Id))
+            {
+                allRecords.Add(new FullExportModel
+                {
+                    Type = "PlaylistItem",
+                    Name = item.Game.Name,
+                    PlaylistId = playlist.Id.ToString(CultureInfo.InvariantCulture),
+                    PlaylistName = playlist.Name,
+                    GameId = item.GameId.ToString(CultureInfo.InvariantCulture),
+                    Position = item.Position.ToString(CultureInfo.InvariantCulture)
+                });
+            }
+        }
+
         var games = await _context.Games
             .Where(g => g.UserId == userId)
             .Include(g => g.Status)
@@ -295,7 +332,7 @@ public class GameImportExportService : IGameImportExportService
             var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                 ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                 : "";
-            allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Hero = g.Hero ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", Favorite = g.Favorite.ToString(), SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
+            allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, GameId = g.Id.ToString(CultureInfo.InvariantCulture), Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Hero = g.Hero ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", Favorite = g.Favorite.ToString(), SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
         }
 
         var replayTypes = await _context.GameReplayTypes.Where(r => r.UserId == userId).OrderBy(r => r.SortOrder).ThenBy(r => EF.Functions.Collate(r.Name, "NOCASE")).ToListAsync();
@@ -363,7 +400,7 @@ public class GameImportExportService : IGameImportExportService
 
     public async Task<object> ImportFullDatabaseAsync(Stream csvStream, int userId)
     {
-        var results = new { platformsImported = 0, platformsUpdated = 0, statusesImported = 0, statusesUpdated = 0, playWithsImported = 0, playWithsUpdated = 0, playedStatusesImported = 0, playedStatusesUpdated = 0, viewsImported = 0, viewsUpdated = 0, gamesImported = 0, gamesUpdated = 0, replayTypesImported = 0, replayTypesUpdated = 0, replaysImported = 0, replaysUpdated = 0, historyImported = 0, errors = new List<string>() };
+        var results = new { platformsImported = 0, platformsUpdated = 0, statusesImported = 0, statusesUpdated = 0, playWithsImported = 0, playWithsUpdated = 0, playedStatusesImported = 0, playedStatusesUpdated = 0, viewsImported = 0, viewsUpdated = 0, gamesImported = 0, gamesUpdated = 0, replayTypesImported = 0, replayTypesUpdated = 0, replaysImported = 0, replaysUpdated = 0, playlistsImported = 0, playlistsUpdated = 0, historyImported = 0, errors = new List<string>() };
         using var reader = new StreamReader(csvStream, Encoding.UTF8);
         using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture) { Delimiter = _exportSettings.CsvDelimiter, HeaderValidated = null, MissingFieldFound = null });
         csv.Read();
@@ -380,6 +417,8 @@ public class GameImportExportService : IGameImportExportService
         var replayTypesRecords = allRecords.Where(r => r.Type == "ReplayType").ToList();
         var replaysRecords = allRecords.Where(r => r.Type == "Replay").ToList();
         var historyRecords = allRecords.Where(r => r.Type == "History").ToList();
+        var playlistRecords = allRecords.Where(r => r.Type == "Playlist").ToList();
+        var playlistItemRecords = allRecords.Where(r => r.Type == "PlaylistItem").ToList();
         foreach (var record in platforms)
         {
             if (string.IsNullOrWhiteSpace(record.Name)) continue;
@@ -614,6 +653,86 @@ public class GameImportExportService : IGameImportExportService
             }
         }
 
+        // Import playlists after games so both internal IDs and exact names can resolve.
+        foreach (var record in playlistRecords.OrderBy(record => ParseNullableInt(record.SortOrder) ?? int.MaxValue))
+        {
+            if (string.IsNullOrWhiteSpace(record.Name)) continue;
+            try
+            {
+                var playlist = await _context.Playlists.FirstOrDefaultAsync(item => item.UserId == userId && item.Name == record.Name);
+                if (playlist is null)
+                {
+                    playlist = new Playlist { UserId = userId, Name = record.Name, SortOrder = ParseNullableInt(record.SortOrder) ?? 0 };
+                    _context.Playlists.Add(playlist);
+                    results = results with { playlistsImported = results.playlistsImported + 1 };
+                }
+                else
+                {
+                    results = results with { playlistsUpdated = results.playlistsUpdated + 1 };
+                }
+
+                playlist.Description = record.Description;
+                playlist.HeroUrl = string.IsNullOrWhiteSpace(record.PlaylistHeroUrl) ? null : record.PlaylistHeroUrl;
+                playlist.CoverUrl = string.IsNullOrWhiteSpace(record.PlaylistCoverUrl) ? null : record.PlaylistCoverUrl;
+                playlist.LogoUrl = string.IsNullOrWhiteSpace(record.PlaylistLogoUrl) ? null : record.PlaylistLogoUrl;
+                await _context.SaveChangesAsync();
+
+                var itemRecords = playlistItemRecords
+                    .Where(item => string.Equals(item.PlaylistId, record.PlaylistId, StringComparison.Ordinal)
+                        || string.Equals(item.PlaylistName, record.Name, StringComparison.Ordinal))
+                    .OrderBy(item => ParseNullableInt(item.Position) ?? int.MaxValue)
+                    .ToList();
+                var resolvedGames = new List<Game>();
+                foreach (var itemRecord in itemRecords)
+                {
+                    Game? game = null;
+                    var exportedGameId = ParseNullableInt(itemRecord.GameId);
+                    if (exportedGameId.HasValue)
+                    {
+                        game = await _context.Games.FirstOrDefaultAsync(candidate => candidate.UserId == userId
+                            && candidate.Id == exportedGameId.Value
+                            && (string.IsNullOrEmpty(itemRecord.Name) || candidate.Name == itemRecord.Name));
+                    }
+                    if (game is null && !string.IsNullOrEmpty(itemRecord.Name))
+                    {
+                        game = await _context.Games.FirstOrDefaultAsync(candidate => candidate.UserId == userId && candidate.Name == itemRecord.Name);
+                    }
+                    if (game is null)
+                    {
+                        results.errors.Add($"Playlist '{record.Name}': no se encontró el juego '{itemRecord.Name}' (ID exportado: {itemRecord.GameId ?? "-"})");
+                        resolvedGames.Clear();
+                        break;
+                    }
+                    if (resolvedGames.Any(existing => existing.Id == game.Id))
+                    {
+                        results.errors.Add($"Playlist '{record.Name}': el juego '{game.Name}' está duplicado en el export.");
+                        resolvedGames.Clear();
+                        break;
+                    }
+                    resolvedGames.Add(game);
+                }
+
+                if (itemRecords.Count > 0 && resolvedGames.Count != itemRecords.Count)
+                {
+                    continue;
+                }
+
+                _context.PlaylistItems.RemoveRange(await _context.PlaylistItems.Where(item => item.PlaylistId == playlist.Id).ToListAsync());
+                await _context.SaveChangesAsync();
+                for (var position = 0; position < resolvedGames.Count; position++)
+                {
+                    _context.PlaylistItems.Add(new PlaylistItem { PlaylistId = playlist.Id, GameId = resolvedGames[position].Id, Position = position });
+                }
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception exception)
+            {
+                results.errors.Add($"Error procesando playlist '{record.Name}': {exception.Message}");
+                _logger.LogError(exception, "Error processing playlist: {PlaylistName}", record.Name);
+                _context.ChangeTracker.Clear();
+            }
+        }
+
         // Import ReplayTypes
         foreach (var record in replayTypesRecords)
         {
@@ -782,6 +901,7 @@ public class GameImportExportService : IGameImportExportService
             views = new { imported = results.viewsImported, updated = results.viewsUpdated },
             games = new { imported = results.gamesImported, updated = results.gamesUpdated },
             replays = new { imported = results.replaysImported, updated = results.replaysUpdated },
+            playlists = new { imported = results.playlistsImported, updated = results.playlistsUpdated },
             history = new { imported = results.historyImported },
             errors = results.errors.Count > 0 ? results.errors : null
         };

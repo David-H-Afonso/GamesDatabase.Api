@@ -368,6 +368,13 @@ public class FullExportModel
     public string? HistoryField { get; set; }
     public string? HistoryOldValue { get; set; }
     public string? HistoryNewValue { get; set; }
+    public string? PlaylistId { get; set; }
+    public string? PlaylistName { get; set; }
+    public string? PlaylistHeroUrl { get; set; }
+    public string? PlaylistCoverUrl { get; set; }
+    public string? PlaylistLogoUrl { get; set; }
+    public string? GameId { get; set; }
+    public string? Position { get; set; }
 }
 
 public class UpdateImageUrlsResult

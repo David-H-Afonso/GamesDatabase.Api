@@ -46,6 +46,20 @@ public sealed class PlaylistsController(IPlaylistService playlistService) : Base
         return result.Success ? Ok() : ErrorResult(result);
     }
 
+    [HttpGet("{id}/export")]
+    public async Task<ActionResult<PlaylistTransferDto>> ExportPlaylist(int id, [FromQuery] PlaylistExportReference reference = PlaylistExportReference.Id)
+    {
+        var result = await playlistService.ExportPlaylistAsync(id, reference, GetCurrentUserIdOrDefault(1));
+        return result.Success ? Ok(result.Data) : result.NotFound ? NotFound(result.Error) : result.Conflict ? Conflict(result.Error) : result.StatusCode == 500 ? StatusCode(500, result.Error) : BadRequest(result.Error);
+    }
+
+    [HttpPost("import")]
+    public async Task<ActionResult<PlaylistDto>> ImportPlaylist(PlaylistTransferDto dto)
+    {
+        var result = await playlistService.ImportPlaylistAsync(dto, GetCurrentUserIdOrDefault(1));
+        return ToActionResult(result);
+    }
+
     [HttpPost("{id}/items")]
     public async Task<ActionResult<PlaylistDto>> AddItem(int id, AddPlaylistItemDto dto)
     {

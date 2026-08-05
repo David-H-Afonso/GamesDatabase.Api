@@ -13,4 +13,6 @@ public interface IPlaylistService
     Task<CatalogServiceResult<PlaylistDto>> AddItemAsync(int id, AddPlaylistItemDto dto, int userId);
     Task<CatalogServiceResult<PlaylistDto>> RemoveItemAsync(int id, int itemId, int userId);
     Task<CatalogServiceResult> ReorderItemsAsync(int id, ReorderPlaylistItemsDto dto, int userId);
+    Task<CatalogServiceResult<PlaylistTransferDto>> ExportPlaylistAsync(int id, PlaylistExportReference reference, int userId);
+    Task<CatalogServiceResult<PlaylistDto>> ImportPlaylistAsync(PlaylistTransferDto dto, int userId);
 }

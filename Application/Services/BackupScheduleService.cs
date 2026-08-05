@@ -128,6 +128,40 @@ public class BackupScheduleService : BackgroundService
             foreach (var v in views)
                 allRecords.Add(new FullExportModel { Type = "View", Name = v.Name, Description = v.Description ?? "", FiltersJson = v.FiltersJson, SortingJson = v.SortingJson ?? "", IsPublic = v.IsPublic.ToString(), CreatedBy = v.CreatedBy ?? "" });
 
+            var playlists = await db.Playlists
+                .Where(playlist => playlist.UserId == userId)
+                .Include(playlist => playlist.Items).ThenInclude(item => item.Game)
+                .OrderBy(playlist => playlist.SortOrder)
+                .ThenBy(playlist => playlist.Name)
+                .ToListAsync(ct);
+            foreach (var playlist in playlists)
+            {
+                allRecords.Add(new FullExportModel
+                {
+                    Type = "Playlist",
+                    Name = playlist.Name,
+                    Description = playlist.Description ?? "",
+                    PlaylistId = playlist.Id.ToString(CultureInfo.InvariantCulture),
+                    PlaylistName = playlist.Name,
+                    PlaylistHeroUrl = playlist.HeroUrl ?? "",
+                    PlaylistCoverUrl = playlist.CoverUrl ?? "",
+                    PlaylistLogoUrl = playlist.LogoUrl ?? "",
+                    SortOrder = playlist.SortOrder.ToString(CultureInfo.InvariantCulture)
+                });
+                foreach (var item in playlist.Items.OrderBy(item => item.Position).ThenBy(item => item.Id))
+                {
+                    allRecords.Add(new FullExportModel
+                    {
+                        Type = "PlaylistItem",
+                        Name = item.Game.Name,
+                        PlaylistId = playlist.Id.ToString(CultureInfo.InvariantCulture),
+                        PlaylistName = playlist.Name,
+                        GameId = item.GameId.ToString(CultureInfo.InvariantCulture),
+                        Position = item.Position.ToString(CultureInfo.InvariantCulture)
+                    });
+                }
+            }
+
             // ── Games (partial = only ModifiedSinceExport, full = all) ──────────
             var gamesQuery = db.Games
                 .Where(g => g.UserId == userId)
@@ -150,6 +184,7 @@ public class BackupScheduleService : BackgroundService
                 {
                     Type = "Game",
                     Name = g.Name,
+                    GameId = g.Id.ToString(CultureInfo.InvariantCulture),
                     Status = g.Status?.Name ?? "",
                     Platform = g.Platform?.Name ?? "",
                     PlayWith = playWithNames,

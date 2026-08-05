@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Infrastructure.Persistence;
@@ -71,6 +72,48 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/playlists/{playlist.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Full_csv_export_contains_playlists_and_old_csv_import_remains_compatible()
+    {
+        var client = await CreateClientAsync("HouseholdUserA");
+        var playlist = await CreatePlaylistAsync(client, "Backup order");
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new AddPlaylistItemDto { GameId = factory.UserAGameId })).EnsureSuccessStatusCode();
+
+        var export = await client.GetAsync("/api/DataExport/full");
+        export.EnsureSuccessStatusCode();
+        var csv = await export.Content.ReadAsStringAsync();
+        Assert.Contains("Playlist", csv, StringComparison.Ordinal);
+        Assert.Contains("PlaylistItem", csv, StringComparison.Ordinal);
+        Assert.Contains(factory.UserAGameId.ToString(), csv, StringComparison.Ordinal);
+
+        using var oldCsv = new MultipartFormDataContent();
+        oldCsv.Add(new StringContent("Type,Name\nPlatform,Legacy platform\n", Encoding.UTF8, "text/csv"), "csvFile", "legacy.csv");
+        var import = await client.PostAsync("/api/DataExport/full", oldCsv);
+        Assert.Equal(HttpStatusCode.OK, import.StatusCode);
+    }
+
+    [Fact]
+    public async Task Playlist_json_transfer_supports_exact_names_and_internal_ids()
+    {
+        var client = await CreateClientAsync("HouseholdUserA");
+        var source = await CreatePlaylistAsync(client, "JSON source");
+        (await client.PostAsJsonAsync($"/api/playlists/{source.Id}/items", new AddPlaylistItemDto { GameId = factory.UserAGameId })).EnsureSuccessStatusCode();
+
+        var byName = await client.GetFromJsonAsync<PlaylistTransferDto>($"/api/playlists/{source.Id}/export?reference=Name");
+        Assert.Null(Assert.Single(byName!.Games).GameId);
+        Assert.Equal("Game A", byName.Games[0].Name);
+
+        byName.Name = "JSON imported by name";
+        byName.Games[0].GameId = null;
+        var importedByName = await client.PostAsJsonAsync("/api/playlists/import", byName);
+        importedByName.EnsureSuccessStatusCode();
+
+        var byId = await client.GetFromJsonAsync<PlaylistTransferDto>($"/api/playlists/{source.Id}/export?reference=Id");
+        byId!.Name = "JSON imported by id";
+        var importedById = await client.PostAsJsonAsync("/api/playlists/import", byId);
+        importedById.EnsureSuccessStatusCode();
     }
 
     private async Task<HttpClient> CreateClientAsync(string username)

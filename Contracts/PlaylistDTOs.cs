@@ -1,5 +1,11 @@
 namespace GamesDatabase.Api.Contracts;
 
+public enum PlaylistExportReference
+{
+    Id,
+    Name
+}
+
 public sealed class PlaylistDto
 {
     public int Id { get; set; }
@@ -73,4 +79,22 @@ public sealed class ReorderPlaylistItemsDto
 public sealed class ReorderPlaylistsDto
 {
     public List<int> OrderedIds { get; set; } = [];
+}
+
+public sealed class PlaylistTransferDto
+{
+    public string Format { get; set; } = "games-database-playlist";
+    public int Version { get; set; } = 1;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? HeroUrl { get; set; }
+    public string? CoverUrl { get; set; }
+    public string? LogoUrl { get; set; }
+    public List<PlaylistGameReferenceDto> Games { get; set; } = [];
+}
+
+public sealed class PlaylistGameReferenceDto
+{
+    public int? GameId { get; set; }
+    public string? Name { get; set; }
 }

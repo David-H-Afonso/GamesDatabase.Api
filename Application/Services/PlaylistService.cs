@@ -130,6 +130,94 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         return CatalogServiceResult.Ok();
     }
 
+    public async Task<CatalogServiceResult<PlaylistTransferDto>> ExportPlaylistAsync(int id, PlaylistExportReference reference, int userId)
+    {
+        var playlist = await PlaylistQuery().FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
+        if (playlist is null) return CatalogServiceResult<PlaylistTransferDto>.NotFoundResult("Playlist no encontrada.");
+
+        var transfer = new PlaylistTransferDto
+        {
+            Name = playlist.Name,
+            Description = playlist.Description,
+            HeroUrl = playlist.HeroUrl,
+            CoverUrl = playlist.CoverUrl,
+            LogoUrl = playlist.LogoUrl,
+            Games = playlist.Items
+                .OrderBy(item => item.Position)
+                .ThenBy(item => item.Id)
+                .Select(item => reference == PlaylistExportReference.Id
+                    ? new PlaylistGameReferenceDto { GameId = item.GameId }
+                    : new PlaylistGameReferenceDto { Name = item.Game.Name })
+                .ToList()
+        };
+        return CatalogServiceResult<PlaylistTransferDto>.Ok(transfer);
+    }
+
+    public async Task<CatalogServiceResult<PlaylistDto>> ImportPlaylistAsync(PlaylistTransferDto dto, int userId)
+    {
+        var name = dto.Name.Trim();
+        if (!string.Equals(dto.Format, "games-database-playlist", StringComparison.OrdinalIgnoreCase)
+            || dto.Version != 1)
+        {
+            return CatalogServiceResult<PlaylistDto>.BadRequest("El JSON no es una playlist de Games Database compatible.");
+        }
+
+        if (name.Length == 0) return CatalogServiceResult<PlaylistDto>.BadRequest("El nombre de la playlist es obligatorio.");
+        if (await context.Playlists.AnyAsync(item => item.UserId == userId && item.Name == name))
+            return CatalogServiceResult<PlaylistDto>.ConflictResult($"Ya existe una playlist con el nombre '{name}'.");
+        if (dto.Games.Count != dto.Games.Count(reference => reference.GameId.HasValue || !string.IsNullOrEmpty(reference.Name)))
+            return CatalogServiceResult<PlaylistDto>.BadRequest("Cada juego debe incluir gameId o name.");
+
+        var ids = dto.Games.Where(reference => reference.GameId.HasValue).Select(reference => reference.GameId!.Value).Distinct().ToList();
+        var names = dto.Games.Where(reference => !reference.GameId.HasValue && !string.IsNullOrEmpty(reference.Name)).Select(reference => reference.Name!).Distinct().ToList();
+        var games = await context.Games
+            .Where(game => game.UserId == userId && (ids.Contains(game.Id) || names.Contains(game.Name)))
+            .ToListAsync();
+        var gamesById = games.ToDictionary(game => game.Id);
+        var gamesByName = games.GroupBy(game => game.Name).ToDictionary(group => group.Key, group => group.Single());
+        var resolvedGames = new List<Game>();
+        var missing = new List<string>();
+        foreach (var reference in dto.Games)
+        {
+            Game? game = null;
+            if (reference.GameId.HasValue
+                && gamesById.TryGetValue(reference.GameId.Value, out var gameById)
+                && (string.IsNullOrEmpty(reference.Name) || gameById.Name == reference.Name))
+            {
+                game = gameById;
+            }
+            if (game is null && !string.IsNullOrEmpty(reference.Name)) gamesByName.TryGetValue(reference.Name, out game);
+            if (game is null)
+            {
+                missing.Add(reference.GameId.HasValue ? $"gameId {reference.GameId.Value}" : $"name '{reference.Name}'");
+                continue;
+            }
+
+            if (resolvedGames.Any(item => item.Id == game.Id))
+                return CatalogServiceResult<PlaylistDto>.BadRequest($"El juego '{game.Name}' aparece más de una vez en el JSON.");
+            resolvedGames.Add(game);
+        }
+
+        if (missing.Count > 0)
+            return CatalogServiceResult<PlaylistDto>.NotFoundResult($"No se pudieron resolver: {string.Join(", ", missing)}.");
+
+        var maxOrder = await context.Playlists.Where(item => item.UserId == userId).MaxAsync(item => (int?)item.SortOrder) ?? 0;
+        var playlist = new Playlist
+        {
+            UserId = userId,
+            Name = name,
+            Description = dto.Description,
+            HeroUrl = dto.HeroUrl,
+            CoverUrl = dto.CoverUrl,
+            LogoUrl = dto.LogoUrl,
+            SortOrder = maxOrder + 1,
+            Items = resolvedGames.Select((game, position) => new PlaylistItem { GameId = game.Id, Position = position }).ToList()
+        };
+        context.Playlists.Add(playlist);
+        await context.SaveChangesAsync();
+        return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(playlist.Id, userId))!);
+    }
+
     private IQueryable<Playlist> PlaylistQuery() => context.Playlists
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.Status)
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.Platform)
