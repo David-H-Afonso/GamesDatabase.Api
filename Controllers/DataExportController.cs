@@ -110,7 +110,8 @@ public class DataExportController : BaseApiController
             return StatusCode(500, new { message = "NetworkSync:NetworkPath is not configured" });
 
         var userId = GetCurrentUserIdOrDefault(1);
-        var gamesRoot = Path.GetFullPath(Path.Combine(networkSyncPath, userId.ToString(), "Games"));
+        var entityRootName = string.Equals(request.EntityType, "Playlist", StringComparison.OrdinalIgnoreCase) ? "Playlists" : "Games";
+        var gamesRoot = Path.GetFullPath(Path.Combine(networkSyncPath, userId.ToString(), entityRootName));
         var folderPath = Path.GetFullPath(Path.Combine(gamesRoot, request.FolderName));
 
         if (!folderPath.StartsWith(gamesRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

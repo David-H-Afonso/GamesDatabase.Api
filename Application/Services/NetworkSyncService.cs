@@ -1534,12 +1534,64 @@ public class NetworkSyncService : INetworkSyncService
                 });
             }
 
+            await AnalyzePlaylistFoldersAsync(userId, result);
+
             return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error analyzing folders for user {UserId}", userId);
             throw;
+        }
+    }
+
+    private async Task AnalyzePlaylistFoldersAsync(int userId, FolderAnalysisResult result)
+    {
+        var playlists = await _context.Playlists
+            .Where(playlist => playlist.UserId == userId)
+            .Select(playlist => playlist.Name)
+            .ToListAsync();
+        result.TotalPlaylistsInDatabase = playlists.Count;
+
+        var playlistsRoot = Path.Combine(_syncOptions.NetworkPath!, userId.ToString(), "Playlists");
+        if (!Directory.Exists(playlistsRoot))
+        {
+            result.PlaylistFolderDifference = -playlists.Count;
+            return;
+        }
+
+        var folders = Directory.GetDirectories(playlistsRoot)
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Select(name => name!)
+            .ToList();
+        result.TotalPlaylistFoldersInFilesystem = folders.Count;
+        result.PlaylistFolderDifference = folders.Count - playlists.Count;
+
+        var expected = playlists
+            .Select(FolderNameHelper.MakeSafeFolderName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in folders)
+        {
+            if (!expected.Contains(folder))
+            {
+                var orphan = BuildOrphanFolder(folder, Path.Combine(playlistsRoot, folder));
+                orphan.EntityType = "Playlist";
+                orphan.Reason = "La carpeta existe en el almacenamiento pero no corresponde a ninguna playlist.";
+                result.PlaylistOrphanFolders.Add(orphan);
+            }
+        }
+
+        foreach (var group in folders
+            .GroupBy(GetNormalizedWordSet)
+            .Where(group => group.Count() > 1))
+        {
+            result.PlaylistPotentialDuplicates.Add(new PotentialDuplicate
+            {
+                GameName = group.First(),
+                FolderNames = group.ToList(),
+                Reason = "Las carpetas de playlists comparten las mismas palabras."
+            });
         }
     }
 

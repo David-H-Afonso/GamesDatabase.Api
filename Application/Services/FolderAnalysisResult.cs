@@ -8,6 +8,11 @@ public class FolderAnalysisResult
     public List<PotentialDuplicate> PotentialDuplicates { get; set; } = new();
     public List<OrphanFolder> OrphanFolders { get; set; } = new();
     public List<MissingGameFolder> MissingGameFolders { get; set; } = new();
+    public int TotalPlaylistsInDatabase { get; set; }
+    public int TotalPlaylistFoldersInFilesystem { get; set; }
+    public int PlaylistFolderDifference { get; set; }
+    public List<PotentialDuplicate> PlaylistPotentialDuplicates { get; set; } = new();
+    public List<OrphanFolder> PlaylistOrphanFolders { get; set; } = new();
     /// <summary>Database duplicate detection results, always populated regardless of filesystem availability.</summary>
     public DatabaseDuplicatesResult DatabaseDuplicates { get; set; } = new();
 }
@@ -25,6 +30,7 @@ public class OrphanFolder
     public string FullPath { get; set; } = string.Empty;
     /// <summary>Human-readable explanation of why the folder is considered orphan.</summary>
     public string Reason { get; set; } = string.Empty;
+    public string EntityType { get; set; } = "Game";
     /// <summary>Folder creation time (UTC), when the filesystem exposes it.</summary>
     public DateTime? CreatedAt { get; set; }
     /// <summary>Folder last-write time (UTC), when the filesystem exposes it.</summary>
@@ -112,6 +118,7 @@ public class DatabaseDuplicateEntry
 public class DeleteOrphanFolderRequest
 {
     public string FolderName { get; set; } = string.Empty;
+    public string EntityType { get; set; } = "Game";
 }
 
 public class DismissDuplicateGamesRequest
