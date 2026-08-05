@@ -335,12 +335,6 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("hero_url");
 
-                    b.Property<bool>("IsAutomatic")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_automatic");
-
                     b.Property<DateTime>("LastExportedAt")
                         .HasColumnType("TEXT")
                         .HasColumnName("last_exported_at");
@@ -354,10 +348,6 @@ namespace GamesDatabase.Api.Migrations
                     b.Property<string>("LogoUrl")
                         .HasColumnType("TEXT")
                         .HasColumnName("logo_url");
-
-                    b.Property<string>("RulesJson")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("rules_json");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")
@@ -1072,7 +1062,7 @@ namespace GamesDatabase.Api.Migrations
                     b.ToTable("household_refresh_token", (string)null);
                 });
 
-            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Playlist", b =>
+                modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Playlist", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1098,10 +1088,20 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("hero_url");
 
+                    b.Property<bool>("IsAutomatic")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_automatic");
+
                     b.Property<string>("LogoUrl")
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT")
                         .HasColumnName("logo_url");
+
+                    b.Property<string>("RulesJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("rules_json");
 
                     b.Property<bool>("ModifiedSinceExport")
                         .ValueGeneratedOnAdd()
