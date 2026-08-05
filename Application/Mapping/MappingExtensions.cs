@@ -25,9 +25,9 @@ public static class MappingExtensions
             Comment = game.Comment,
             PlayWithIds = game.GamePlayWiths?.Select(gpw => gpw.PlayWithId).ToList() ?? new List<int>(),
             PlayedStatusId = game.PlayedStatusId,
-            Logo = game.Logo,
-            Hero = game.Hero,
-            Cover = game.Cover,
+            Logo = NormalizeImageUrl(game.Logo),
+            Hero = NormalizeImageUrl(game.Hero),
+            Cover = NormalizeImageUrl(game.Cover),
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
             Favorite = game.Favorite,
@@ -46,11 +46,17 @@ public static class MappingExtensions
             UpdatedAt = game.UpdatedAt,
             StatusName = game.Status?.Name,
             PlatformName = game.Platform?.Name,
-            PlatformLogo = game.Platform?.Logo,
+            PlatformLogo = NormalizePlatformLogo(game.PlatformId ?? 0, game.Platform?.Logo),
             PlayWithNames = game.GamePlayWiths?.Select(gpw => gpw.PlayWith.Name).ToList() ?? new List<string>(),
             PlayedStatusName = game.PlayedStatus?.Name
         };
     }
+
+    private static string? NormalizeImageUrl(string? value) =>
+        string.IsNullOrWhiteSpace(value) || value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) ? null : value;
+
+    private static string? NormalizePlatformLogo(int platformId, string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) ? $"/api/gameplatforms/{platformId}/logo" : value;
 
     public static Game ToEntity(this GameCreateDto dto)
     {
@@ -127,7 +133,7 @@ public static class MappingExtensions
             SortOrder = platform.SortOrder,
             IsActive = platform.IsActive,
             Color = platform.Color,
-            Logo = platform.Logo
+            Logo = NormalizePlatformLogo(platform.Id, platform.Logo)
         };
     }
 

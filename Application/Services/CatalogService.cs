@@ -577,7 +577,7 @@ public class CatalogService : ICatalogService
             return "El logo es demasiado grande";
         }
 
-        if (IsValidImageUrl(normalized) || IsValidImageDataUrl(normalized))
+        if (IsValidImageUrl(normalized) || IsValidInternalPlatformLogo(normalized) || IsValidImageDataUrl(normalized))
         {
             return null;
         }
@@ -605,6 +605,10 @@ public class CatalogService : ICatalogService
 
         return allowedPrefixes.Any(prefix => logo.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static bool IsValidInternalPlatformLogo(string logo) =>
+        logo.StartsWith("/platform-icons/", StringComparison.OrdinalIgnoreCase)
+        && !logo.Contains("..", StringComparison.Ordinal);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PLAYWITH
