@@ -136,7 +136,29 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         if (!HasUniqueIds(dto.OrderedIds)) return CatalogServiceResult.BadRequest("OrderedIds debe contener todos los elementos una sola vez.");
         var playlist = await context.Playlists.Include(item => item.Items).FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
         if (playlist is null) return CatalogServiceResult.NotFoundResult("Playlist no encontrada.");
-        if (playlist.IsAutomatic) return CatalogServiceResult.BadRequest("Las playlists automáticas se ordenan mediante sus reglas.");
+        if (playlist.IsAutomatic)
+        {
+            await HydrateAutomaticItemsAsync(playlist, userId);
+            var automaticRules = string.IsNullOrWhiteSpace(playlist.RulesJson)
+                ? new PlaylistRulesDto()
+                : JsonSerializer.Deserialize<PlaylistRulesDto>(playlist.RulesJson) ?? new PlaylistRulesDto();
+            var automaticGameIds = playlist.Items.Select(item => item.GameId).ToHashSet();
+            if (dto.OrderedIds.Count != automaticGameIds.Count
+                || dto.OrderedIds.Distinct().Count() != dto.OrderedIds.Count
+                || dto.OrderedIds.Any(gameId => !automaticGameIds.Contains(gameId)))
+            {
+                return CatalogServiceResult.BadRequest("OrderedIds debe contener todos los juegos automáticos una sola vez.");
+            }
+
+            automaticRules.OrderedGameIds = dto.OrderedIds;
+            playlist.RulesJson = JsonSerializer.Serialize(automaticRules);
+            playlist.UpdatedAt = DateTime.UtcNow;
+            playlist.ModifiedSinceExport = true;
+            await context.SaveChangesAsync();
+            return CatalogServiceResult.Ok();
+        }
+
+        if (!HasUniqueIds(dto.OrderedIds)) return CatalogServiceResult.BadRequest("OrderedIds debe contener todos los elementos una sola vez.");
         if (playlist.Items.Count != dto.OrderedIds.Count || playlist.Items.Any(item => !dto.OrderedIds.Contains(item.Id)))
             return CatalogServiceResult.NotFoundResult("Una o más posiciones no existen.");
         foreach (var item in playlist.Items) item.Position = dto.OrderedIds.IndexOf(item.Id);
@@ -278,7 +300,13 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         };
         if (rules.SortDescending) ordered = ordered.Reverse();
         if (rules.Limit is > 0) ordered = ordered.Take(rules.Limit.Value);
-        playlist.Items = ordered.Select((game, position) => new PlaylistItem { Id = game.Id, PlaylistId = playlist.Id, GameId = game.Id, Position = position, Game = game, Playlist = playlist }).ToList();
+        var orderedGames = ordered.ToList();
+        var manualOrder = rules.OrderedGameIds;
+        orderedGames = orderedGames
+            .OrderBy(game => manualOrder.Contains(game.Id) ? manualOrder.IndexOf(game.Id) : int.MaxValue)
+            .ThenBy(game => game.Name)
+            .ToList();
+        playlist.Items = orderedGames.Select((game, position) => new PlaylistItem { Id = game.Id, PlaylistId = playlist.Id, GameId = game.Id, Position = position, Game = game, Playlist = playlist }).ToList();
     }
 
     private async Task NormalizePlaylistOrdersAsync(int userId)

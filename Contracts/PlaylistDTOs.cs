@@ -94,6 +94,7 @@ public sealed class PlaylistRulesDto
     public string SortBy { get; set; } = "Position";
     public bool SortDescending { get; set; }
     public int? Limit { get; set; }
+    public List<int> OrderedGameIds { get; set; } = [];
 }
 
 public sealed class AddPlaylistItemDto
