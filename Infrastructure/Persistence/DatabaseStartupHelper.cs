@@ -34,6 +34,8 @@ public class DatabaseStartupHelper
         EnsureColumn(conn, logger, "game", "favorite", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, logger, "game_export_cache", "hero_url", "TEXT NULL");
         EnsureColumn(conn, logger, "game_export_cache", "hero_downloaded", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, logger, "playlist", "is_automatic", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, logger, "playlist", "rules_json", "TEXT NULL");
 
         ExecuteRepairSql(conn, logger,
             "UPDATE game SET hero = cover WHERE hero IS NULL AND cover IS NOT NULL;",
