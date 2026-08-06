@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace GamesDatabase.Api.Migrations;
 
+[Migration("20260805190000_AddAutomaticPlaylistRules")]
 public partial class AddAutomaticPlaylistRules : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
