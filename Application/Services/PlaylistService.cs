@@ -295,6 +295,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
             "name" => games.OrderBy(game => game.Name),
             "grade" => games.OrderBy(game => game.Grade),
             "critic" => games.OrderBy(game => game.Critic),
+            "story" => games.OrderBy(game => game.Story),
             "score" => games.OrderBy(game => game.Score),
             "released" => games.OrderBy(game => game.Released),
             "updated" => games.OrderBy(game => game.UpdatedAt),
@@ -304,10 +305,13 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         if (rules.Limit is > 0) ordered = ordered.Take(rules.Limit.Value);
         var orderedGames = ordered.ToList();
         var manualOrder = rules.OrderedGameIds;
-        orderedGames = orderedGames
-            .OrderBy(game => manualOrder.Contains(game.Id) ? manualOrder.IndexOf(game.Id) : int.MaxValue)
-            .ThenBy(game => game.Name)
-            .ToList();
+        if (manualOrder.Count > 0)
+        {
+            orderedGames = orderedGames
+                .OrderBy(game => manualOrder.Contains(game.Id) ? manualOrder.IndexOf(game.Id) : int.MaxValue)
+                .ThenBy(game => game.Name)
+                .ToList();
+        }
         playlist.Items = orderedGames.Select((game, position) => new PlaylistItem { Id = game.Id, PlaylistId = playlist.Id, GameId = game.Id, Position = position, Game = game, Playlist = playlist }).ToList();
     }
 

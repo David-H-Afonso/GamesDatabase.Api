@@ -75,6 +75,44 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
     }
 
     [Fact]
+    public async Task Automatic_playlist_preserves_score_order_and_supports_story_order()
+    {
+        var client = await CreateClientAsync("HouseholdUserA");
+        var lowScoreGame = await CreateGameAsync(client, "Sort test low");
+        var highScoreGame = await CreateGameAsync(client, "Sort test high");
+
+        (await client.PutAsJsonAsync($"/api/games/{lowScoreGame.Id}", new { critic = 80, story = 20 })).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync($"/api/games/{highScoreGame.Id}", new { critic = 80, story = 1 })).EnsureSuccessStatusCode();
+        lowScoreGame = await GetGameAsync(client, lowScoreGame.Id);
+        highScoreGame = await GetGameAsync(client, highScoreGame.Id);
+        Assert.True(lowScoreGame.Score < highScoreGame.Score, $"Expected low score game to sort first, got {lowScoreGame.Score} and {highScoreGame.Score}.");
+
+        var playlistResponse = await client.PostAsJsonAsync("/api/playlists", new PlaylistCreateDto
+        {
+            Name = "Automatic sorting",
+            IsAutomatic = true,
+            Rules = new PlaylistRulesDto
+            {
+                StatusIds = [factory.UserAInitialStatusId],
+                Search = "Sort test",
+                SortBy = "Score"
+            }
+        });
+        playlistResponse.EnsureSuccessStatusCode();
+        var playlist = (await playlistResponse.Content.ReadFromJsonAsync<PlaylistDto>())!;
+
+        var scoreOrdered = await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}");
+        Assert.Equal(lowScoreGame.Id, scoreOrdered!.Items[0].GameId);
+
+        playlist.Rules!.SortBy = "Story";
+        var update = await client.PutAsJsonAsync($"/api/playlists/{playlist.Id}", new PlaylistUpdateDto { Rules = playlist.Rules });
+        update.EnsureSuccessStatusCode();
+
+        var storyOrdered = await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}");
+        Assert.Equal(highScoreGame.Id, storyOrdered!.Items[0].GameId);
+    }
+
+    [Fact]
     public async Task Full_csv_export_contains_playlists_and_old_csv_import_remains_compatible()
     {
         var client = await CreateClientAsync("HouseholdUserA");
