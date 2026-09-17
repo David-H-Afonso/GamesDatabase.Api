@@ -1,14 +1,23 @@
-# Build stage
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+# Build stage: run the SDK natively on the builder and publish for the target
+# architecture. This keeps the final image multi-architecture without running
+# the .NET compiler through QEMU for arm64.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+ARG TARGETARCH
 WORKDIR /src
+
+RUN case "$TARGETARCH" in \
+      amd64) echo 'x64' > /tmp/dotnet-arch ;; \
+      arm64) echo 'arm64' > /tmp/dotnet-arch ;; \
+      *) echo "Unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac
 
 # Copy csproj and restore dependencies
 COPY GamesDatabase.Api.csproj .
-RUN dotnet restore GamesDatabase.Api.csproj
+RUN dotnet restore GamesDatabase.Api.csproj --arch "$(cat /tmp/dotnet-arch)"
 
 # Copy everything else and build
 COPY . .
-RUN dotnet publish GamesDatabase.Api.csproj -c Release -o /app/publish --no-restore
+RUN dotnet publish GamesDatabase.Api.csproj -c Release -o /app/publish --no-restore --arch "$(cat /tmp/dotnet-arch)"
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
