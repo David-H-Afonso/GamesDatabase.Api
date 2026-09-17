@@ -8,4 +8,6 @@ public interface ISteamStoreService
     Task<SteamReviewSummaryDto?> GetReviewSummaryAsync(int appId);
     Task<List<SteamStoreSearchItemDto>> SearchStoreAsync(string query);
     Task<string?> GetCommunityIconUrlAsync(int appId);
+    Task<SteamAssetUrlsDto?> GetAssetUrlsAsync(int appId);
+    Task<string?> GetLibraryCoverUrlAsync(int appId);
 }

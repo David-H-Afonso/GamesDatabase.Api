@@ -288,6 +288,13 @@ public class SteamAppDetailsDto
     public string? Price { get; set; }
 }
 
+public class SteamAssetUrlsDto
+{
+    public string? LogoUrl { get; set; }
+    public string? HeroUrl { get; set; }
+    public string? CoverUrl { get; set; }
+}
+
 // ─── Sync/Import results ──────────────────────────────────────────────────────
 
 public class SteamSyncResult

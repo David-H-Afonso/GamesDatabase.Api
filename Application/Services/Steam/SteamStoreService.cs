@@ -31,8 +31,6 @@ public class SteamStoreService : ISteamStoreService
         @"https?://[^""'\s<>]+/(?:steamcommunity/public/images|community_assets/images)/apps/(?<appId>\d+)/(?<hash>[a-f0-9]{32,64})\.jpg",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private static string GetSteamLibraryCoverUrl(int appId) => $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/library_600x900.jpg";
-
     public SteamStoreService(IHttpClientFactory httpClientFactory, IOptions<SteamSettings> settings, GamesDbContext context, ILogger<SteamStoreService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
@@ -176,20 +174,25 @@ public class SteamStoreService : ISteamStoreService
             var result = JsonSerializer.Deserialize<SteamStoreSearchResponse>(json, _jsonOptions);
             if (result?.Items == null) return [];
 
-            return result.Items
-                .Select(i => new SteamStoreSearchItemDto
+            var items = new List<SteamStoreSearchItemDto>();
+            foreach (var item in result.Items)
+            {
+                var assets = await GetAssetUrlsAsync(item.Id);
+                items.Add(new SteamStoreSearchItemDto
                 {
-                    AppId = i.Id,
-                    Name = i.Name,
-                    HeroUrl = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{i.Id}/header.jpg",
-                    CoverUrl = GetSteamLibraryCoverUrl(i.Id),
-                    LogoUrl = i.TinyImage,
-                    Price = i.Price?.FinalFormatted,
-                    DiscountPercent = i.Price?.DiscountPercent > 0 ? i.Price.DiscountPercent : null,
-                    OriginalPrice = i.Price?.DiscountPercent > 0 ? i.Price.InitialFormatted : null,
-                    Metascore = int.TryParse(i.Metascore, out var ms) && ms > 0 ? ms : null
-                })
-                .ToList();
+                    AppId = item.Id,
+                    Name = item.Name,
+                    HeroUrl = assets?.HeroUrl,
+                    CoverUrl = assets?.CoverUrl,
+                    LogoUrl = assets?.LogoUrl ?? item.TinyImage,
+                    Price = item.Price?.FinalFormatted,
+                    DiscountPercent = item.Price?.DiscountPercent > 0 ? item.Price.DiscountPercent : null,
+                    OriginalPrice = item.Price?.DiscountPercent > 0 ? item.Price.InitialFormatted : null,
+                    Metascore = int.TryParse(item.Metascore, out var ms) && ms > 0 ? ms : null
+                });
+            }
+
+            return items;
         }
         catch (Exception ex)
         {
@@ -227,6 +230,72 @@ public class SteamStoreService : ISteamStoreService
             _logger.LogWarning(ex, "Error fetching Steam community icon for AppID {AppId}", appId);
             return null;
         }
+    }
+
+    public async Task<SteamAssetUrlsDto?> GetAssetUrlsAsync(int appId)
+    {
+        var requestJson = JsonSerializer.Serialize(new
+        {
+            ids = new[] { new { appid = appId } },
+            context = new { language = 0, country_code = "ES" },
+            data_request = new { include_assets = true }
+        });
+        var url = $"https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json={Uri.EscapeDataString(requestJson)}";
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return null;
+
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            if (!document.RootElement.TryGetProperty("response", out var responseElement)
+                || !responseElement.TryGetProperty("store_items", out var storeItems)
+                || storeItems.ValueKind != JsonValueKind.Array
+                || storeItems.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            var item = storeItems[0];
+            if (!item.TryGetProperty("assets", out var assets)
+                || !assets.TryGetProperty("asset_url_format", out var formatElement))
+            {
+                return null;
+            }
+
+            var format = formatElement.GetString();
+            if (string.IsNullOrWhiteSpace(format)) return null;
+
+            string? BuildAsset(string property) => assets.TryGetProperty(property, out var element)
+                ? BuildAssetUrl(format, element.GetString())
+                : null;
+
+            var communityIcon = assets.TryGetProperty("community_icon", out var iconElement) ? iconElement.GetString() : null;
+            return new SteamAssetUrlsDto
+            {
+                HeroUrl = BuildAsset("header_2x") ?? BuildAsset("header"),
+                CoverUrl = BuildAsset("library_capsule_2x") ?? BuildAsset("library_capsule"),
+                LogoUrl = string.IsNullOrWhiteSpace(communityIcon)
+                    ? null
+                    : $"https://shared.akamai.steamstatic.com/community_assets/images/apps/{appId}/{communityIcon}.jpg"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error fetching Steam library assets for AppID {AppId}", appId);
+            return null;
+        }
+    }
+
+    public async Task<string?> GetLibraryCoverUrlAsync(int appId)
+    {
+        return (await GetAssetUrlsAsync(appId))?.CoverUrl;
+    }
+
+    private static string? BuildAssetUrl(string format, string? assetPath)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath)) return null;
+        return $"https://shared.akamai.steamstatic.com/store_item_assets/{format.Replace("${FILENAME}", assetPath, StringComparison.Ordinal)}";
     }
 
     private static string? FindCommunityIconUrl(string html, int appId)
