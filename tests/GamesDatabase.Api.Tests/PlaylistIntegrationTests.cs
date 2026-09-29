@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Contracts;
+using GamesDatabase.Api.Domain.Entities;
 using GamesDatabase.Api.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -58,6 +59,35 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
 
         var reorderedDetail = await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}");
         Assert.Equal(secondGame.Id, Assert.Single(reorderedDetail!.Items.Take(1)).GameId);
+    }
+
+    [Fact]
+    public async Task Playlist_includes_steam_achievement_stats_on_every_detail_request()
+    {
+        var client = await CreateClientAsync("HouseholdUserA");
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+            var game = await context.Games.SingleAsync(item => item.Id == factory.UserAGameId);
+            context.SteamAchievements.AddRange(
+                new SteamAchievement { UserId = game.UserId, GameId = game.Id, SteamAppId = 100, ApiName = "achievement-one", DisplayName = "Achievement One", Achieved = true },
+                new SteamAchievement { UserId = game.UserId, GameId = game.Id, SteamAppId = 100, ApiName = "achievement-two", DisplayName = "Achievement Two", Achieved = true },
+                new SteamAchievement { UserId = game.UserId, GameId = game.Id, SteamAppId = 100, ApiName = "achievement-three", DisplayName = "Achievement Three", Achieved = false });
+            await context.SaveChangesAsync();
+        }
+
+        var playlist = await CreatePlaylistAsync(client, "Achievement stats");
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new AddPlaylistItemDto { GameId = factory.UserAGameId })).EnsureSuccessStatusCode();
+
+        var firstRequest = await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}");
+        var firstGame = Assert.Single(firstRequest!.Items).Game;
+        Assert.Equal(2, firstGame.SteamAchievementsUnlocked);
+        Assert.Equal(3, firstGame.SteamAchievementsTotal);
+
+        var refreshedRequest = await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}");
+        var refreshedGame = Assert.Single(refreshedRequest!.Items).Game;
+        Assert.Equal(firstGame.SteamAchievementsUnlocked, refreshedGame.SteamAchievementsUnlocked);
+        Assert.Equal(firstGame.SteamAchievementsTotal, refreshedGame.SteamAchievementsTotal);
     }
 
     [Fact]

@@ -25,7 +25,9 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
     {
         var playlist = await PlaylistQuery().FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
         if (playlist is not null) await HydrateAutomaticItemsAsync(playlist, userId);
-        return playlist?.ToDto();
+        var dto = playlist?.ToDto();
+        if (dto is not null) await FillSteamAchievementStatsAsync(dto, userId);
+        return dto;
     }
 
     public async Task<CatalogServiceResult<PlaylistDto>> CreatePlaylistAsync(PlaylistCreateDto dto, int userId)
@@ -261,6 +263,32 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.Platform)
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.PlayedStatus)
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.GamePlayWiths).ThenInclude(mapping => mapping.PlayWith);
+
+    private async Task FillSteamAchievementStatsAsync(PlaylistDto playlist, int userId)
+    {
+        var games = playlist.Items.Select(item => item.Game).ToList();
+        if (games.Count == 0) return;
+
+        var gameIds = games.Select(game => game.Id).ToList();
+        var stats = await context.SteamAchievements
+            .AsNoTracking()
+            .Where(achievement => achievement.UserId == userId && achievement.GameId.HasValue && gameIds.Contains(achievement.GameId.Value))
+            .GroupBy(achievement => achievement.GameId!.Value)
+            .Select(group => new
+            {
+                GameId = group.Key,
+                Total = group.Count(),
+                Unlocked = group.Count(achievement => achievement.Achieved)
+            })
+            .ToDictionaryAsync(group => group.GameId);
+
+        foreach (var game in games)
+        {
+            if (!stats.TryGetValue(game.Id, out var stat)) continue;
+            game.SteamAchievementsTotal = stat.Total;
+            game.SteamAchievementsUnlocked = stat.Unlocked;
+        }
+    }
 
     private async Task HydrateAutomaticItemsAsync(Playlist playlist, int userId)
     {
