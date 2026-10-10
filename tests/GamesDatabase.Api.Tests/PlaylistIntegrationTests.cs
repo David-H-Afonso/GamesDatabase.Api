@@ -277,6 +277,12 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
         var groupIds = (await owner.GetFromJsonAsync<List<PlaylistGroupDto>>("/api/playlists/groups"))!.Select(item => item.Id).Reverse().ToList();
         (await owner.PostAsJsonAsync("/api/playlists/groups/reorder", new { orderedIds = groupIds })).EnsureSuccessStatusCode();
         Assert.Equal(groupIds, (await owner.GetFromJsonAsync<List<PlaylistGroupDto>>("/api/playlists/groups"))!.Select(item => item.Id).ToList());
+        var withUngrouped = new List<int>(groupIds);
+        withUngrouped.Insert(1, 0);
+        (await owner.PostAsJsonAsync("/api/playlists/groups/reorder", new { orderedIds = withUngrouped })).EnsureSuccessStatusCode();
+        var remembered = (await owner.GetFromJsonAsync<List<PlaylistGroupDto>>("/api/playlists/groups"))!;
+        Assert.True(remembered[0].SortOrder < 0);
+        Assert.True(remembered[1].SortOrder > 0);
         Assert.Equal(HttpStatusCode.BadRequest, (await other.PostAsJsonAsync("/api/playlists/groups/reorder", new { orderedIds = groupIds })).StatusCode);
         (await owner.DeleteAsync($"/api/playlists/groups/{secondGroup.Id}")).EnsureSuccessStatusCode();
         var playlist = await CreatePlaylistAsync(owner, "Grouped saga test");

@@ -24,7 +24,7 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
         if (id.HasValue && group is null) return CatalogServiceResult<PlaylistGroupDto>.NotFoundResult("Grupo no encontrado.");
         if (group is null)
         {
-            group = new PlaylistGroup { UserId = userId, SortOrder = (await context.Set<PlaylistGroup>().Where(group => group.UserId == userId).MaxAsync(group => (int?)group.SortOrder) ?? 0) + 1 };
+            group = new PlaylistGroup { UserId = userId, SortOrder = Math.Max(0, await context.Set<PlaylistGroup>().Where(group => group.UserId == userId).MaxAsync(group => (int?)group.SortOrder) ?? 0) + 1 };
             context.Add(group);
         }
         group.Name = name;
@@ -46,9 +46,14 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
     public async Task<CatalogServiceResult> ReorderGroupsAsync(ReorderPlaylistsDto dto, int userId)
     {
         var groups = await context.Set<PlaylistGroup>().Where(group => group.UserId == userId).ToListAsync();
-        if (dto.OrderedIds.Count != groups.Count || dto.OrderedIds.Distinct().Count() != groups.Count || groups.Any(group => !dto.OrderedIds.Contains(group.Id)))
+        var includesUngrouped = dto.OrderedIds.Contains(0);
+        var expectedCount = groups.Count + (includesUngrouped ? 1 : 0);
+        if (dto.OrderedIds.Count != expectedCount || dto.OrderedIds.Distinct().Count() != expectedCount || groups.Any(group => !dto.OrderedIds.Contains(group.Id)) || dto.OrderedIds.Any(id => id != 0 && groups.All(group => group.Id != id)))
             return CatalogServiceResult.BadRequest("El orden debe contener todos tus grupos una sola vez.");
-        foreach (var group in groups) group.SortOrder = dto.OrderedIds.IndexOf(group.Id) + 1;
+        // Zero is the virtual ungrouped section. Negative/positive positions
+        // persist folders before/after it even while that section is empty.
+        var origin = includesUngrouped ? dto.OrderedIds.IndexOf(0) : -1;
+        foreach (var group in groups) group.SortOrder = dto.OrderedIds.IndexOf(group.Id) - origin;
         await context.SaveChangesAsync();
         return CatalogServiceResult.Ok();
     }

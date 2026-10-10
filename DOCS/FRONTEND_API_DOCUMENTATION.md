@@ -1304,8 +1304,10 @@ If you encounter issues:
 ## Playlist groups
 
 `POST /api/playlists/groups/reorder` accepts `{ orderedIds }`, containing every
-group owned by the user exactly once. The ungrouped section is not a group and
-is never included. The front supports folder drag-and-drop and an explicit
+group owned by the user exactly once. Optional ID `0` represents the virtual
+ungrouped section; folder sort orders are persisted relative to this anchor so
+its position survives being hidden when empty. Without `0`, ungrouped defaults
+to the top. The front supports folder drag-and-drop and an explicit
 selection mode for moving multiple playlists; the move controls are hidden
 outside selection mode.
 
