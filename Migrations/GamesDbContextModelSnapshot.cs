@@ -1062,7 +1062,7 @@ namespace GamesDatabase.Api.Migrations
                     b.ToTable("household_refresh_token", (string)null);
                 });
 
-                modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Playlist", b =>
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Playlist", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1099,9 +1099,9 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("logo_url");
 
-                    b.Property<string>("RulesJson")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("rules_json");
+                    b.Property<int?>("MaxLength")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("max_length");
 
                     b.Property<bool>("ModifiedSinceExport")
                         .ValueGeneratedOnAdd()
@@ -1114,6 +1114,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("TEXT")
                         .HasColumnName("name");
+
+                    b.Property<string>("RulesJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("rules_json");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("INTEGER")

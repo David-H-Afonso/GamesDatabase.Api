@@ -8,6 +8,7 @@ public enum PlaylistExportReference
 
 public sealed class PlaylistDto
 {
+    public int? MaxLength { get; set; }
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -28,6 +29,7 @@ public sealed class PlaylistDto
 
 public sealed class PlaylistSummaryDto
 {
+    public int? MaxLength { get; set; }
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -54,6 +56,8 @@ public sealed class PlaylistItemDto
 
 public sealed class PlaylistCreateDto
 {
+    [System.ComponentModel.DataAnnotations.Range(1, int.MaxValue)]
+    public int? MaxLength { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? HeroUrl { get; set; }
@@ -65,6 +69,11 @@ public sealed class PlaylistCreateDto
 
 public sealed class PlaylistUpdateDto
 {
+    private int? maxLength;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool MaxLengthSpecified { get; private set; }
+    [System.ComponentModel.DataAnnotations.Range(1, int.MaxValue)]
+    public int? MaxLength { get => maxLength; set { maxLength = value; MaxLengthSpecified = true; } }
     public string? Name { get; set; }
     public string? Description { get; set; }
     public string? HeroUrl { get; set; }
@@ -95,11 +104,15 @@ public sealed class PlaylistRulesDto
     public bool SortDescending { get; set; }
     public int? Limit { get; set; }
     public List<int> OrderedGameIds { get; set; } = [];
+    public List<int> StatusPriorityIds { get; set; } = [];
+    public bool GroupByStatus { get; set; }
+    public List<int> ExcludedGameIds { get; set; } = [];
 }
 
 public sealed class AddPlaylistItemDto
 {
     public int GameId { get; set; }
+    public int? StatusId { get; set; }
 }
 
 public sealed class ReorderPlaylistItemsDto
@@ -114,6 +127,8 @@ public sealed class ReorderPlaylistsDto
 
 public sealed class PlaylistTransferDto
 {
+    [System.ComponentModel.DataAnnotations.Range(1, int.MaxValue)]
+    public int? MaxLength { get; set; }
     public string Format { get; set; } = "games-database-playlist";
     public int Version { get; set; } = 1;
     public string Name { get; set; } = string.Empty;

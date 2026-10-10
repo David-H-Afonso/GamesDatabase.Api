@@ -374,6 +374,7 @@ public class FullExportModel
     public string? PlaylistHeroUrl { get; set; }
     public string? PlaylistCoverUrl { get; set; }
     public string? PlaylistLogoUrl { get; set; }
+    public string? PlaylistMaxLength { get; set; }
     public string? GameId { get; set; }
     public string? Position { get; set; }
 }

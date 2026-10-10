@@ -326,6 +326,7 @@ public class GameImportExportService : IGameImportExportService
                 PlaylistHeroUrl = playlist.HeroUrl ?? "",
                 PlaylistCoverUrl = playlist.CoverUrl ?? "",
                 PlaylistLogoUrl = playlist.LogoUrl ?? "",
+                PlaylistMaxLength = playlist.MaxLength?.ToString(CultureInfo.InvariantCulture) ?? "",
                 SortOrder = playlist.SortOrder.ToString(CultureInfo.InvariantCulture)
             });
 
@@ -700,6 +701,13 @@ public class GameImportExportService : IGameImportExportService
                 playlist.HeroUrl = string.IsNullOrWhiteSpace(record.PlaylistHeroUrl) ? null : record.PlaylistHeroUrl;
                 playlist.CoverUrl = string.IsNullOrWhiteSpace(record.PlaylistCoverUrl) ? null : record.PlaylistCoverUrl;
                 playlist.LogoUrl = string.IsNullOrWhiteSpace(record.PlaylistLogoUrl) ? null : record.PlaylistLogoUrl;
+                // Older exports lack this column; preserve an existing capacity.
+                if (record.PlaylistMaxLength is not null)
+                {
+                    var maxLength = ParseNullableInt(record.PlaylistMaxLength);
+                    if (maxLength is <= 0) throw new InvalidOperationException("PlaylistMaxLength debe ser positivo.");
+                    playlist.MaxLength = maxLength;
+                }
                 await _context.SaveChangesAsync();
 
                 var itemRecords = playlistItemRecords

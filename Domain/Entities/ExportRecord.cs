@@ -130,6 +130,9 @@ public class ExportRecord
     [Name("PlaylistLogoUrl")]
     public string? PlaylistLogoUrl { get; set; }
 
+    [Name("PlaylistMaxLength")]
+    public string? PlaylistMaxLength { get; set; }
+
     [Name("GameId")]
     public string? GameId { get; set; }
 

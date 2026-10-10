@@ -146,6 +146,7 @@ public class BackupScheduleService : BackgroundService
                     PlaylistHeroUrl = playlist.HeroUrl ?? "",
                     PlaylistCoverUrl = playlist.CoverUrl ?? "",
                     PlaylistLogoUrl = playlist.LogoUrl ?? "",
+                    PlaylistMaxLength = playlist.MaxLength?.ToString(CultureInfo.InvariantCulture) ?? "",
                     SortOrder = playlist.SortOrder.ToString(CultureInfo.InvariantCulture)
                 });
                 foreach (var item in playlist.Items.OrderBy(item => item.Position).ThenBy(item => item.Id))

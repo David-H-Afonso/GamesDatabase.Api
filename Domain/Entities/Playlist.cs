@@ -24,6 +24,7 @@ public class Playlist
     public string? LogoUrl { get; set; }
 
     public bool IsAutomatic { get; set; }
+    public int? MaxLength { get; set; }
     public string? RulesJson { get; set; }
 
     public int SortOrder { get; set; }

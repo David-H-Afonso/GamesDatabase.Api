@@ -8,7 +8,7 @@ using System.Text.Json;
 
 namespace GamesDatabase.Api.Application.Services;
 
-public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
+public sealed class PlaylistService(GamesDbContext context, IGameService gameService) : IPlaylistService
 {
     public async Task<IEnumerable<PlaylistSummaryDto>> GetPlaylistsAsync(int userId)
     {
@@ -33,6 +33,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
     public async Task<CatalogServiceResult<PlaylistDto>> CreatePlaylistAsync(PlaylistCreateDto dto, int userId)
     {
         var name = dto.Name.Trim();
+        if (dto.MaxLength is <= 0) return CatalogServiceResult<PlaylistDto>.BadRequest("MaxLength debe ser mayor que cero o null.");
         if (name.Length == 0) return CatalogServiceResult<PlaylistDto>.BadRequest("El nombre de la playlist es obligatorio.");
         if (await context.Playlists.AnyAsync(item => item.UserId == userId && item.Name == name))
             return CatalogServiceResult<PlaylistDto>.ConflictResult($"Ya existe una playlist con el nombre '{name}'.");
@@ -42,6 +43,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         {
             UserId = userId,
             Name = name,
+            MaxLength = dto.MaxLength,
             Description = dto.Description,
             HeroUrl = dto.HeroUrl,
             CoverUrl = dto.CoverUrl,
@@ -60,6 +62,11 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         var playlist = await context.Playlists.FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
         if (playlist is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Playlist no encontrada.");
 
+        if (dto.MaxLengthSpecified)
+        {
+            if (dto.MaxLength is <= 0) return CatalogServiceResult<PlaylistDto>.BadRequest("MaxLength debe ser mayor que cero o null.");
+            playlist.MaxLength = dto.MaxLength;
+        }
         if (dto.Name is not null)
         {
             var name = dto.Name.Trim();
@@ -104,9 +111,49 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
     {
         var playlist = await context.Playlists.FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
         if (playlist is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Playlist no encontrada.");
-        if (playlist.IsAutomatic) return CatalogServiceResult<PlaylistDto>.BadRequest("Las playlists automáticas se llenan mediante sus reglas.");
         var game = await context.Games.FirstOrDefaultAsync(item => item.Id == dto.GameId && item.UserId == userId);
         if (game is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Juego no encontrado.");
+        // Serialize the capacity check with the write, including status changes.
+        await using var capacityTransaction = await context.Database.BeginTransactionAsync();
+        if (playlist.MaxLength.HasValue)
+        {
+            int count;
+            if (playlist.IsAutomatic)
+            {
+                var capacityRules = ReadRules(playlist);
+                count = await AutomaticQuery(capacityRules, userId).CountAsync();
+                if (capacityRules.Limit is > 0) count = Math.Min(count, capacityRules.Limit.Value);
+            }
+            else count = await context.PlaylistItems.CountAsync(item => item.PlaylistId == id);
+            if (count >= playlist.MaxLength.Value)
+                return CatalogServiceResult<PlaylistDto>.BadRequest("La playlist ha alcanzado su máximo de juegos.");
+        }
+        if (playlist.IsAutomatic)
+        {
+            var rules = ReadRules(playlist);
+            var proposedStatus = dto.StatusId ?? game.StatusId;
+            if (rules.StatusIds.Count > 0 && !rules.StatusIds.Contains(proposedStatus))
+                return CatalogServiceResult<PlaylistDto>.BadRequest("Selecciona un estado admitido por las reglas de esta playlist.");
+            if (dto.StatusId.HasValue && !await context.GameStatuses.AnyAsync(status => status.Id == proposedStatus && status.UserId == userId && status.IsActive))
+                return CatalogServiceResult<PlaylistDto>.BadRequest("El estado no está disponible para este usuario.");
+            var candidateRules = ReadRules(playlist);
+            candidateRules.StatusIds = [];
+            candidateRules.ExcludedGameIds = [];
+            if (!await AutomaticQuery(candidateRules, userId).AnyAsync(candidate => candidate.Id == game.Id))
+                return CatalogServiceResult<PlaylistDto>.BadRequest("El juego no cumple las otras reglas de la playlist. Cambiar el estado no basta.");
+            if (game.StatusId != proposedStatus)
+            {
+                var result = await gameService.UpdateGameAsync(game.Id, JsonSerializer.SerializeToElement(new { statusId = proposedStatus }), userId);
+                if (!result.Success) return CatalogServiceResult<PlaylistDto>.BadRequest(result.Error ?? "No se pudo cambiar el estado.");
+            }
+            rules.ExcludedGameIds.Remove(game.Id);
+            playlist.RulesJson = JsonSerializer.Serialize(rules);
+            playlist.UpdatedAt = DateTime.UtcNow;
+            playlist.ModifiedSinceExport = true;
+            await context.SaveChangesAsync();
+            await capacityTransaction.CommitAsync();
+            return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(id, userId))!);
+        }
         if (await context.PlaylistItems.AnyAsync(item => item.PlaylistId == id && item.GameId == dto.GameId))
             return CatalogServiceResult<PlaylistDto>.ConflictResult("El juego ya está en esta playlist.");
 
@@ -115,11 +162,25 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         playlist.UpdatedAt = DateTime.UtcNow;
         playlist.ModifiedSinceExport = true;
         await context.SaveChangesAsync();
+        await capacityTransaction.CommitAsync();
         return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(id, userId))!);
     }
 
     public async Task<CatalogServiceResult<PlaylistDto>> RemoveItemAsync(int id, int itemId, int userId)
     {
+        var automaticPlaylist = await context.Playlists.FirstOrDefaultAsync(playlist => playlist.Id == id && playlist.UserId == userId && playlist.IsAutomatic);
+        if (automaticPlaylist is not null)
+        {
+            if (!await context.Games.AnyAsync(game => game.Id == itemId && game.UserId == userId))
+                return CatalogServiceResult<PlaylistDto>.NotFoundResult("Juego no encontrado.");
+            var rules = ReadRules(automaticPlaylist);
+            if (!rules.ExcludedGameIds.Contains(itemId)) rules.ExcludedGameIds.Add(itemId);
+            automaticPlaylist.RulesJson = JsonSerializer.Serialize(rules);
+            automaticPlaylist.UpdatedAt = DateTime.UtcNow;
+            automaticPlaylist.ModifiedSinceExport = true;
+            await context.SaveChangesAsync();
+            return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(id, userId))!);
+        }
         var item = await context.PlaylistItems
             .Include(candidate => candidate.Playlist)
             .FirstOrDefaultAsync(candidate => candidate.Id == itemId && candidate.PlaylistId == id && candidate.Playlist.UserId == userId);
@@ -140,11 +201,14 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         if (playlist is null) return CatalogServiceResult.NotFoundResult("Playlist no encontrada.");
         if (playlist.IsAutomatic)
         {
-            await HydrateAutomaticItemsAsync(playlist, userId);
+            // Automatic entries are virtual: do not attach them to the tracked
+            // collection that SaveChanges would persist as manual items.
+            var virtualPlaylist = new Playlist { Id = playlist.Id, IsAutomatic = true, RulesJson = playlist.RulesJson, MaxLength = playlist.MaxLength };
+            await HydrateAutomaticItemsAsync(virtualPlaylist, userId);
             var automaticRules = string.IsNullOrWhiteSpace(playlist.RulesJson)
                 ? new PlaylistRulesDto()
                 : JsonSerializer.Deserialize<PlaylistRulesDto>(playlist.RulesJson) ?? new PlaylistRulesDto();
-            var automaticGameIds = playlist.Items.Select(item => item.GameId).ToHashSet();
+            var automaticGameIds = virtualPlaylist.Items.Select(item => item.GameId).ToHashSet();
             if (dto.OrderedIds.Count != automaticGameIds.Count
                 || dto.OrderedIds.Distinct().Count() != dto.OrderedIds.Count
                 || dto.OrderedIds.Any(gameId => !automaticGameIds.Contains(gameId)))
@@ -177,6 +241,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
 
         var transfer = new PlaylistTransferDto
         {
+            MaxLength = playlist.MaxLength,
             Name = playlist.Name,
             Description = playlist.Description,
             HeroUrl = playlist.HeroUrl,
@@ -195,6 +260,9 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
 
     public async Task<CatalogServiceResult<PlaylistDto>> ImportPlaylistAsync(PlaylistTransferDto dto, int userId)
     {
+        if (dto.MaxLength is <= 0) return CatalogServiceResult<PlaylistDto>.BadRequest("MaxLength debe ser mayor que cero o null.");
+        if (dto.MaxLength.HasValue && dto.Games.Count > dto.MaxLength.Value)
+            return CatalogServiceResult<PlaylistDto>.BadRequest("El JSON contiene más juegos que el máximo de la playlist.");
         var name = dto.Name.Trim();
         if (!string.Equals(dto.Format, "games-database-playlist", StringComparison.OrdinalIgnoreCase)
             || dto.Version != 1)
@@ -247,6 +315,7 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
             UserId = userId,
             Name = name,
             Description = dto.Description,
+            MaxLength = dto.MaxLength,
             HeroUrl = dto.HeroUrl,
             CoverUrl = dto.CoverUrl,
             LogoUrl = dto.LogoUrl,
@@ -293,15 +362,46 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
     private async Task HydrateAutomaticItemsAsync(Playlist playlist, int userId)
     {
         if (!playlist.IsAutomatic) return;
-        var rules = string.IsNullOrWhiteSpace(playlist.RulesJson)
-            ? new PlaylistRulesDto()
-            : JsonSerializer.Deserialize<PlaylistRulesDto>(playlist.RulesJson) ?? new PlaylistRulesDto();
+        var rules = ReadRules(playlist);
+        var games = await AutomaticQuery(rules, userId).ToListAsync();
+        IEnumerable<Game> ordered = rules.SortBy.ToLowerInvariant() switch
+        {
+            "name" => games.OrderBy(game => game.Name),
+            "grade" => games.OrderBy(game => game.Grade),
+            "critic" => games.OrderBy(game => game.Critic),
+            "story" => games.OrderBy(game => game.Story),
+            "score" => games.OrderBy(game => game.Score),
+            "released" => games.OrderBy(game => game.Released),
+            "updated" => games.OrderBy(game => game.UpdatedAt),
+            _ => games.OrderBy(game => game.Id)
+        };
+        if (rules.SortDescending) ordered = ordered.Reverse();
+        // Stable ordering retains the configured base sort for newly matching games.
+        if (rules.OrderedGameIds.Count > 0)
+            ordered = ordered.OrderBy(game => rules.OrderedGameIds.Contains(game.Id) ? rules.OrderedGameIds.IndexOf(game.Id) : int.MaxValue);
+        if (rules.GroupByStatus)
+        {
+            var priorities = rules.StatusPriorityIds.Count > 0 ? rules.StatusPriorityIds : rules.StatusIds;
+            ordered = ordered.OrderBy(game => priorities.Contains(game.StatusId) ? priorities.IndexOf(game.StatusId) : int.MaxValue);
+        }
+        if (rules.Limit is > 0) ordered = ordered.Take(rules.Limit.Value);
+        if (playlist.MaxLength is > 0) ordered = ordered.Take(playlist.MaxLength.Value);
+        playlist.Items = ordered.Select((game, position) => new PlaylistItem { Id = game.Id, PlaylistId = playlist.Id, GameId = game.Id, Position = position, Game = game, Playlist = playlist }).ToList();
+    }
+
+    private static PlaylistRulesDto ReadRules(Playlist playlist) => string.IsNullOrWhiteSpace(playlist.RulesJson)
+        ? new PlaylistRulesDto()
+        : JsonSerializer.Deserialize<PlaylistRulesDto>(playlist.RulesJson) ?? new PlaylistRulesDto();
+
+    private IQueryable<Game> AutomaticQuery(PlaylistRulesDto rules, int userId)
+    {
         var query = context.Games.AsNoTracking()
             .Include(game => game.Status)
             .Include(game => game.Platform)
             .Include(game => game.PlayedStatus)
             .Include(game => game.GamePlayWiths).ThenInclude(mapping => mapping.PlayWith)
             .Where(game => game.UserId == userId);
+        if (rules.ExcludedGameIds.Count > 0) query = query.Where(game => !rules.ExcludedGameIds.Contains(game.Id));
         if (!string.IsNullOrWhiteSpace(rules.Search)) query = query.Where(game => game.Name.Contains(rules.Search));
         if (rules.StatusIds.Count > 0) query = query.Where(game => rules.StatusIds.Contains(game.StatusId));
         if (rules.PlatformIds.Count > 0) query = query.Where(game => game.PlatformId.HasValue && rules.PlatformIds.Contains(game.PlatformId.Value));
@@ -316,31 +416,17 @@ public sealed class PlaylistService(GamesDbContext context) : IPlaylistService
         if (rules.ReleasedFromYear.HasValue) query = query.Where(game => game.Released != null && game.Released.StartsWith(rules.ReleasedFromYear.Value.ToString()));
         if (rules.ReleasedToYear.HasValue) query = query.Where(game => game.Released != null && string.Compare(game.Released, $"{rules.ReleasedToYear.Value + 1}-01-01", StringComparison.Ordinal) < 0);
         if (rules.HasSteam.HasValue) query = rules.HasSteam.Value ? query.Where(game => game.SteamAppId.HasValue) : query.Where(game => !game.SteamAppId.HasValue);
-        if (rules.FullCompletion.HasValue) query = rules.FullCompletion.Value ? query.Where(game => game.Completion == 100 || game.IsManuallyCompleted) : query.Where(game => game.Completion != 100 && !game.IsManuallyCompleted);
-        var games = await query.ToListAsync();
-        IEnumerable<Game> ordered = rules.SortBy.ToLowerInvariant() switch
+        if (rules.FullCompletion.HasValue)
         {
-            "name" => games.OrderBy(game => game.Name),
-            "grade" => games.OrderBy(game => game.Grade),
-            "critic" => games.OrderBy(game => game.Critic),
-            "story" => games.OrderBy(game => game.Story),
-            "score" => games.OrderBy(game => game.Score),
-            "released" => games.OrderBy(game => game.Released),
-            "updated" => games.OrderBy(game => game.UpdatedAt),
-            _ => games.OrderBy(game => game.Id)
-        };
-        if (rules.SortDescending) ordered = ordered.Reverse();
-        if (rules.Limit is > 0) ordered = ordered.Take(rules.Limit.Value);
-        var orderedGames = ordered.ToList();
-        var manualOrder = rules.OrderedGameIds;
-        if (manualOrder.Count > 0)
-        {
-            orderedGames = orderedGames
-                .OrderBy(game => manualOrder.Contains(game.Id) ? manualOrder.IndexOf(game.Id) : int.MaxValue)
-                .ThenBy(game => game.Name)
-                .ToList();
+            var completedIds = context.SteamAchievements.Where(achievement => achievement.UserId == userId && achievement.GameId.HasValue)
+                .GroupBy(achievement => achievement.GameId!.Value)
+                .Where(group => group.All(achievement => achievement.Achieved))
+                .Select(group => group.Key);
+            query = rules.FullCompletion.Value
+                ? query.Where(game => game.IsManuallyCompleted || completedIds.Contains(game.Id))
+                : query.Where(game => !game.IsManuallyCompleted && !completedIds.Contains(game.Id));
         }
-        playlist.Items = orderedGames.Select((game, position) => new PlaylistItem { Id = game.Id, PlaylistId = playlist.Id, GameId = game.Id, Position = position, Game = game, Playlist = playlist }).ToList();
+        return query;
     }
 
     private async Task NormalizePlaylistOrdersAsync(int userId)

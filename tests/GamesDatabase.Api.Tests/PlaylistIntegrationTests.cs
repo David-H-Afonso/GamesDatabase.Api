@@ -62,6 +62,29 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
     }
 
     [Fact]
+    public async Task Playlist_capacity_blocks_addition_preserves_items_and_can_be_cleared()
+    {
+        var client = await CreateClientAsync("HouseholdUserA");
+        var first = await CreateGameAsync(client, "Capacity first");
+        var second = await CreateGameAsync(client, "Capacity second");
+        var third = await CreateGameAsync(client, "Capacity third");
+        var playlist = await CreatePlaylistAsync(client, "Capacity test");
+        Assert.Null(playlist.MaxLength);
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new { gameId = first.Id })).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new { gameId = second.Id })).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync($"/api/playlists/{playlist.Id}", new { maxLength = 1 })).EnsureSuccessStatusCode();
+        Assert.Equal(2, (await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.Items.Count);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new { gameId = third.Id })).StatusCode);
+        (await client.PutAsJsonAsync($"/api/playlists/{playlist.Id}", new { name = "Capacity renamed" })).EnsureSuccessStatusCode();
+        Assert.Equal(1, (await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.MaxLength);
+        var transfer = await client.GetFromJsonAsync<PlaylistTransferDto>($"/api/playlists/{playlist.Id}/export");
+        Assert.Equal(1, transfer!.MaxLength);
+        (await client.PutAsJsonAsync($"/api/playlists/{playlist.Id}", new { maxLength = (int?)null })).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new { gameId = third.Id })).EnsureSuccessStatusCode();
+        Assert.Null((await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.MaxLength);
+    }
+
+    [Fact]
     public async Task Playlist_includes_steam_achievement_stats_on_every_detail_request()
     {
         var client = await CreateClientAsync("HouseholdUserA");
@@ -182,6 +205,62 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
         byId!.Name = "JSON imported by id";
         var importedById = await client.PostAsJsonAsync("/api/playlists/import", byId);
         importedById.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task Automatic_list_add_validates_rules_before_changing_status_and_supports_exclusion()
+    {
+        var client = await CreateClientAsync("HouseholdUserA");
+        var game = await CreateGameAsync(client, "Guided intake test");
+        var statusResponse = await client.PostAsJsonAsync("/api/gamestatus", new { name = "Must intake test", isActive = true });
+        statusResponse.EnsureSuccessStatusCode();
+        var status = (await statusResponse.Content.ReadFromJsonAsync<GameStatusDto>())!;
+        var create = await client.PostAsJsonAsync("/api/playlists", new PlaylistCreateDto
+        {
+            Name = "Guided automatic intake", IsAutomatic = true,
+            Rules = new PlaylistRulesDto { StatusIds = [status.Id], MinGrade = 90 }
+        });
+        create.EnsureSuccessStatusCode();
+        var playlist = (await create.Content.ReadFromJsonAsync<PlaylistDto>())!;
+        var rejected = await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new AddPlaylistItemDto { GameId = game.Id, StatusId = status.Id });
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal(game.StatusId, (await GetGameAsync(client, game.Id)).StatusId);
+        (await client.PutAsJsonAsync($"/api/games/{game.Id}", new { grade = 95 })).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new AddPlaylistItemDto { GameId = game.Id, StatusId = status.Id })).EnsureSuccessStatusCode();
+        Assert.Equal(status.Id, (await GetGameAsync(client, game.Id)).StatusId);
+        var detail = (await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!;
+        Assert.Contains(detail.Items, item => item.GameId == game.Id);
+        (await client.DeleteAsync($"/api/playlists/{playlist.Id}/items/{game.Id}")).EnsureSuccessStatusCode();
+        Assert.DoesNotContain((await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.Items, item => item.GameId == game.Id);
+        Assert.Equal(status.Id, (await GetGameAsync(client, game.Id)).StatusId);
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items", new AddPlaylistItemDto { GameId = game.Id })).EnsureSuccessStatusCode();
+        Assert.Contains((await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.Items, item => item.GameId == game.Id);
+    }
+
+    [Fact]
+    public async Task Automatic_list_groups_status_priorities_and_allows_free_override()
+    {
+        var client = await CreateClientAsync("HouseholdUserA");
+        var must = await CreateGameAsync(client, "Priority must test");
+        var goal = await CreateGameAsync(client, "Priority goal test");
+        var response = await client.PostAsJsonAsync("/api/gamestatus", new { name = "Goal priority test", isActive = true });
+        response.EnsureSuccessStatusCode();
+        var status = (await response.Content.ReadFromJsonAsync<GameStatusDto>())!;
+        (await client.PatchAsJsonAsync($"/api/games/{goal.Id}/status", new { statusId = status.Id })).EnsureSuccessStatusCode();
+        var rules = new PlaylistRulesDto { Search = "Priority", StatusIds = [must.StatusId, status.Id], GroupByStatus = true, StatusPriorityIds = [must.StatusId, status.Id], OrderedGameIds = [goal.Id, must.Id] };
+        var created = await client.PostAsJsonAsync("/api/playlists", new PlaylistCreateDto { Name = "Status priority test", IsAutomatic = true, Rules = rules });
+        created.EnsureSuccessStatusCode();
+        var playlist = (await created.Content.ReadFromJsonAsync<PlaylistDto>())!;
+        Assert.Equal(must.Id, playlist.Items[0].GameId);
+        (await client.PostAsJsonAsync($"/api/playlists/{playlist.Id}/items/reorder", new ReorderPlaylistItemsDto { OrderedIds = [goal.Id, must.Id] })).EnsureSuccessStatusCode();
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
+            Assert.False(await context.PlaylistItems.AnyAsync(item => item.PlaylistId == playlist.Id));
+        }
+        rules.GroupByStatus = false;
+        (await client.PutAsJsonAsync($"/api/playlists/{playlist.Id}", new PlaylistUpdateDto { Rules = rules })).EnsureSuccessStatusCode();
+        Assert.Equal(goal.Id, (await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.Items[0].GameId);
     }
 
     private async Task<HttpClient> CreateClientAsync(string username)

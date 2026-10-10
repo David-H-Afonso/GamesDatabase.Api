@@ -1299,3 +1299,32 @@ If you encounter issues:
 ---
 
 **Happy Coding! 🎮**
+# Playlist planning: automatic membership and manual priorities
+
+Playlists expose nullable `maxLength` in summaries, details, create/update and
+JSON transfers. Null or omitted on creation means unlimited; positive integers
+set capacity. On update omission preserves capacity and explicit null clears it.
+Adding to a full list is rejected before any game/status write. Lowering capacity
+never removes existing manual items. Automatic results are capped after ordering;
+their existing `rules.limit` remains a separate result limit. Full CSV/backup
+exports include `PlaylistMaxLength`; old CSVs preserve existing capacity.
+New and migrated manual Focus lists default to four (no items are removed).
+
+Automatic playlist `rules` additionally accept `groupByStatus` (default false),
+`statusPriorityIds` (ordered status IDs) and `excludedGameIds` (explicit exclusions).
+Base sorting is applied first, followed by stable `orderedGameIds` overrides;
+when grouping is enabled, status priority is applied last. Limits are applied
+after ordering. New matches preserve the configured base sort. Clear
+`orderedGameIds` to restore base order, or `excludedGameIds` to restore exclusions.
+
+`POST /api/playlists/{id}/items` accepts `{ gameId, statusId? }`. For automatic
+lists, status is changed only when explicitly supplied; ownership, allowed
+statuses and all remaining membership rules are validated before any write.
+Game status and list exclusion changes commit together and use normal game
+history recording. A limit can keep a matching game outside the visible list.
+
+`DELETE /api/playlists/{id}/items/{itemId}` excludes a game for automatic lists
+(their synthetic `itemId` equals `gameId`); it never deletes or changes that game.
+Automatic reorder requests contain game IDs; manual reorder requests contain
+playlist-item IDs. Full-completion rules use manual completion or all recorded
+Steam achievements unlocked, never the estimated `completion` duration.

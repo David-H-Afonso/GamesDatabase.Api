@@ -11,6 +11,7 @@ public static class PlaylistMappingExtensions
         var firstGame = playlist.Items.OrderBy(item => item.Position).FirstOrDefault()?.Game;
         return new PlaylistSummaryDto
         {
+            MaxLength = playlist.MaxLength,
             Id = playlist.Id,
             Name = playlist.Name,
             Description = playlist.Description,
@@ -33,6 +34,7 @@ public static class PlaylistMappingExtensions
         var firstGame = playlist.Items.OrderBy(item => item.Position).FirstOrDefault()?.Game;
         return new PlaylistDto
         {
+            MaxLength = playlist.MaxLength,
             Id = playlist.Id,
             Name = playlist.Name,
             Description = playlist.Description,

@@ -46,7 +46,10 @@ using (var scope = app.Services.CreateScope())
     var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     try
     {
-        context.Database.Migrate();
+        // The integration fixture uses an empty isolated database; historical
+        // migrations assume the original pre-migration schema already exists.
+        if (app.Environment.IsEnvironment("Testing")) context.Database.EnsureCreated();
+        else context.Database.Migrate();
     }
     catch (Exception ex)
     {
