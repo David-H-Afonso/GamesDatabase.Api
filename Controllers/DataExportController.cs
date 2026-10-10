@@ -254,6 +254,10 @@ public class DataExportController : BaseApiController
             var fileName = $"games_selective_export_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
             return File(csvBytes, "text/csv", fileName);
         }
+        catch (SelectiveConfigurationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in selective export");
@@ -283,6 +287,10 @@ public class DataExportController : BaseApiController
             {
                 fileStream?.Dispose();
             }
+        }
+        catch (SelectiveConfigurationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {

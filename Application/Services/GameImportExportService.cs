@@ -942,6 +942,9 @@ public class GameImportExportService : IGameImportExportService
 
     public async Task<byte[]> SelectiveExportGamesAsync(SelectiveExportRequest request, int userId)
     {
+        ValidateExportConfig(request.GlobalConfig);
+        if (request.PerGameConfig is not null)
+            foreach (var config in request.PerGameConfig.Values) ValidateExportConfig(config);
         var allRecords = new List<FullExportModel>();
 
         var games = await _context.Games
@@ -1009,7 +1012,28 @@ public class GameImportExportService : IGameImportExportService
         if (!string.IsNullOrWhiteSpace(configJson))
         {
             var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            config = JsonSerializer.Deserialize<SelectiveImportConfig>(configJson, opts) ?? config;
+            try
+            {
+                config = JsonSerializer.Deserialize<SelectiveImportConfig>(configJson, opts)
+                    ?? throw new SelectiveConfigurationException("Selective import configuration must not be null.");
+            }
+            catch (JsonException)
+            {
+                throw new SelectiveConfigurationException("Invalid JSON for selective import configuration.");
+            }
+        }
+
+        ValidateImportConfig(config.GlobalConfig);
+        if (config.PerGameConfig is not null)
+        {
+            var overrides = new Dictionary<string, GameImportConfig>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in config.PerGameConfig)
+            {
+                ValidateImportConfig(entry.Value);
+                if (!overrides.TryAdd(entry.Key, entry.Value))
+                    throw new SelectiveConfigurationException("Per-game configuration contains duplicate game names differing only in casing.");
+            }
+            config.PerGameConfig = overrides;
         }
 
         List<FullExportModel> gameRows;
@@ -1231,7 +1255,7 @@ public class GameImportExportService : IGameImportExportService
             }
             catch (Exception ex)
             {
-                result.Errors.Add($"Error processing '{record.Name}': {ex.Message}");
+                result.Errors.Add($"Could not import '{record.Name}'. Check the game data and try again.");
                 _logger.LogError(ex, "Error in selective import for game: {GameName}", record.Name);
                 _context.ChangeTracker.Clear();
             }
@@ -1298,6 +1322,20 @@ public class GameImportExportService : IGameImportExportService
     {
         if (hasHeroHeader) return string.IsNullOrWhiteSpace(cover) ? null : cover;
         return string.IsNullOrWhiteSpace(hero) ? null : (string.IsNullOrWhiteSpace(cover) ? null : cover);
+    }
+
+    private static void ValidateExportConfig(GameExportConfig? config)
+    {
+        if (config is null) throw new SelectiveConfigurationException("Export configurations must not be null.");
+        if (config.Mode is null || config.Properties?.Values.Any(value => value is null || value.Mode is null) == true)
+            throw new SelectiveConfigurationException("Export configuration modes and property overrides must not be null.");
+    }
+
+    private static void ValidateImportConfig(GameImportConfig? config)
+    {
+        if (config is null) throw new SelectiveConfigurationException("Import configurations must not be null.");
+        if (config.Mode is null || config.Properties?.Values.Any(value => value is null || value.Mode is null) == true)
+            throw new SelectiveConfigurationException("Import configuration modes and property overrides must not be null.");
     }
 
     private static bool IsGeneratedPlaylistUrl(string? url) =>

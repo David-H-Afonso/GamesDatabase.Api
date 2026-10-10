@@ -16,7 +16,7 @@ public class SelectiveExportRequest
 
 public class GameExportConfig
 {
-    /// <summary>"simple" = all AsStored. "custom" = use Properties. "customCleared" = clear personal fields, keep rest.</summary>
+    /// <summary>"simple" = all "asStored". "custom" = use Properties. "customCleared" = clear personal fields, keep rest.</summary>
     public string Mode { get; set; } = "simple";
 
     public Dictionary<string, ExportPropertyOverride>? Properties { get; set; }
@@ -44,13 +44,13 @@ public class SelectiveImportConfig
     /// <summary>Global import configuration applied to all games unless overridden.</summary>
     public GameImportConfig GlobalConfig { get; set; } = new();
 
-    /// <summary>Per-game import overrides keyed by game name (from CSV). Overrides GlobalConfig for that game.</summary>
+    /// <summary>Per-game import overrides keyed by game name (from CSV), matched case-insensitively. Overrides GlobalConfig for that game.</summary>
     public Dictionary<string, GameImportConfig>? PerGameConfig { get; set; }
 }
 
 public class GameImportConfig
 {
-    /// <summary>"simple" = all AsImported. "priceOnly" = update only price fields. "custom" = use Properties. "customCleared" = clean personal fields, keep rest AsImported.</summary>
+    /// <summary>"simple" = all "asImported". "priceOnly" = update only price fields. "custom" = use Properties. "customCleared" = clean personal fields, keep rest "asImported".</summary>
     public string Mode { get; set; } = "simple";
 
     public Dictionary<string, ImportPropertyOverride>? Properties { get; set; }

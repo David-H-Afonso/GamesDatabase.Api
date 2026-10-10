@@ -1301,6 +1301,17 @@ If you encounter issues:
 **Happy Coding! 🎮**
 # Playlist planning: automatic membership and manual priorities
 
+## Selective import/export configuration validation
+
+Selective import/export rejects explicit null global configurations, null
+per-game configurations, null property overrides and null modes with HTTP 400.
+Omitted configurations retain their defaults. Malformed `configJson` and a JSON
+`null` import configuration also return 400 before processing any CSV rows.
+Per-game import names match using `OrdinalIgnoreCase`; duplicate override names
+differing only in casing are rejected as ambiguous. Unexpected failures are
+logged server-side; public 500 responses and per-game errors contain no exception
+details. Canonical property modes are `asStored` and `asImported`.
+
 Playlists expose nullable `maxLength` in summaries, details, create/update and
 JSON transfers. Null or omitted on creation means unlimited; positive integers
 set capacity. On update omission preserves capacity and explicit null clears it.
