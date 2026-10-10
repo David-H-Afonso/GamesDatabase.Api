@@ -25,6 +25,7 @@ public class Playlist
 
     public bool IsAutomatic { get; set; }
     public int? MaxLength { get; set; }
+    public int? GroupId { get; set; }
     public string? RulesJson { get; set; }
 
     public int SortOrder { get; set; }

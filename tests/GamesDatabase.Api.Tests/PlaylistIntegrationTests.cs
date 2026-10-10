@@ -263,6 +263,25 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
         Assert.Equal(goal.Id, (await client.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.Items[0].GameId);
     }
 
+    [Fact]
+    public async Task Playlist_groups_are_private_and_deletion_preserves_playlists()
+    {
+        var owner = await CreateClientAsync("HouseholdUserA");
+        var other = await CreateClientAsync("HouseholdUserB");
+        var response = await owner.PostAsJsonAsync("/api/playlists/groups", new { name = "Sagas" });
+        response.EnsureSuccessStatusCode();
+        var group = (await response.Content.ReadFromJsonAsync<PlaylistGroupDto>())!;
+        var playlist = await CreatePlaylistAsync(owner, "Grouped saga test");
+        (await owner.PostAsJsonAsync($"/api/playlists/{playlist.Id}/move", new { groupId = group.Id })).EnsureSuccessStatusCode();
+        Assert.Equal(group.Id, (await owner.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.GroupId);
+        Assert.DoesNotContain((await other.GetFromJsonAsync<List<PlaylistGroupDto>>("/api/playlists/groups"))!, candidate => candidate.Id == group.Id);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.DeleteAsync($"/api/playlists/groups/{group.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await owner.PostAsJsonAsync("/api/playlists/groups", new { name = "sagas" })).StatusCode);
+        (await owner.PutAsJsonAsync($"/api/playlists/groups/{group.Id}", new { name = "Series" })).EnsureSuccessStatusCode();
+        (await owner.DeleteAsync($"/api/playlists/groups/{group.Id}")).EnsureSuccessStatusCode();
+        Assert.Null((await owner.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.GroupId);
+    }
+
     private async Task<HttpClient> CreateClientAsync(string username)
     {
         var client = factory.CreateClient();

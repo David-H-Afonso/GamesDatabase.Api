@@ -12,6 +12,7 @@ public static class PlaylistMappingExtensions
         return new PlaylistSummaryDto
         {
             MaxLength = playlist.MaxLength,
+            GroupId = playlist.GroupId,
             Id = playlist.Id,
             Name = playlist.Name,
             Description = playlist.Description,
@@ -35,6 +36,7 @@ public static class PlaylistMappingExtensions
         return new PlaylistDto
         {
             MaxLength = playlist.MaxLength,
+            GroupId = playlist.GroupId,
             Id = playlist.Id,
             Name = playlist.Name,
             Description = playlist.Description,

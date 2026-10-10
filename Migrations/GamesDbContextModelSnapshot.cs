@@ -1083,6 +1083,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("description");
 
+                    b.Property<int?>("GroupId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("group_id");
+
                     b.Property<string>("HeroUrl")
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT")
@@ -1133,12 +1137,43 @@ namespace GamesDatabase.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("GroupId");
+
                     b.HasIndex("UserId", "Name")
                         .IsUnique();
 
                     b.HasIndex("UserId", "SortOrder");
 
                     b.ToTable("playlist", (string)null);
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.PlaylistGroup", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("name");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("sort_order");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("playlist_group", (string)null);
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.PlaylistItem", b =>
@@ -1734,6 +1769,11 @@ namespace GamesDatabase.Api.Migrations
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Playlist", b =>
                 {
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.PlaylistGroup", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("GamesDatabase.Api.Domain.Entities.User", "User")
                         .WithMany("Playlists")
                         .HasForeignKey("UserId")
@@ -1741,6 +1781,15 @@ namespace GamesDatabase.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.PlaylistGroup", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.PlaylistItem", b =>

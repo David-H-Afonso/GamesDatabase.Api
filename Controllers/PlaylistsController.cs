@@ -8,6 +8,36 @@ namespace GamesDatabase.Api.Controllers;
 [Route("api/[controller]")]
 public sealed class PlaylistsController(IPlaylistService playlistService) : BaseApiController
 {
+    [HttpGet("groups")]
+    public async Task<IActionResult> GetGroups() => Ok(await playlistService.GetGroupsAsync(GetCurrentUserIdOrDefault(1)));
+
+    [HttpPost("groups")]
+    public async Task<IActionResult> CreateGroup(PlaylistGroupSaveDto dto)
+    {
+        var result = await playlistService.SaveGroupAsync(null, dto, GetCurrentUserIdOrDefault(1));
+        return result.Success ? Ok(result.Data) : result.Conflict ? Conflict(result.Error) : BadRequest(result.Error);
+    }
+
+    [HttpPut("groups/{id}")]
+    public async Task<IActionResult> UpdateGroup(int id, PlaylistGroupSaveDto dto)
+    {
+        var result = await playlistService.SaveGroupAsync(id, dto, GetCurrentUserIdOrDefault(1));
+        return result.Success ? Ok(result.Data) : result.NotFound ? NotFound(result.Error) : result.Conflict ? Conflict(result.Error) : BadRequest(result.Error);
+    }
+
+    [HttpDelete("groups/{id}")]
+    public async Task<IActionResult> DeleteGroup(int id)
+    {
+        var result = await playlistService.DeleteGroupAsync(id, GetCurrentUserIdOrDefault(1));
+        return result.Success ? NoContent() : ErrorResult(result);
+    }
+
+    [HttpPost("{id}/move")]
+    public async Task<IActionResult> MovePlaylist(int id, PlaylistMoveDto dto)
+    {
+        var result = await playlistService.MovePlaylistAsync(id, dto, GetCurrentUserIdOrDefault(1));
+        return result.Success ? Ok() : ErrorResult(result);
+    }
     [HttpGet]
     public async Task<ActionResult<IEnumerable<PlaylistSummaryDto>>> GetPlaylists() => Ok(await playlistService.GetPlaylistsAsync(GetCurrentUserIdOrDefault(1)));
 

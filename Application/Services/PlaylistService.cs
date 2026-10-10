@@ -10,6 +10,53 @@ namespace GamesDatabase.Api.Application.Services;
 
 public sealed class PlaylistService(GamesDbContext context, IGameService gameService) : IPlaylistService
 {
+    public async Task<IEnumerable<PlaylistGroupDto>> GetGroupsAsync(int userId) => await context.Set<PlaylistGroup>()
+        .Where(group => group.UserId == userId).OrderBy(group => group.SortOrder).ThenBy(group => group.Id)
+        .Select(group => new PlaylistGroupDto(group.Id, group.Name, group.SortOrder)).ToListAsync();
+
+    public async Task<CatalogServiceResult<PlaylistGroupDto>> SaveGroupAsync(int? id, PlaylistGroupSaveDto dto, int userId)
+    {
+        var name = dto.Name.Trim();
+        if (name.Length == 0 || name.Length > 150) return CatalogServiceResult<PlaylistGroupDto>.BadRequest("El nombre del grupo debe tener entre 1 y 150 caracteres.");
+        if (await context.Set<PlaylistGroup>().AnyAsync(group => group.UserId == userId && group.Id != id && group.Name.ToLower() == name.ToLower()))
+            return CatalogServiceResult<PlaylistGroupDto>.ConflictResult("Ya existe un grupo con ese nombre.");
+        var group = id.HasValue ? await context.Set<PlaylistGroup>().FirstOrDefaultAsync(group => group.Id == id && group.UserId == userId) : null;
+        if (id.HasValue && group is null) return CatalogServiceResult<PlaylistGroupDto>.NotFoundResult("Grupo no encontrado.");
+        if (group is null)
+        {
+            group = new PlaylistGroup { UserId = userId, SortOrder = (await context.Set<PlaylistGroup>().Where(group => group.UserId == userId).MaxAsync(group => (int?)group.SortOrder) ?? 0) + 1 };
+            context.Add(group);
+        }
+        group.Name = name;
+        await context.SaveChangesAsync();
+        return CatalogServiceResult<PlaylistGroupDto>.Ok(new(group.Id, group.Name, group.SortOrder));
+    }
+
+    public async Task<CatalogServiceResult> DeleteGroupAsync(int id, int userId)
+    {
+        var group = await context.Set<PlaylistGroup>().FirstOrDefaultAsync(group => group.Id == id && group.UserId == userId);
+        if (group is null) return CatalogServiceResult.NotFoundResult("Grupo no encontrado.");
+        var members = await context.Playlists.Where(playlist => playlist.UserId == userId && playlist.GroupId == id).ToListAsync();
+        foreach (var playlist in members) playlist.GroupId = null;
+        context.Remove(group);
+        await context.SaveChangesAsync();
+        return CatalogServiceResult.Ok();
+    }
+
+    public async Task<CatalogServiceResult> MovePlaylistAsync(int id, PlaylistMoveDto dto, int userId)
+    {
+        var playlists = await context.Playlists.Where(playlist => playlist.UserId == userId).ToListAsync();
+        var playlist = playlists.FirstOrDefault(playlist => playlist.Id == id);
+        if (playlist is null) return CatalogServiceResult.NotFoundResult("Playlist no encontrada.");
+        if (dto.GroupId.HasValue && !await context.Set<PlaylistGroup>().AnyAsync(group => group.Id == dto.GroupId && group.UserId == userId))
+            return CatalogServiceResult.NotFoundResult("Grupo no encontrado.");
+        if (dto.OrderedIds.Count > 0 && (dto.OrderedIds.Distinct().Count() != playlists.Count || dto.OrderedIds.Count != playlists.Count || playlists.Any(playlist => !dto.OrderedIds.Contains(playlist.Id))))
+            return CatalogServiceResult.BadRequest("El orden debe contener todas tus playlists una sola vez.");
+        playlist.GroupId = dto.GroupId;
+        if (dto.OrderedIds.Count > 0) foreach (var member in playlists) member.SortOrder = dto.OrderedIds.IndexOf(member.Id) + 1;
+        await context.SaveChangesAsync();
+        return CatalogServiceResult.Ok();
+    }
     public async Task<IEnumerable<PlaylistSummaryDto>> GetPlaylistsAsync(int userId)
     {
         var playlists = await PlaylistQuery()

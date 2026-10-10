@@ -8,6 +8,7 @@ public enum PlaylistExportReference
 
 public sealed class PlaylistDto
 {
+    public int? GroupId { get; set; }
     public int? MaxLength { get; set; }
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -29,6 +30,7 @@ public sealed class PlaylistDto
 
 public sealed class PlaylistSummaryDto
 {
+    public int? GroupId { get; set; }
     public int? MaxLength { get; set; }
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;

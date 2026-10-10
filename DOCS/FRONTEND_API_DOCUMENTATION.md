@@ -1301,6 +1301,18 @@ If you encounter issues:
 **Happy Coding! 🎮**
 # Playlist planning: automatic membership and manual priorities
 
+## Playlist groups
+
+Playlist summaries/details expose nullable `groupId`. Groups belong to the
+authenticated user: `GET/POST /api/playlists/groups`, `PUT/DELETE
+/api/playlists/groups/{id}`. Save bodies contain `{ name }`; responses contain
+`{ id, name, sortOrder }`. Names are unique case-insensitively per user.
+`POST /api/playlists/{id}/move` accepts `{ groupId, orderedIds? }`: null means
+ungrouped; an optional order must contain every playlist owned by the user once.
+Moving and reordering commit together. Deleting a group ungroups its playlists;
+it never removes their items or games. Group collapse preferences are local to
+the browser/user. AddPlaylistGroups creates the group table and nullable FK.
+
 ## Selective import/export configuration validation
 
 Selective import/export rejects explicit null global configurations, null
