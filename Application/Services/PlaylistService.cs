@@ -43,6 +43,16 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
         return CatalogServiceResult.Ok();
     }
 
+    public async Task<CatalogServiceResult> ReorderGroupsAsync(ReorderPlaylistsDto dto, int userId)
+    {
+        var groups = await context.Set<PlaylistGroup>().Where(group => group.UserId == userId).ToListAsync();
+        if (dto.OrderedIds.Count != groups.Count || dto.OrderedIds.Distinct().Count() != groups.Count || groups.Any(group => !dto.OrderedIds.Contains(group.Id)))
+            return CatalogServiceResult.BadRequest("El orden debe contener todos tus grupos una sola vez.");
+        foreach (var group in groups) group.SortOrder = dto.OrderedIds.IndexOf(group.Id) + 1;
+        await context.SaveChangesAsync();
+        return CatalogServiceResult.Ok();
+    }
+
     public async Task<CatalogServiceResult> MovePlaylistAsync(int id, PlaylistMoveDto dto, int userId)
     {
         var playlists = await context.Playlists.Where(playlist => playlist.UserId == userId).ToListAsync();

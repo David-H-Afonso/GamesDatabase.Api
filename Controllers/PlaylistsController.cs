@@ -18,6 +18,13 @@ public sealed class PlaylistsController(IPlaylistService playlistService) : Base
         return result.Success ? Ok(result.Data) : result.Conflict ? Conflict(result.Error) : BadRequest(result.Error);
     }
 
+    [HttpPost("groups/reorder")]
+    public async Task<IActionResult> ReorderGroups(ReorderPlaylistsDto dto)
+    {
+        var result = await playlistService.ReorderGroupsAsync(dto, GetCurrentUserIdOrDefault(1));
+        return result.Success ? Ok() : ErrorResult(result);
+    }
+
     [HttpPut("groups/{id}")]
     public async Task<IActionResult> UpdateGroup(int id, PlaylistGroupSaveDto dto)
     {

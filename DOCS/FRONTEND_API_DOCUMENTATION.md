@@ -1303,6 +1303,12 @@ If you encounter issues:
 
 ## Playlist groups
 
+`POST /api/playlists/groups/reorder` accepts `{ orderedIds }`, containing every
+group owned by the user exactly once. The ungrouped section is not a group and
+is never included. The front supports folder drag-and-drop and an explicit
+selection mode for moving multiple playlists; the move controls are hidden
+outside selection mode.
+
 Playlist summaries/details expose nullable `groupId`. Groups belong to the
 authenticated user: `GET/POST /api/playlists/groups`, `PUT/DELETE
 /api/playlists/groups/{id}`. Save bodies contain `{ name }`; responses contain

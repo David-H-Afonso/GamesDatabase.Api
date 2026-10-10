@@ -271,6 +271,14 @@ public sealed class PlaylistIntegrationTests : IClassFixture<GamesDatabaseApiFac
         var response = await owner.PostAsJsonAsync("/api/playlists/groups", new { name = "Sagas" });
         response.EnsureSuccessStatusCode();
         var group = (await response.Content.ReadFromJsonAsync<PlaylistGroupDto>())!;
+        var secondResponse = await owner.PostAsJsonAsync("/api/playlists/groups", new { name = "Backlog group" });
+        secondResponse.EnsureSuccessStatusCode();
+        var secondGroup = (await secondResponse.Content.ReadFromJsonAsync<PlaylistGroupDto>())!;
+        var groupIds = (await owner.GetFromJsonAsync<List<PlaylistGroupDto>>("/api/playlists/groups"))!.Select(item => item.Id).Reverse().ToList();
+        (await owner.PostAsJsonAsync("/api/playlists/groups/reorder", new { orderedIds = groupIds })).EnsureSuccessStatusCode();
+        Assert.Equal(groupIds, (await owner.GetFromJsonAsync<List<PlaylistGroupDto>>("/api/playlists/groups"))!.Select(item => item.Id).ToList());
+        Assert.Equal(HttpStatusCode.BadRequest, (await other.PostAsJsonAsync("/api/playlists/groups/reorder", new { orderedIds = groupIds })).StatusCode);
+        (await owner.DeleteAsync($"/api/playlists/groups/{secondGroup.Id}")).EnsureSuccessStatusCode();
         var playlist = await CreatePlaylistAsync(owner, "Grouped saga test");
         (await owner.PostAsJsonAsync($"/api/playlists/{playlist.Id}/move", new { groupId = group.Id })).EnsureSuccessStatusCode();
         Assert.Equal(group.Id, (await owner.GetFromJsonAsync<PlaylistDto>($"/api/playlists/{playlist.Id}"))!.GroupId);
