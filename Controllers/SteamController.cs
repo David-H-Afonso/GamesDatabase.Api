@@ -133,6 +133,16 @@ public class SteamController : BaseApiController
         return Ok(result);
     }
 
+    /// <summary>Returns grouped progress without changing the legacy achievements array.</summary>
+    [HttpGet("achievements/{gameId:int}/progress")]
+    public async Task<IActionResult> GetAchievementProgress(int gameId)
+    {
+        var userId = CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+        var result = await _profile.GetAchievementProgressAsync(userId.Value, gameId);
+        return result == null ? NotFound() : Ok(result);
+    }
+
     /// <summary>Returns cached store metadata for a Steam AppID. Fetches from Steam Store if not cached or stale.</summary>
     [HttpGet("app/{appId:int}/metadata")]
     public async Task<IActionResult> GetAppMetadata(int appId)

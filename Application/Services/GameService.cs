@@ -6,6 +6,7 @@ using GamesDatabase.Api.Common;
 using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Domain.Entities;
 using GamesDatabase.Api.Infrastructure.Persistence;
+using GamesDatabase.Api.Application.Services.Steam;
 
 namespace GamesDatabase.Api.Application.Services;
 
@@ -126,6 +127,7 @@ public class GameService : IGameService
             query = ApplyTraditionalSorting(query, parameters);
         }
 
+        query = SteamAchievementProgress.ApplyFilters(query, _context, userId, parameters.FullCompletion, parameters.AllAchievements);
         var totalCount = await query.CountAsync();
 
         var games = await query
@@ -874,16 +876,6 @@ public class GameService : IGameService
                 : query.Where(g => !g.SteamAppId.HasValue);
         }
 
-        if (parameters.FullCompletion == true)
-        {
-            query = query.Where(g =>
-                g.IsManuallyCompleted ||
-                (
-                    _context.SteamAchievements.Any(a => a.UserId == userId && a.GameId == g.Id) &&
-                    !_context.SteamAchievements.Any(a => a.UserId == userId && a.GameId == g.Id && !a.Achieved)
-                ));
-        }
-
         if (!string.IsNullOrWhiteSpace(parameters.MissingDuration))
         {
             query = parameters.MissingDuration.ToLowerInvariant() switch
@@ -1023,27 +1015,7 @@ public class GameService : IGameService
 
     private async Task FillSteamAchievementStatsAsync(IEnumerable<GameDto> gameDtos, int userId)
     {
-        var dtoList = gameDtos.ToList();
-        if (dtoList.Count == 0) return;
-
-        var gameIds = dtoList.Select(g => g.Id).ToList();
-        var stats = await _context.SteamAchievements
-            .Where(a => a.UserId == userId && a.GameId.HasValue && gameIds.Contains(a.GameId.Value))
-            .GroupBy(a => a.GameId!.Value)
-            .Select(g => new
-            {
-                GameId = g.Key,
-                Total = g.Count(),
-                Unlocked = g.Count(a => a.Achieved)
-            })
-            .ToDictionaryAsync(g => g.GameId);
-
-        foreach (var dto in dtoList)
-        {
-            if (!stats.TryGetValue(dto.Id, out var stat)) continue;
-            dto.SteamAchievementsTotal = stat.Total;
-            dto.SteamAchievementsUnlocked = stat.Unlocked;
-        }
+        await SteamAchievementProgress.FillGamesAsync(_context, gameDtos, userId);
     }
 
     private bool GameExists(int id, int userId)

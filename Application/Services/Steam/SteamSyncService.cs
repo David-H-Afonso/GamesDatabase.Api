@@ -6,22 +6,29 @@ using GamesDatabase.Api.Application.Mapping;
 using GamesDatabase.Api.Common;
 using GamesDatabase.Api.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
 
 namespace GamesDatabase.Api.Application.Services.Steam;
 
 public class SteamSyncService : ISteamSyncService
 {
+    // Focus, the Steam tab and manual bulk sync may overlap. Hold this user-scoped
+    // gate through SaveChanges so another scope cannot insert the same cache rows
+    // or overwrite a newly preserved completion using an older tracked Game.
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> _syncGates = new();
     private readonly GamesDbContext _context;
     private readonly ISteamApiService _steamApi;
     private readonly ISteamStoreService _steamStore;
     private readonly ILogger<SteamSyncService> _logger;
+    private readonly SteamAchievementSyncService _achievementSync;
 
-    public SteamSyncService(GamesDbContext context, ISteamApiService steamApi, ISteamStoreService steamStore, ILogger<SteamSyncService> logger)
+    public SteamSyncService(GamesDbContext context, ISteamApiService steamApi, ISteamStoreService steamStore, ILogger<SteamSyncService> logger, SteamAchievementSyncService achievementSync)
     {
         _context = context;
         _steamApi = steamApi;
         _steamStore = steamStore;
         _logger = logger;
+        _achievementSync = achievementSync;
     }
 
     private static string GetSteamLibraryCoverUrl(int appId) => $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/library_600x900.jpg";
@@ -34,6 +41,7 @@ public class SteamSyncService : ISteamSyncService
 
     public async Task<SteamSyncResult> SyncGameAsync(int userId, int gameId)
     {
+        using var syncGate = await AcquireSyncGateAsync(userId);
         var user = await _context.Users.FindAsync(userId);
         if (user?.SteamId == null)
             return new SteamSyncResult { Success = false, Error = "User has no Steam account linked" };
@@ -50,6 +58,7 @@ public class SteamSyncService : ISteamSyncService
 
     public async Task<SteamSyncResult> SyncAllUserGamesAsync(int userId)
     {
+        using var syncGate = await AcquireSyncGateAsync(userId);
         var user = await _context.Users.FindAsync(userId);
         if (user?.SteamId == null)
             return new SteamSyncResult { Success = false, Error = "User has no Steam account linked" };
@@ -67,6 +76,8 @@ public class SteamSyncService : ISteamSyncService
 
         int gamesUpdated = 0;
         int achievementsUpdated = 0;
+        var warnings = new List<string>();
+        var achievementsSyncSucceeded = true;
 
         foreach (var game in games)
         {
@@ -91,6 +102,11 @@ public class SteamSyncService : ISteamSyncService
             // Sync achievements
             var achResult = await SyncAchievementsForGameAsync(user.SteamId, game);
             achievementsUpdated += achResult;
+            if (game.SteamAchievementsLastError != null)
+            {
+                warnings.Add($"{game.Id}:{game.SteamAchievementsLastError}");
+                achievementsSyncSucceeded &= game.SteamAchievementsLastError == "setsUnavailable";
+            }
 
             game.SteamLastSynced = DateTime.UtcNow;
         }
@@ -101,12 +117,15 @@ public class SteamSyncService : ISteamSyncService
         {
             Success = true,
             GamesUpdated = gamesUpdated,
-            AchievementsUpdated = achievementsUpdated
+            AchievementsUpdated = achievementsUpdated,
+            AchievementsSyncSucceeded = achievementsSyncSucceeded,
+            Warnings = warnings
         };
     }
 
     public async Task<SteamImportResult> ImportLibraryAsync(int userId, SteamImportRequest request)
     {
+        using var syncGate = await AcquireSyncGateAsync(userId);
         var user = await _context.Users.FindAsync(userId);
         if (user?.SteamId == null)
             return new SteamImportResult { Success = false, Error = "User has no Steam account linked" };
@@ -246,6 +265,7 @@ public class SteamSyncService : ISteamSyncService
 
     public async Task<SteamImportedGameDto> AddStoreGameAsync(int userId, int appId, string? logoUrl = null, string? heroUrl = null, string? coverUrl = null)
     {
+        using var syncGate = await AcquireSyncGateAsync(userId);
         // Check if already exists in GDB
         var existing = await _context.Games
             .FirstOrDefaultAsync(g => g.UserId == userId && g.SteamAppId == appId);
@@ -477,97 +497,16 @@ public class SteamSyncService : ISteamSyncService
         {
             Success = true,
             GamesUpdated = 1,
-            AchievementsUpdated = achCount
+            AchievementsUpdated = achCount,
+            AchievementsSyncSucceeded = game.SteamAchievementsLastError is null or "setsUnavailable",
+            Warnings = game.SteamAchievementsLastError == null ? [] : [game.SteamAchievementsLastError]
         };
     }
 
     private async Task<int> SyncAchievementsForGameAsync(string steamId, Game game)
     {
-        if (game.SteamAppId == null) return 0;
-
-        var playerAch = await _steamApi.GetPlayerAchievementsAsync(steamId, game.SteamAppId.Value);
-        if (!playerAch.Success || playerAch.Achievements.Count == 0) return 0;
-
-        var schema = await _steamApi.GetGameSchemaAsync(game.SteamAppId.Value);
-        var schemaMap = schema?.Achievements
-            .GroupBy(a => a.ApiName)
-            .ToDictionary(g => g.Key, g => g.First())
-            ?? new Dictionary<string, SteamSchemaAchievement>();
-        var playerMap = playerAch.Achievements
-            .GroupBy(a => a.ApiName)
-            .ToDictionary(g => g.Key, g => g.First());
-        var achievementApiNames = schemaMap.Count > 0
-            ? schemaMap.Keys.ToList()
-            : playerMap.Keys.ToList();
-
-        var userId = game.UserId;
-        var existingAch = await _context.SteamAchievements
-            .Where(a => a.UserId == userId && a.SteamAppId == game.SteamAppId.Value)
-            .ToDictionaryAsync(a => a.ApiName, a => a);
-
-        int count = 0;
-        foreach (var apiName in achievementApiNames)
-        {
-            schemaMap.TryGetValue(apiName, out var schemaDef);
-            playerMap.TryGetValue(apiName, out var raw);
-            var achieved = raw?.Achieved == 1;
-            var unlockTime = raw?.UnlockTime > 0
-                ? DateTimeOffset.FromUnixTimeSeconds(raw.UnlockTime).UtcDateTime
-                : (DateTime?)null;
-
-            if (existingAch.TryGetValue(apiName, out var existing))
-            {
-                var changed =
-                    existing.GameId != game.Id ||
-                    existing.Achieved != achieved ||
-                    existing.UnlockTime != unlockTime ||
-                    (schemaDef != null && (
-                        existing.DisplayName != schemaDef.DisplayName ||
-                        existing.Description != schemaDef.Description ||
-                        existing.IconUrl != schemaDef.Icon ||
-                        existing.IconGrayUrl != schemaDef.IconGray ||
-                        existing.Hidden != (schemaDef.Hidden == 1)));
-
-                // Re-link to the current game (GameId may be NULL if the game was deleted and re-added)
-                existing.GameId = game.Id;
-                existing.Achieved = achieved;
-                existing.UnlockTime = unlockTime;
-                existing.LastSynced = DateTime.UtcNow;
-                if (schemaDef != null)
-                {
-                    existing.DisplayName = schemaDef.DisplayName;
-                    existing.Description = schemaDef.Description;
-                    existing.IconUrl = schemaDef.Icon;
-                    existing.IconGrayUrl = schemaDef.IconGray;
-                    existing.Hidden = schemaDef.Hidden == 1;
-                }
-
-                if (changed)
-                    count++;
-            }
-            else
-            {
-                var newAch = new SteamAchievement
-                {
-                    UserId = userId,
-                    GameId = game.Id,
-                    SteamAppId = game.SteamAppId.Value,
-                    ApiName = apiName,
-                    Achieved = achieved,
-                    UnlockTime = unlockTime,
-                    DisplayName = schemaDef?.DisplayName ?? apiName,
-                    Description = schemaDef?.Description,
-                    IconUrl = schemaDef?.Icon,
-                    IconGrayUrl = schemaDef?.IconGray,
-                    Hidden = schemaDef?.Hidden == 1,
-                    LastSynced = DateTime.UtcNow
-                };
-                _context.SteamAchievements.Add(newAch);
-                count++;
-            }
-        }
-
-        return count;
+        var result = await _achievementSync.SyncAsync(steamId, game);
+        return result.Updated;
     }
 
     private static void SyncSteamManagedFinishedDate(Game game, SteamOwnedGameDto ownedGame)
@@ -610,5 +549,17 @@ public class SteamSyncService : ISteamSyncService
         }
 
         return (null, null);
+    }
+
+    private static async Task<IDisposable> AcquireSyncGateAsync(int userId)
+    {
+        var gate = _syncGates.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        return new SyncGateLease(gate);
+    }
+
+    private sealed class SyncGateLease(SemaphoreSlim gate) : IDisposable
+    {
+        public void Dispose() => gate.Release();
     }
 }

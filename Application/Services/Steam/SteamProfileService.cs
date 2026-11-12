@@ -7,6 +7,7 @@ using Microsoft.Extensions.Caching.Memory;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using GamesDatabase.Api.Application.Mapping;
 
 namespace GamesDatabase.Api.Application.Services.Steam;
 
@@ -146,27 +147,63 @@ public class SteamProfileService : ISteamProfileService
 
     public async Task<List<SteamAchievementDto>> GetAchievementsAsync(int userId, int gameId)
     {
-        var game = await _context.Games.FindAsync(gameId);
-        if (game == null || game.UserId != userId) return [];
+        return (await GetAchievementProgressAsync(userId, gameId))?.Achievements ?? [];
+    }
 
-        return await _context.SteamAchievements
-            .Where(a => a.UserId == userId && a.GameId == gameId)
-            .OrderByDescending(a => a.Achieved)
-            .ThenByDescending(a => a.UnlockTime)
-            .Select(a => new SteamAchievementDto
+    public async Task<SteamAchievementProgressDto?> GetAchievementProgressAsync(int userId, int gameId)
+    {
+        var game = await _context.Games.AsNoTracking().FirstOrDefaultAsync(game => game.Id == gameId && game.UserId == userId);
+        if (game == null) return null;
+        var dto = game.ToDto();
+        await SteamAchievementProgress.FillGamesAsync(_context, [dto], userId);
+        var sets = await _context.SteamAchievementSets.AsNoTracking()
+            .Where(set => set.UserId == userId && set.GameId == gameId && set.SteamAppId == game.SteamAppId &&
+                set.IsActive && set.IsPublic && !set.DeveloperOnly)
+            .OrderBy(set => set.GroupId == 0 ? 0 : 1).ThenBy(set => set.SortOrder).ThenBy(set => set.GroupId).ToListAsync();
+        var rows = await SteamAchievementProgress.VisibleAchievements(_context, userId).AsNoTracking()
+            .Where(achievement => achievement.UserId == userId && achievement.GameId == gameId &&
+                achievement.SteamAppId == game.SteamAppId && achievement.IsActive)
+            .OrderByDescending(achievement => achievement.Achieved).ThenByDescending(achievement => achievement.UnlockTime).ToListAsync();
+        var setMap = sets.ToDictionary(set => set.GroupId);
+        var required = rows.Where(achievement => !achievement.Archived &&
+            (!setMap.TryGetValue(achievement.GroupId, out var set) || !set.Archived)).ToList();
+        var eligible = required.Where(achievement => !setMap.TryGetValue(achievement.GroupId, out var set) || set.IsAchievable == true).ToList();
+        var visible = rows.Where(achievement => setMap.TryGetValue(achievement.GroupId, out var set) && set.Archived
+            ? rows.Any(other => other.GroupId == set.GroupId && other.Achieved)
+            : !achievement.Archived || achievement.Achieved).ToList();
+        return new SteamAchievementProgressDto
+        {
+            GameId = gameId,
+            Source = game.SteamAchievementsSource ?? (rows.Count > 0 ? "legacy" : "none"),
+            LastSynced = game.SteamAchievementsSyncedAt,
+            LastError = game.SteamAchievementsLastError,
+            IsCompleted = dto.IsCompleted,
+            IsFullyCompleted = dto.IsFullyCompleted,
+            CompletionPreserved = game.SteamCompletionPreserved,
+            TotalAchievements = dto.SteamAchievementsTotal,
+            UnlockedAchievements = dto.SteamAchievementsUnlocked,
+            EligibleAchievementsTotal = eligible.Count,
+            EligibleAchievementsUnlocked = eligible.Count(achievement => achievement.Achieved),
+            Sets = sets.Where(set => set.TotalAchievements > 0 &&
+                (!set.Archived || rows.Any(achievement => achievement.GroupId == set.GroupId && achievement.Achieved)))
+                .Select(set => new SteamAchievementSetDto
+                {
+                    GroupId = set.GroupId, DisplayName = set.DisplayName, DlcAppId = set.DlcAppId,
+                    Archived = set.Archived, IsAchievable = set.IsAchievable, IsCompleted = set.IsCompleted, CompletedAt = set.CompletedAt,
+                    TotalAchievements = set.Archived ? rows.Count(achievement => achievement.GroupId == set.GroupId) : required.Count(achievement => achievement.GroupId == set.GroupId),
+                    UnlockedAchievements = (set.Archived ? rows : required).Count(achievement => achievement.GroupId == set.GroupId && achievement.Achieved)
+                }).ToList(),
+            Achievements = visible.Select(achievement => new SteamAchievementDto
             {
-                Id = a.Id,
-                SteamAppId = a.SteamAppId,
-                ApiName = a.ApiName,
-                DisplayName = a.DisplayName,
-                Description = a.Description,
-                Achieved = a.Achieved,
-                UnlockTime = a.UnlockTime,
-                IconUrl = a.IconUrl,
-                IconGrayUrl = a.IconGrayUrl,
-                Hidden = a.Hidden
-            })
-            .ToListAsync();
+                Id = achievement.Id, SteamAppId = achievement.SteamAppId, ApiName = achievement.ApiName,
+                DisplayName = achievement.DisplayName, Description = achievement.Description,
+                Achieved = achievement.Achieved, UnlockTime = achievement.UnlockTime,
+                IconUrl = achievement.IconUrl, IconGrayUrl = achievement.IconGrayUrl, Hidden = achievement.Hidden,
+                GroupId = achievement.GroupId, Archived = achievement.Archived || (setMap.TryGetValue(achievement.GroupId, out var set) && set.Archived),
+                GlobalPercent = achievement.GlobalPercent, ProgressCurrent = achievement.ProgressCurrent,
+                ProgressMin = achievement.ProgressMin, ProgressMax = achievement.ProgressMax
+            }).ToList()
+        };
     }
 
     public async Task<List<SteamMatchSuggestionDto>> GetMatchSuggestionsAsync(int userId)

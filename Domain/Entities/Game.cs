@@ -49,6 +49,13 @@ public class Game
     public int? SteamPlaytimeForever { get; set; }
     public int? SteamPlaytime2Weeks { get; set; }
     public DateTime? SteamLastSynced { get; set; }
+    // Historical completion is deliberately independent of the current percentage.
+    public bool SteamCompletionPreserved { get; set; }
+    public string? SteamAchievementsSource { get; set; }
+    public DateTime? SteamAchievementsSyncedAt { get; set; }
+    public string? SteamAchievementsLastError { get; set; }
+    public int? SteamAchievementSchemaVersion { get; set; }
+    public long? SteamAchievementSchemaHash { get; set; }
     public string? SteamFinishedSource { get; set; }
     public string? SteamFinishedLastValue { get; set; }
     public DateTime? SteamFinishedSyncedAt { get; set; }
@@ -58,7 +65,7 @@ public class Game
     // Manual playtime override in minutes. When present, it takes priority over Steam time.
     public int? ManualPlaytimeMinutes { get; set; }
 
-    // Manual 100% completion (for non-Steam games)
+    // Manual completion. For non-Steam games this is also the 100% declaration.
     public bool IsManuallyCompleted { get; set; } = false;
 
     // Export tracking

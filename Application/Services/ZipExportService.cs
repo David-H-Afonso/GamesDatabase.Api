@@ -358,7 +358,9 @@ public class ZipExportService : IZipExportService
                     SteamPlaytimeForever = game.SteamPlaytimeForever ?? "",
                     SteamPlaytime2Weeks = game.SteamPlaytime2Weeks ?? "",
                     SteamLastSynced = game.SteamLastSynced ?? "",
-                    ManualPlaytimeMinutes = game.ManualPlaytimeMinutes ?? ""
+                    ManualPlaytimeMinutes = game.ManualPlaytimeMinutes ?? "",
+                    IsManuallyCompleted = game.IsManuallyCompleted ?? "",
+                    SteamCompletionPreserved = game.SteamCompletionPreserved ?? ""
                 };
                 await AddJsonToZip(archive, $"{basePath}/info.json", gameInfo);
             }

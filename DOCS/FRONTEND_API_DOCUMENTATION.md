@@ -4,6 +4,14 @@
 **Date**: October 3, 2025  
 **Base URL**: `https://localhost:7245` (Development)
 
+### November 2026: Steam achievement sets
+
+See [Steam achievement sets](STEAM_ACHIEVEMENT_SETS.md) for the current additive
+Steam progress contract, completion policy, migration safeguards and rollback.
+`fullCompletion=true` now includes completed sets and preserved completion;
+`allAchievements=true` is the separate strict 100% filter. The existing achievements
+array endpoint remains compatible.
+
 ---
 
 ## 📑 Table of Contents

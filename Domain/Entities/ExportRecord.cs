@@ -100,6 +100,12 @@ public class ExportRecord
     [Name("ManualPlaytimeMinutes")]
     public string? ManualPlaytimeMinutes { get; set; }
 
+    [Optional, Name("IsManuallyCompleted")]
+    public string? IsManuallyCompleted { get; set; }
+
+    [Optional, Name("SteamCompletionPreserved")]
+    public string? SteamCompletionPreserved { get; set; }
+
     [Name("Description")]
     public string? Description { get; set; }
 

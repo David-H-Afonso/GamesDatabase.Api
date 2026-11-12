@@ -136,6 +136,7 @@ public class GamesDbContext : DbContext
     public DbSet<GameHistoryEntry> GameHistoryEntries { get; set; }
     public DbSet<BackupSchedule> BackupSchedules { get; set; }
     public DbSet<SteamAchievement> SteamAchievements { get; set; }
+    public DbSet<SteamAchievementSet> SteamAchievementSets { get; set; }
     public DbSet<SteamAppCache> SteamAppCaches { get; set; }
     public DbSet<SteamMatchDismissal> SteamMatchDismissals { get; set; }
     public DbSet<DuplicateGameDismissal> DuplicateGameDismissals { get; set; }

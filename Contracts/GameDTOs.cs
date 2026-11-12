@@ -34,6 +34,11 @@ public class GameDto
     public DateTime? SteamLastSynced { get; set; }
     public int SteamAchievementsUnlocked { get; set; }
     public int SteamAchievementsTotal { get; set; }
+    public int SteamSetsCompleted { get; set; }
+    public int SteamSetsTotal { get; set; }
+    public bool SteamCompletionPreserved { get; set; }
+    public bool IsCompleted { get; set; }
+    public bool IsFullyCompleted { get; set; }
     public string? SteamFinishedSource { get; set; }
     public string? SteamFinishedLastValue { get; set; }
     public DateTime? SteamFinishedSyncedAt { get; set; }

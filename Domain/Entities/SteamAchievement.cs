@@ -16,6 +16,15 @@ public class SteamAchievement
     public string? IconUrl { get; set; }
     public string? IconGrayUrl { get; set; }
     public bool Hidden { get; set; }
+    public long? InternalKey { get; set; }
+    public int GroupId { get; set; }
+    public bool Archived { get; set; }
+    public bool IsActive { get; set; } = true;
+    public double? GlobalPercent { get; set; }
+    public int ProgressType { get; set; }
+    public double? ProgressCurrent { get; set; }
+    public double? ProgressMin { get; set; }
+    public double? ProgressMax { get; set; }
     public DateTime LastSynced { get; set; }
 
     [JsonIgnore]

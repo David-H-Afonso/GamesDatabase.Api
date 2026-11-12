@@ -10,6 +10,7 @@ public interface ISteamProfileService
     Task<(bool Success, string? Error, object? Result)> LinkGameAsync(int userId, SteamLinkGameRequest request);
     Task<List<SteamLibraryGameDto>?> GetLibraryAsync(int userId);
     Task<List<SteamAchievementDto>> GetAchievementsAsync(int userId, int gameId);
+    Task<SteamAchievementProgressDto?> GetAchievementProgressAsync(int userId, int gameId);
     Task<List<SteamMatchSuggestionDto>> GetMatchSuggestionsAsync(int userId);
     Task<List<SteamMatchSuggestionDto>> GetStoreMatchSuggestionsAsync(int userId);
     Task<(int Dismissed, string? Error)> DismissMatchSuggestionsAsync(int userId, SteamDismissMatchSuggestionsRequest request);

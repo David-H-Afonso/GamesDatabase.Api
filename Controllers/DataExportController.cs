@@ -369,6 +369,10 @@ public class FullExportModel
     public string? SteamLastSynced { get; set; }
     [Name("ManualPlaytimeMinutes")]
     public string? ManualPlaytimeMinutes { get; set; }
+    [Optional]
+    public string? IsManuallyCompleted { get; set; }
+    [Optional]
+    public string? SteamCompletionPreserved { get; set; }
     public string? Description { get; set; }
     public string? FiltersJson { get; set; }
     public string? SortingJson { get; set; }

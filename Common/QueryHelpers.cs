@@ -72,6 +72,7 @@ public class GameQueryParameters : QueryParameters
     public bool? HasReplays { get; set; }
     public bool? HasSteamApp { get; set; }
     public bool? FullCompletion { get; set; }
+    public bool? AllAchievements { get; set; }
     public string? MissingDuration { get; set; }
 
     /// <summary>

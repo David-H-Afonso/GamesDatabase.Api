@@ -34,6 +34,12 @@ public class GameConfiguration : IEntityTypeConfiguration<Game>
         entity.Property(e => e.SteamPlaytimeForever).HasColumnName("steam_playtime_forever");
         entity.Property(e => e.SteamPlaytime2Weeks).HasColumnName("steam_playtime_2weeks");
         entity.Property(e => e.SteamLastSynced).HasColumnName("steam_last_synced");
+        entity.Property(e => e.SteamCompletionPreserved).HasColumnName("steam_completion_preserved").HasDefaultValue(false);
+        entity.Property(e => e.SteamAchievementsSource).HasColumnName("steam_achievements_source");
+        entity.Property(e => e.SteamAchievementsSyncedAt).HasColumnName("steam_achievements_synced_at");
+        entity.Property(e => e.SteamAchievementsLastError).HasColumnName("steam_achievements_last_error");
+        entity.Property(e => e.SteamAchievementSchemaVersion).HasColumnName("steam_achievement_schema_version");
+        entity.Property(e => e.SteamAchievementSchemaHash).HasColumnName("steam_achievement_schema_hash");
         entity.Property(e => e.SteamFinishedSource).HasColumnName("steam_finished_source");
         entity.Property(e => e.SteamFinishedLastValue).HasColumnName("steam_finished_last_value");
         entity.Property(e => e.SteamFinishedSyncedAt).HasColumnName("steam_finished_synced_at");

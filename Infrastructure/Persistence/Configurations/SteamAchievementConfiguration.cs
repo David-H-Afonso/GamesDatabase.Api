@@ -23,6 +23,15 @@ public class SteamAchievementConfiguration : IEntityTypeConfiguration<SteamAchie
         entity.Property(e => e.IconUrl).HasColumnName("icon_url");
         entity.Property(e => e.IconGrayUrl).HasColumnName("icon_gray_url");
         entity.Property(e => e.Hidden).HasColumnName("hidden").HasDefaultValue(false);
+        entity.Property(e => e.InternalKey).HasColumnName("internal_key");
+        entity.Property(e => e.GroupId).HasColumnName("group_id");
+        entity.Property(e => e.Archived).HasColumnName("archived");
+        entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+        entity.Property(e => e.GlobalPercent).HasColumnName("global_percent");
+        entity.Property(e => e.ProgressType).HasColumnName("progress_type");
+        entity.Property(e => e.ProgressCurrent).HasColumnName("progress_current");
+        entity.Property(e => e.ProgressMin).HasColumnName("progress_min");
+        entity.Property(e => e.ProgressMax).HasColumnName("progress_max");
         entity.Property(e => e.LastSynced).HasColumnName("last_synced");
 
         entity.HasOne(e => e.User)

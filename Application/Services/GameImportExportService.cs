@@ -358,7 +358,20 @@ public class GameImportExportService : IGameImportExportService
             var playWithNames = g.GamePlayWiths != null && g.GamePlayWiths.Any()
                 ? string.Join(", ", g.GamePlayWiths.Select(gpw => gpw.PlayWith.Name))
                 : "";
-            allRecords.Add(new FullExportModel { Type = "Game", Name = g.Name, GameId = g.Id.ToString(CultureInfo.InvariantCulture), Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames, PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "", Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "", Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "", Comment = g.Comment ?? "", Logo = g.Logo ?? "", Hero = g.Hero ?? "", Cover = g.Cover ?? "", IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", Favorite = g.Favorite.ToString(), SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "", SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "", ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "" });
+            allRecords.Add(new FullExportModel
+            {
+                Type = "Game", Name = g.Name, GameId = g.Id.ToString(CultureInfo.InvariantCulture),
+                Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames,
+                PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "",
+                Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "",
+                Grade = g.Grade?.ToString() ?? "", Completion = g.Completion?.ToString() ?? "", Story = g.Story?.ToString() ?? "",
+                Comment = g.Comment ?? "", Logo = g.Logo ?? "", Hero = g.Hero ?? "", Cover = g.Cover ?? "",
+                IsCheaperByKey = g.IsCheaperByKey?.ToString() ?? "", KeyStoreUrl = g.KeyStoreUrl ?? "", Favorite = g.Favorite.ToString(),
+                SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "",
+                SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "",
+                ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "",
+                IsManuallyCompleted = g.IsManuallyCompleted.ToString(), SteamCompletionPreserved = g.SteamCompletionPreserved.ToString()
+            });
         }
 
         var replayTypes = await _context.GameReplayTypes.Where(r => r.UserId == userId).OrderBy(r => r.SortOrder).ThenBy(r => EF.Functions.Collate(r.Name, "NOCASE")).ToListAsync();
@@ -601,6 +614,9 @@ public class GameImportExportService : IGameImportExportService
                     existing.SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks);
                     existing.SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced);
                     existing.ManualPlaytimeMinutes = ParseNullableInt(record.ManualPlaytimeMinutes);
+                    if (bool.TryParse(record.IsManuallyCompleted, out var manualCompletion)) existing.IsManuallyCompleted = manualCompletion;
+                    // History is monotonic. Old/missing/false CSV values cannot erase it.
+                    existing.SteamCompletionPreserved |= bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion;
                     existing.CalculateScore();
 
                     var existingMappings = existing.GamePlayWiths.ToList();
@@ -646,7 +662,9 @@ public class GameImportExportService : IGameImportExportService
                         SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever),
                         SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks),
                         SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced),
-                        ManualPlaytimeMinutes = ParseNullableInt(record.ManualPlaytimeMinutes)
+                        ManualPlaytimeMinutes = ParseNullableInt(record.ManualPlaytimeMinutes),
+                        IsManuallyCompleted = bool.TryParse(record.IsManuallyCompleted, out var manualCompletion) && manualCompletion,
+                        SteamCompletionPreserved = bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion
                     };
                     newGame.CalculateScore();
                     _context.Games.Add(newGame);
@@ -995,6 +1013,9 @@ public class GameImportExportService : IGameImportExportService
                 SteamPlaytime2Weeks = ApplyExportString(g.SteamPlaytime2Weeks?.ToString() ?? "", "steamPlaytime2Weeks", effectiveConfig),
                 SteamLastSynced = ApplyExportString(g.SteamLastSynced?.ToString("O") ?? "", "steamLastSynced", effectiveConfig),
                 ManualPlaytimeMinutes = ApplyExportString(g.ManualPlaytimeMinutes?.ToString() ?? "", "manualPlaytimeMinutes", effectiveConfig),
+                // Completion declarations/history are portable metadata, not cached Steam definitions.
+                IsManuallyCompleted = g.IsManuallyCompleted.ToString(),
+                SteamCompletionPreserved = g.SteamCompletionPreserved.ToString(),
             });
         }
 
@@ -1201,6 +1222,8 @@ public class GameImportExportService : IGameImportExportService
                     existing.SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks);
                     existing.SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced);
                     existing.ManualPlaytimeMinutes = ParseNullableInt(resolvedManualPlaytimeMinutes);
+                    if (bool.TryParse(record.IsManuallyCompleted, out var manualCompletion)) existing.IsManuallyCompleted = manualCompletion;
+                    existing.SteamCompletionPreserved |= bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion;
                     existing.CalculateScore();
 
                     foreach (var mapping in existing.GamePlayWiths.ToList())
@@ -1240,6 +1263,8 @@ public class GameImportExportService : IGameImportExportService
                         SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks),
                         SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced),
                         ManualPlaytimeMinutes = ParseNullableInt(resolvedManualPlaytimeMinutes),
+                        IsManuallyCompleted = bool.TryParse(record.IsManuallyCompleted, out var manualCompletion) && manualCompletion,
+                        SteamCompletionPreserved = bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion,
                     };
                     newGame.CalculateScore();
                     _context.Games.Add(newGame);

@@ -5,6 +5,7 @@ using GamesDatabase.Api.Domain.Entities;
 using GamesDatabase.Api.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using GamesDatabase.Api.Application.Services.Steam;
 
 namespace GamesDatabase.Api.Application.Services;
 
@@ -397,28 +398,7 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
 
     private async Task FillSteamAchievementStatsAsync(PlaylistDto playlist, int userId)
     {
-        var games = playlist.Items.Select(item => item.Game).ToList();
-        if (games.Count == 0) return;
-
-        var gameIds = games.Select(game => game.Id).ToList();
-        var stats = await context.SteamAchievements
-            .AsNoTracking()
-            .Where(achievement => achievement.UserId == userId && achievement.GameId.HasValue && gameIds.Contains(achievement.GameId.Value))
-            .GroupBy(achievement => achievement.GameId!.Value)
-            .Select(group => new
-            {
-                GameId = group.Key,
-                Total = group.Count(),
-                Unlocked = group.Count(achievement => achievement.Achieved)
-            })
-            .ToDictionaryAsync(group => group.GameId);
-
-        foreach (var game in games)
-        {
-            if (!stats.TryGetValue(game.Id, out var stat)) continue;
-            game.SteamAchievementsTotal = stat.Total;
-            game.SteamAchievementsUnlocked = stat.Unlocked;
-        }
+        await SteamAchievementProgress.FillGamesAsync(context, playlist.Items.Select(item => item.Game), userId);
     }
 
     private async Task HydrateAutomaticItemsAsync(Playlist playlist, int userId)
@@ -478,17 +458,7 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
         if (rules.ReleasedFromYear.HasValue) query = query.Where(game => game.Released != null && game.Released.StartsWith(rules.ReleasedFromYear.Value.ToString()));
         if (rules.ReleasedToYear.HasValue) query = query.Where(game => game.Released != null && string.Compare(game.Released, $"{rules.ReleasedToYear.Value + 1}-01-01", StringComparison.Ordinal) < 0);
         if (rules.HasSteam.HasValue) query = rules.HasSteam.Value ? query.Where(game => game.SteamAppId.HasValue) : query.Where(game => !game.SteamAppId.HasValue);
-        if (rules.FullCompletion.HasValue)
-        {
-            var completedIds = context.SteamAchievements.Where(achievement => achievement.UserId == userId && achievement.GameId.HasValue)
-                .GroupBy(achievement => achievement.GameId!.Value)
-                .Where(group => group.All(achievement => achievement.Achieved))
-                .Select(group => group.Key);
-            query = rules.FullCompletion.Value
-                ? query.Where(game => game.IsManuallyCompleted || completedIds.Contains(game.Id))
-                : query.Where(game => !game.IsManuallyCompleted && !completedIds.Contains(game.Id));
-        }
-        return query;
+        return SteamAchievementProgress.ApplyFilters(query, context, userId, rules.FullCompletion, rules.AllAchievements);
     }
 
     private async Task NormalizePlaylistOrdersAsync(int userId)

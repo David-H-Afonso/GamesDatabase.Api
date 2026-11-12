@@ -3,6 +3,7 @@ using System.Text.Json;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Contracts.Steam;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GamesDatabase.Api.Application.Services.Steam;
 
@@ -11,17 +12,19 @@ public class SteamApiService : ISteamApiService
     private readonly HttpClient _httpClient;
     private readonly SteamSettings _settings;
     private readonly ILogger<SteamApiService> _logger;
+    private readonly IMemoryCache _cache;
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public SteamApiService(IHttpClientFactory httpClientFactory, IOptions<SteamSettings> settings, ILogger<SteamApiService> logger)
+    public SteamApiService(IHttpClientFactory httpClientFactory, IOptions<SteamSettings> settings, ILogger<SteamApiService> logger, IMemoryCache cache)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
         _logger = logger;
+        _cache = cache;
     }
 
     public async Task<List<SteamOwnedGameDto>> GetOwnedGamesAsync(string steamId)
@@ -70,6 +73,9 @@ public class SteamApiService : ISteamApiService
                 return new SteamPlayerAchievementsResult { Success = false, ProfilePrivate = true, Error = "Profile is private" };
             }
 
+            if (!response.IsSuccessStatusCode)
+                return new SteamPlayerAchievementsResult { Error = "steamUnavailable" };
+
             var json = await response.Content.ReadAsStringAsync();
             var data = JsonSerializer.Deserialize<SteamPlayerAchievementsResponse>(json, _jsonOptions);
             var stats = data?.PlayerStats;
@@ -92,7 +98,7 @@ public class SteamApiService : ISteamApiService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching achievements for SteamID {SteamId}, AppID {AppId}", steamId, appId);
-            return new SteamPlayerAchievementsResult { Success = false, Error = ex.Message };
+            return new SteamPlayerAchievementsResult { Success = false, Error = "steamUnavailable" };
         }
     }
 
@@ -153,4 +159,114 @@ public class SteamApiService : ISteamApiService
             return null;
         }
     }
+
+    public async Task<SteamAchievementSnapshot> GetAchievementSnapshotAsync(string steamId, int appId)
+    {
+        var cacheKey = $"steam-achievement-schema:{appId}:english";
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            SteamSetSchema? schema = _cache.Get<SteamSetSchema>(cacheKey);
+            if (schema == null)
+            {
+                var schemaResult = await GetServiceResponseAsync<SteamSetSchema>("GetGameAchievements", new { appid = appId, language = "english" });
+                if (schemaResult.Unsupported)
+                    return await GetLegacyAchievementSnapshotAsync(steamId, appId);
+                if (schemaResult.Result == 42)
+                    return new SteamAchievementSnapshot { Success = true, SupportsSets = true, NoAchievements = true };
+                if (!schemaResult.Success || !IsValidSchema(schemaResult.Data))
+                    return new SteamAchievementSnapshot { Error = schemaResult.Error ?? "invalidSchema" };
+                schema = schemaResult.Data!;
+                _cache.Set(cacheKey, schema, TimeSpan.FromMinutes(5));
+            }
+
+            var playerResult = await GetServiceResponseAsync<SteamSetPlayerProgress>("GetUserAchievements", new { steamid = steamId, appid = appId });
+            if (playerResult.Unsupported)
+                return await GetLegacyAchievementSnapshotAsync(steamId, appId);
+            if (!playerResult.Success)
+                return new SteamAchievementSnapshot { Error = playerResult.Error ?? "playerUnavailable" };
+
+            var player = playerResult.Data;
+            // Sparse achievement lists are normal; a missing group snapshot is not.
+            if (player?.Groups == null || player.Groups.Count == 0)
+                return new SteamAchievementSnapshot { Error = "playerUnavailable" };
+            if (schema.SchemaVersion != player.SchemaVersion || schema.SchemaHash != player.SchemaHash)
+            {
+                _cache.Remove(cacheKey);
+                continue;
+            }
+
+            var unlocks = player.Achievements ?? [];
+            var keys = schema.Achievements!.Select(achievement => achievement.InternalKey).ToHashSet();
+            if (unlocks.Select(achievement => achievement.InternalKey).Distinct().Count() != unlocks.Count ||
+                unlocks.Any(achievement => !keys.Contains(achievement.InternalKey)) ||
+                player.Groups.Select(group => group.GroupId).Distinct().Count() != player.Groups.Count ||
+                player.Groups.Any(group => !schema.Groups!.Any(definition => definition.GroupId == group.GroupId)))
+                return new SteamAchievementSnapshot { Error = "invalidPlayerSnapshot" };
+
+            return new SteamAchievementSnapshot { Success = true, SupportsSets = true, Schema = schema, Player = player };
+        }
+
+        return new SteamAchievementSnapshot { Error = "schemaChanged" };
+    }
+
+    private static bool IsValidSchema(SteamSetSchema? schema) =>
+        schema?.Achievements != null && schema.Groups is { Count: > 0 } &&
+        schema.SchemaVersion.HasValue && schema.SchemaHash.HasValue &&
+        schema.Groups.All(group => group.TotalAchievements >= 0 && group.CompletionAchievements >= 0 &&
+            group.CompletionAchievements <= group.TotalAchievements &&
+            schema.Achievements.Count(achievement => achievement.GroupId == group.GroupId) == group.TotalAchievements) &&
+        schema.Achievements.All(achievement => !string.IsNullOrWhiteSpace(achievement.ApiName) &&
+            schema.Groups.Any(group => group.GroupId == achievement.GroupId)) &&
+        schema.Achievements.Select(achievement => achievement.ApiName).Distinct(StringComparer.Ordinal).Count() == schema.Achievements.Count &&
+        schema.Achievements.Select(achievement => achievement.InternalKey).Distinct().Count() == schema.Achievements.Count &&
+        schema.Groups.Select(group => group.GroupId).Distinct().Count() == schema.Groups.Count;
+
+    private async Task<SteamAchievementSnapshot> GetLegacyAchievementSnapshotAsync(string steamId, int appId)
+    {
+        var player = await GetPlayerAchievementsAsync(steamId, appId);
+        if (!player.Success)
+            return new SteamAchievementSnapshot { Error = player.ProfilePrivate ? "profilePrivate" : "steamUnavailable" };
+        var schema = await GetGameSchemaAsync(appId);
+        if (schema == null || (player.Achievements.Count > 0 && schema.Achievements.Count == 0))
+            return new SteamAchievementSnapshot { Error = "invalidSchema" };
+        return new SteamAchievementSnapshot
+        {
+            Success = true,
+            NoAchievements = schema.Achievements.Count == 0 && player.Achievements.Count == 0,
+            LegacySchema = schema,
+            LegacyAchievements = player.Achievements
+        };
+    }
+
+    private async Task<ServiceResponse<T>> GetServiceResponseAsync<T>(string method, object input) where T : class
+    {
+        var jsonInput = Uri.EscapeDataString(JsonSerializer.Serialize(input));
+        var url = $"{_settings.ApiBaseUrl}/IPlayerService/{method}/v1/?input_json={jsonInput}";
+        try
+        {
+            using var response = await _httpClient.GetAsync(url);
+            var unsupported = response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed or System.Net.HttpStatusCode.NotImplemented;
+            if (!response.IsSuccessStatusCode)
+                return new(false, unsupported, null, default, response.StatusCode switch
+                {
+                    System.Net.HttpStatusCode.Forbidden => "profilePrivate",
+                    System.Net.HttpStatusCode.TooManyRequests => "rateLimited",
+                    _ => "steamUnavailable"
+                });
+
+            int? result = response.Headers.TryGetValues("x-eresult", out var values) && int.TryParse(values.FirstOrDefault(), out var parsed) ? parsed : null;
+            if (result.HasValue && result != 1)
+                return new(false, false, result, default, result == 15 ? "profilePrivate" : "steamUnavailable");
+            var json = await response.Content.ReadAsStringAsync();
+            var envelope = JsonSerializer.Deserialize<SteamServiceEnvelope<T>>(json, _jsonOptions);
+            return new(envelope?.Response != null, false, result, envelope == null ? default : envelope.Response, "invalidResponse");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning("Steam achievement method {Method} failed ({FailureType})", method, ex.GetType().Name);
+            return new(false, false, null, default, "steamUnavailable");
+        }
+    }
+
+    private sealed record ServiceResponse<T>(bool Success, bool Unsupported, int? Result, T? Data, string? Error) where T : class;
 }

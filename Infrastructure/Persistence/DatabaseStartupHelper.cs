@@ -29,6 +29,13 @@ public class DatabaseStartupHelper
         EnsureColumn(conn, logger, "game", "steam_finished_synced_at", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "steam_finished_rejected_value", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "steam_started_rejected_value", "TEXT NULL");
+        var needsCompletionBackfill = !ColumnExists(conn, "game", "steam_completion_preserved");
+        EnsureColumn(conn, logger, "game", "steam_completion_preserved", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, logger, "game", "steam_achievements_source", "TEXT NULL");
+        EnsureColumn(conn, logger, "game", "steam_achievements_synced_at", "TEXT NULL");
+        EnsureColumn(conn, logger, "game", "steam_achievements_last_error", "TEXT NULL");
+        EnsureColumn(conn, logger, "game", "steam_achievement_schema_version", "INTEGER NULL");
+        EnsureColumn(conn, logger, "game", "steam_achievement_schema_hash", "INTEGER NULL");
         EnsureColumn(conn, logger, "game", "IsManuallyCompleted", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, logger, "game", "hero", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "favorite", "INTEGER NOT NULL DEFAULT 0");
@@ -66,6 +73,37 @@ public class DatabaseStartupHelper
                 CONSTRAINT "FK_steam_achievement_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
             );
             """, "ensured steam_achievement table exists");
+
+        EnsureColumn(conn, logger, "steam_achievement", "internal_key", "INTEGER NULL");
+        EnsureColumn(conn, logger, "steam_achievement", "group_id", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, logger, "steam_achievement", "archived", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, logger, "steam_achievement", "is_active", "INTEGER NOT NULL DEFAULT 1");
+        EnsureColumn(conn, logger, "steam_achievement", "global_percent", "REAL NULL");
+        EnsureColumn(conn, logger, "steam_achievement", "progress_type", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, logger, "steam_achievement", "progress_current", "REAL NULL");
+        EnsureColumn(conn, logger, "steam_achievement", "progress_min", "REAL NULL");
+        EnsureColumn(conn, logger, "steam_achievement", "progress_max", "REAL NULL");
+        if (needsCompletionBackfill)
+            ExecuteRepairSql(conn, logger, """
+                UPDATE "game" SET "steam_completion_preserved" = 1
+                WHERE EXISTS (SELECT 1 FROM "steam_achievement" a WHERE a."user_id" = "game"."user_id" AND a."game_id" = "game"."id")
+                AND NOT EXISTS (SELECT 1 FROM "steam_achievement" a WHERE a."user_id" = "game"."user_id" AND a."game_id" = "game"."id" AND a."achieved" = 0);
+                """, "preserved legacy full completion");
+        ExecuteRepairSql(conn, logger, """
+            CREATE TABLE IF NOT EXISTS "steam_achievement_set" (
+                "id" INTEGER NOT NULL CONSTRAINT "PK_steam_achievement_set" PRIMARY KEY AUTOINCREMENT,
+                "user_id" INTEGER NOT NULL, "game_id" INTEGER NULL, "steam_app_id" INTEGER NOT NULL,
+                "group_id" INTEGER NOT NULL, "display_name" TEXT NOT NULL, "dlc_app_id" INTEGER NULL,
+                "sort_order" INTEGER NOT NULL, "archived" INTEGER NOT NULL, "developer_only" INTEGER NOT NULL,
+                "is_public" INTEGER NOT NULL DEFAULT 1, "is_active" INTEGER NOT NULL DEFAULT 1,
+                "total_achievements" INTEGER NOT NULL, "completion_achievements" INTEGER NOT NULL,
+                "is_achievable" INTEGER NULL, "is_completed" INTEGER NOT NULL, "completed_at" TEXT NULL, "last_synced" TEXT NOT NULL,
+                CONSTRAINT "FK_steam_achievement_set_game_game_id" FOREIGN KEY ("game_id") REFERENCES "game" ("id") ON DELETE SET NULL,
+                CONSTRAINT "FK_steam_achievement_set_user_user_id" FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS "IX_steam_achievement_set_game_id" ON "steam_achievement_set" ("game_id");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_steam_achievement_set_user_id_steam_app_id_group_id" ON "steam_achievement_set" ("user_id", "steam_app_id", "group_id");
+            """, "ensured steam achievement sets exist");
 
         ExecuteRepairSql(conn, logger, """
             CREATE TABLE IF NOT EXISTS "steam_app_cache" (

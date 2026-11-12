@@ -303,6 +303,8 @@ public class SteamSyncResult
     public string? Error { get; set; }
     public int GamesUpdated { get; set; }
     public int AchievementsUpdated { get; set; }
+    public bool AchievementsSyncSucceeded { get; set; } = true;
+    public List<string> Warnings { get; set; } = new();
 }
 
 public class SteamImportResult
@@ -386,6 +388,12 @@ public class SteamAchievementDto
     public string? IconUrl { get; set; }
     public string? IconGrayUrl { get; set; }
     public bool Hidden { get; set; }
+    public int GroupId { get; set; }
+    public bool Archived { get; set; }
+    public double? GlobalPercent { get; set; }
+    public double? ProgressCurrent { get; set; }
+    public double? ProgressMin { get; set; }
+    public double? ProgressMax { get; set; }
 }
 
 public class SteamLibraryGameDto

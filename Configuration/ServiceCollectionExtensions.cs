@@ -308,6 +308,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISteamApiService, SteamApiService>();
         services.AddScoped<ISteamStoreService, SteamStoreService>();
         services.AddScoped<ISteamSyncService, SteamSyncService>();
+        services.AddScoped<SteamAchievementSyncService>();
         services.AddScoped<ISteamProfileService, SteamProfileService>();
         services.AddSingleton<ISteamAuthService, SteamAuthService>();
 

@@ -239,9 +239,35 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("status_id");
 
+                    b.Property<long?>("SteamAchievementSchemaHash")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("steam_achievement_schema_hash");
+
+                    b.Property<int?>("SteamAchievementSchemaVersion")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("steam_achievement_schema_version");
+
+                    b.Property<string>("SteamAchievementsLastError")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("steam_achievements_last_error");
+
+                    b.Property<string>("SteamAchievementsSource")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("steam_achievements_source");
+
+                    b.Property<DateTime?>("SteamAchievementsSyncedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("steam_achievements_synced_at");
+
                     b.Property<int?>("SteamAppId")
                         .HasColumnType("INTEGER")
                         .HasColumnName("steam_app_id");
+
+                    b.Property<bool>("SteamCompletionPreserved")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("steam_completion_preserved");
 
                     b.Property<string>("SteamFinishedLastValue")
                         .HasColumnType("TEXT")
@@ -1271,6 +1297,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("api_name");
 
+                    b.Property<bool>("Archived")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("archived");
+
                     b.Property<string>("Description")
                         .HasColumnType("TEXT")
                         .HasColumnName("description");
@@ -1284,6 +1314,14 @@ namespace GamesDatabase.Api.Migrations
                     b.Property<int?>("GameId")
                         .HasColumnType("INTEGER")
                         .HasColumnName("game_id");
+
+                    b.Property<double?>("GlobalPercent")
+                        .HasColumnType("REAL")
+                        .HasColumnName("global_percent");
+
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("group_id");
 
                     b.Property<bool>("Hidden")
                         .ValueGeneratedOnAdd()
@@ -1299,9 +1337,35 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("icon_url");
 
+                    b.Property<long?>("InternalKey")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("internal_key");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
                     b.Property<DateTime>("LastSynced")
                         .HasColumnType("TEXT")
                         .HasColumnName("last_synced");
+
+                    b.Property<double?>("ProgressCurrent")
+                        .HasColumnType("REAL")
+                        .HasColumnName("progress_current");
+
+                    b.Property<double?>("ProgressMax")
+                        .HasColumnType("REAL")
+                        .HasColumnName("progress_max");
+
+                    b.Property<double?>("ProgressMin")
+                        .HasColumnType("REAL")
+                        .HasColumnName("progress_min");
+
+                    b.Property<int>("ProgressType")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("progress_type");
 
                     b.Property<int>("SteamAppId")
                         .HasColumnType("INTEGER")
@@ -1323,6 +1387,97 @@ namespace GamesDatabase.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("steam_achievement", (string)null);
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.SteamAchievementSet", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Archived")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("archived");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("completed_at");
+
+                    b.Property<int>("CompletionAchievements")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("completion_achievements");
+
+                    b.Property<bool>("DeveloperOnly")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("developer_only");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("display_name");
+
+                    b.Property<int?>("DlcAppId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("dlc_app_id");
+
+                    b.Property<int?>("GameId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("game_id");
+
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("group_id");
+
+                    b.Property<bool?>("IsAchievable")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("is_achievable");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsCompleted")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("is_completed");
+
+                    b.Property<bool>("IsPublic")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_public");
+
+                    b.Property<DateTime>("LastSynced")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("last_synced");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("sort_order");
+
+                    b.Property<int>("SteamAppId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("steam_app_id");
+
+                    b.Property<int>("TotalAchievements")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("total_achievements");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GameId");
+
+                    b.HasIndex("UserId", "SteamAppId", "GroupId")
+                        .IsUnique();
+
+                    b.ToTable("steam_achievement_set", (string)null);
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.SteamAppCache", b =>
@@ -1823,6 +1978,24 @@ namespace GamesDatabase.Api.Migrations
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.SteamAchievement", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.Game", "Game")
+                        .WithMany()
+                        .HasForeignKey("GameId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Game");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.SteamAchievementSet", b =>
                 {
                     b.HasOne("GamesDatabase.Api.Domain.Entities.Game", "Game")
                         .WithMany()

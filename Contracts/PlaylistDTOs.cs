@@ -102,6 +102,7 @@ public sealed class PlaylistRulesDto
     public int? ReleasedToYear { get; set; }
     public bool? HasSteam { get; set; }
     public bool? FullCompletion { get; set; }
+    public bool? AllAchievements { get; set; }
     public string SortBy { get; set; } = "Position";
     public bool SortDescending { get; set; }
     public int? Limit { get; set; }

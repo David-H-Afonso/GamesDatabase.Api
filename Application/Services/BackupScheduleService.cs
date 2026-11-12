@@ -210,7 +210,9 @@ public class BackupScheduleService : BackgroundService
                     SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "",
                     SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "",
                     SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "",
-                    ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? ""
+                    ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "",
+                    IsManuallyCompleted = g.IsManuallyCompleted.ToString(),
+                    SteamCompletionPreserved = g.SteamCompletionPreserved.ToString()
                 });
             }
 
