@@ -67,16 +67,28 @@ public class SteamSyncService : ISteamSyncService
             .Where(game => game.UserId == userId && game.SteamAppId != null)
             .OrderBy(game => game.Id).Select(game => game.Id).ToListAsync(cancellationToken);
         var result = new SteamSyncResult { Success = true, TotalGames = gameIds.Count };
-        void Report(string? name = null) => onProgress?.Invoke(new SteamSyncProgress
+        void Report(string? name = null, SteamSyncIssueDto? issue = null) => onProgress?.Invoke(new SteamSyncProgress
         {
             TotalGames = result.TotalGames, ProcessedGames = result.ProcessedGames,
             GamesUpdated = result.GamesUpdated, AchievementsUpdated = result.AchievementsUpdated,
-            FailedGames = result.FailedGames, WarningCount = result.WarningCount, CurrentGameName = name
+            FailedGames = result.FailedGames, WarningCount = result.WarningCount, InfoCount = result.InfoCount,
+            ReasonCounts = new Dictionary<string, int>(result.ReasonCounts), CurrentGameName = name, Issue = issue
         });
-        void Warn(int gameId, string code)
+        SteamSyncIssueDto Record(Game game, string code)
         {
-            result.WarningCount++;
-            if (result.Warnings.Count < 50) result.Warnings.Add($"{gameId}:{code}");
+            var severity = SteamSyncClassification.Severity(code);
+            if (severity == "info") result.InfoCount++;
+            else
+            {
+                if (severity == "error") result.FailedGames++;
+                else result.WarningCount++;
+                if (code != "setsUnavailable") result.AchievementsSyncSucceeded = false;
+                if (result.Warnings.Count < 50) result.Warnings.Add($"{game.Id}:{code}");
+            }
+            result.ReasonCounts[code] = result.ReasonCounts.GetValueOrDefault(code) + 1;
+            var issue = new SteamSyncIssueDto(game.Id, game.SteamAppId!.Value, game.Name, severity, code);
+            SteamSyncClassification.Retain(result.Issues, issue);
+            return issue;
         }
         Report();
         if (gameIds.Count == 0) return result;
@@ -97,6 +109,7 @@ public class SteamSyncService : ISteamSyncService
                 continue;
             }
             Report(game.Name);
+            SteamSyncIssueDto? issue = null;
             try
             {
                 if (game.Critic == null) await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
@@ -109,7 +122,7 @@ public class SteamSyncService : ISteamSyncService
                 }
                 await FillMissingSteamImagesAsync(game, steamGame);
                 NormalizeStoredSteamReleaseDate(game);
-                var achievementCount = await SyncAchievementsForGameAsync(steamId, game);
+                var achievement = await _achievementSync.SyncAsync(steamId, game);
                 cancellationToken.ThrowIfCancellationRequested();
                 // A link changed during a long sync must not receive the old account's data.
                 var currentLink = await _context.Games.AsNoTracking().Where(current => current.Id == gameId && current.UserId == userId)
@@ -127,27 +140,20 @@ public class SteamSyncService : ISteamSyncService
                 await _context.SaveChangesAsync(cancellationToken);
                 // Report committed work, never merely fetched/in-memory changes.
                 if (hasPlaytime) result.GamesUpdated++;
-                result.AchievementsUpdated += achievementCount;
+                result.AchievementsUpdated += achievement.Updated;
                 if (game.SteamAchievementsLastError != null)
-                {
-                    Warn(game.Id, game.SteamAchievementsLastError);
-                    if (game.SteamAchievementsLastError != "setsUnavailable")
-                    {
-                        result.FailedGames++;
-                        result.AchievementsSyncSucceeded = false;
-                    }
-                }
+                    issue = Record(game, game.SteamAchievementsLastError);
+                else if (achievement.Outcome == "noAchievements")
+                    issue = Record(game, "noAchievements");
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                result.FailedGames++;
-                result.AchievementsSyncSucceeded = false;
-                Warn(gameId, "gameSyncFailed");
+                issue = Record(game, "gameSyncFailed");
                 _logger.LogWarning("Steam sync could not commit game {GameId} ({FailureType}); previous committed games are retained", gameId, ex.GetType().Name);
             }
             finally { _context.ChangeTracker.Clear(); }
             result.ProcessedGames++;
-            Report();
+            Report(issue: issue);
         }
         return result;
     }
@@ -517,18 +523,25 @@ public class SteamSyncService : ISteamSyncService
         await FillMissingSteamImagesAsync(game, ownedGame);
         NormalizeStoredSteamReleaseDate(game);
 
-        var achCount = await SyncAchievementsForGameAsync(user.SteamId, game);
+        var achievement = await _achievementSync.SyncAsync(user.SteamId, game);
         game.SteamLastSynced = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
 
+        var code = game.SteamAchievementsLastError ?? (achievement.Outcome == "noAchievements" ? "noAchievements" : null);
+        var severity = code == null ? null : SteamSyncClassification.Severity(code);
         return new SteamSyncResult
         {
             Success = true,
             GamesUpdated = 1,
-            AchievementsUpdated = achCount,
-            AchievementsSyncSucceeded = game.SteamAchievementsLastError is null or "setsUnavailable",
-            Warnings = game.SteamAchievementsLastError == null ? [] : [game.SteamAchievementsLastError]
+            AchievementsUpdated = achievement.Updated,
+            AchievementsSyncSucceeded = achievement.Success,
+            FailedGames = severity == "error" ? 1 : 0,
+            WarningCount = severity == "warning" ? 1 : 0,
+            InfoCount = severity == "info" ? 1 : 0,
+            ReasonCounts = code == null ? [] : new() { [code] = 1 },
+            Issues = code == null ? [] : [new(game.Id, game.SteamAppId.Value, game.Name, severity!, code)],
+            Warnings = code != null && severity != "info" ? [code] : []
         };
     }
 

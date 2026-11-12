@@ -95,8 +95,10 @@ public sealed class SteamSetAchievementUnlock
 {
     [JsonRequired, JsonPropertyName("internal_key")]
     public long InternalKey { get; set; }
-    [JsonRequired, JsonPropertyName("unlocked")]
-    public bool Unlocked { get; set; }
+    // Steam omits unlocked on progress-only records. Missing is not a parse error,
+    // but the adapter still requires either this flag or a numeric progress value.
+    [JsonPropertyName("unlocked")]
+    public bool? Unlocked { get; set; }
     [JsonPropertyName("unlock_time")]
     public long UnlockTime { get; set; }
     [JsonPropertyName("progress_int")]
@@ -122,6 +124,7 @@ public sealed class SteamAchievementSnapshot
     public bool Success { get; set; }
     public bool SupportsSets { get; set; }
     public bool NoAchievements { get; set; }
+    public string? SkipReason { get; set; }
     public string? Error { get; set; }
     public SteamSetSchema? Schema { get; set; }
     public SteamSetPlayerProgress? Player { get; set; }
@@ -134,6 +137,7 @@ public sealed class SteamAchievementSyncResult
     public bool Success { get; set; }
     public int Updated { get; set; }
     public string? Error { get; set; }
+    public string Outcome { get; set; } = "updated";
 }
 
 public sealed class SteamAchievementSetDto
@@ -155,6 +159,7 @@ public sealed class SteamAchievementProgressDto
     public string Source { get; set; } = "none";
     public DateTime? LastSynced { get; set; }
     public string? LastError { get; set; }
+    public string? Notice { get; set; }
     public bool IsCompleted { get; set; }
     public bool IsFullyCompleted { get; set; }
     public bool CompletionPreserved { get; set; }

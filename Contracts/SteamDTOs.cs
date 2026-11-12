@@ -307,6 +307,9 @@ public class SteamSyncResult
     public int ProcessedGames { get; set; }
     public int FailedGames { get; set; }
     public int WarningCount { get; set; }
+    public int InfoCount { get; set; }
+    public Dictionary<string, int> ReasonCounts { get; set; } = new();
+    public List<SteamSyncIssueDto> Issues { get; set; } = [];
     public bool AchievementsSyncSucceeded { get; set; } = true;
     public List<string> Warnings { get; set; } = new();
 }

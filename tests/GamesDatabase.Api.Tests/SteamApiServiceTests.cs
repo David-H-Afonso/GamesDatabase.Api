@@ -31,7 +31,7 @@ public sealed class SteamApiServiceTests
 
     [Theory]
     [InlineData(15, "profilePrivate")]
-    [InlineData(2, "steamUnavailable")]
+    [InlineData(2, "statsUnavailable")]
     public async Task Http_200_does_not_override_a_failed_eresult(int resultCode, string error)
     {
         var snapshot = SteamAchievementFixtures.Snapshot([1], [1]);
@@ -48,7 +48,7 @@ public sealed class SteamApiServiceTests
         using var api = new ApiHarness(path => path.Contains("GetGameAchievements") ? Json(snapshot.Schema) : Json(new { }));
         var result = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 620);
         Assert.False(result.Success);
-        Assert.Equal("playerUnavailable", result.Error);
+        Assert.Equal("invalidPlayerSnapshot", result.Error);
     }
 
     [Fact]
@@ -147,6 +147,114 @@ public sealed class SteamApiServiceTests
         using var api = new ApiHarness(_ => Raw("not-json"));
         var result = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 620);
         Assert.False(result.Success);
+        Assert.Equal("invalidResponse", result.Error);
+    }
+
+    [Theory]
+    [InlineData("\"progress_int\":7")]
+    [InlineData("\"progress_int\":0")]
+    [InlineData("\"progress_float\":0.25")]
+    public async Task Reads_real_progress_only_records_without_requiring_an_unlocked_flag(string progressField)
+    {
+        var fixture = SteamAchievementFixtures.Snapshot([2], [1]);
+        var player = "{\"response\":{\"schema_version\":1,\"schema_hash\":100,\"groups\":[{\"groupid\":0,\"is_achievable\":true,\"is_completed\":false}],\"achievements\":[{\"internal_key\":0,\"unlocked\":true,\"unlock_time\":1700000000},{\"internal_key\":1," + progressField + "}]}}";
+        using var api = new ApiHarness(path => path.Contains("GetGameAchievements") ? Json(fixture.Schema) : Raw(player));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 1259420);
+        Assert.True(snapshot.Success);
+        Assert.Null(snapshot.Error);
+        Assert.Equal(2, snapshot.Player!.Achievements!.Count);
+        Assert.Null(snapshot.Player.Achievements[1].Unlocked);
+    }
+
+    [Fact]
+    public async Task Missing_unlocked_without_progress_is_still_an_invalid_player_record()
+    {
+        var fixture = SteamAchievementFixtures.Snapshot([1], [0]);
+        using var api = new ApiHarness(path => path.Contains("GetGameAchievements") ? Json(fixture.Schema) : Raw("""
+            {"response":{"schema_version":1,"schema_hash":100,"groups":[{"groupid":0,"is_achievable":true,"is_completed":false}],"achievements":[{"internal_key":0}]}}
+            """));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 620);
+        Assert.False(snapshot.Success);
+        Assert.Equal("invalidPlayerSnapshot", snapshot.Error);
+        Assert.Null(snapshot.SkipReason);
+    }
+
+    [Fact]
+    public async Task Matching_schema_only_player_payload_is_an_informational_skip_not_zero_progress()
+    {
+        var fixture = SteamAchievementFixtures.Snapshot([1], [0]);
+        using var api = new ApiHarness(path => path.Contains("GetGameAchievements") ? Json(fixture.Schema) : Raw("""
+            {"response":{"schema_version":1,"schema_hash":100}}
+            """));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 2668510);
+        Assert.Equal("noPlayerData", snapshot.SkipReason);
+        Assert.Null(snapshot.Error);
+        Assert.False(snapshot.NoAchievements);
+        Assert.False(snapshot.Success); // There is no verified player snapshot to apply.
+    }
+
+    [Fact]
+    public async Task Schema_only_payload_with_mismatched_hash_is_not_silently_skipped()
+    {
+        var fixture = SteamAchievementFixtures.Snapshot([1], [0]);
+        using var api = new ApiHarness(path => path.Contains("GetGameAchievements") ? Json(fixture.Schema) : Raw("""
+            {"response":{"schema_version":1,"schema_hash":999}}
+            """));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 620);
+        Assert.Equal("schemaChanged", snapshot.Error);
+        Assert.Null(snapshot.SkipReason);
+    }
+
+    [Fact]
+    public async Task Omitted_empty_achievement_array_is_valid_only_when_group_counts_confirm_zero()
+    {
+        using var api = new ApiHarness(_ => Raw("""
+            {"response":{"schema_version":5,"schema_hash":3825814976,"groups":[{"groupid":0,"ispublic":true,"total_achievements":0,"completion_achievements":0}]}}
+            """));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 391540);
+        Assert.True(snapshot.Success);
+        Assert.True(snapshot.NoAchievements);
+        Assert.Empty(snapshot.Schema!.Achievements!);
+        Assert.Single(api.Paths); // No player request is needed for an empty published schema.
+    }
+
+    [Theory]
+    [InlineData(true, "unreleased", null)]
+    [InlineData(false, null, "statsUnavailable")]
+    public async Task Provider_failure_is_an_unreleased_skip_only_after_store_confirmation(bool comingSoon, string? skip, string? error)
+    {
+        using var api = new ApiHarness(path => path.Contains("/api/appdetails")
+            ? Raw(JsonSerializer.Serialize(new Dictionary<string, object> { ["620"] = new { success = true, data = new { release_date = new { coming_soon = comingSoon } } } }))
+            : Json(new { }, 2));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 620);
+        Assert.Equal(skip, snapshot.SkipReason);
+        Assert.Equal(error, snapshot.Error);
+        Assert.Equal(2, api.Paths.Count);
+    }
+
+    [Fact]
+    public async Task A_failed_release_lookup_does_not_hide_a_provider_problem_as_unreleased()
+    {
+        using var api = new ApiHarness(path => path.Contains("/api/appdetails") ? new(HttpStatusCode.ServiceUnavailable) : Json(new { }, 2));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 620);
+        Assert.Null(snapshot.SkipReason);
+        Assert.Equal("statsUnavailable", snapshot.Error);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{\"620\":null}")]
+    [InlineData("{\"620\":{\"success\":true,\"data\":[]}}")]
+    [InlineData("{\"620\":{\"success\":true,\"data\":{\"release_date\":null}}}")]
+    [InlineData("{\"620\":{\"success\":true,\"data\":{\"release_date\":{\"coming_soon\":\"true\"}}}}")]
+    [InlineData("{\"620\":")]
+    public async Task An_unusable_release_payload_remains_a_provider_warning(string storePayload)
+    {
+        using var api = new ApiHarness(path => path.Contains("/api/appdetails") ? Raw(storePayload) : Json(new { }, 2));
+        var snapshot = await api.Service.GetAchievementSnapshotAsync("76561198000000000", 620);
+        Assert.Null(snapshot.SkipReason);
+        Assert.Equal("statsUnavailable", snapshot.Error);
     }
 
     private static HttpResponseMessage Json(object? response, int result = 1)
@@ -172,7 +280,7 @@ public sealed class SteamApiServiceTests
                 Paths.Add(path);
                 return respond(path);
             }));
-            Service = new(this, Options.Create(new SteamSettings { ApiBaseUrl = "https://steam.test", ApiKey = "test-only-key" }), NullLogger<SteamApiService>.Instance, cache);
+            Service = new(this, Options.Create(new SteamSettings { ApiBaseUrl = "https://steam.test", StoreApiBaseUrl = "https://store.test", ApiKey = "test-only-key" }), NullLogger<SteamApiService>.Instance, cache);
         }
         public HttpClient CreateClient(string name) => client;
         public void Dispose() { client.Dispose(); cache.Dispose(); }

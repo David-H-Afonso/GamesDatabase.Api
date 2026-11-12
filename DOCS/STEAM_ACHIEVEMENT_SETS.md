@@ -90,6 +90,13 @@ as a successful achievement update. `lastSynced` in the progress response denote
 the last **successful achievement** snapshot. `lastError` is an optional stable
 error code, never an exception message or URL containing credentials.
 
+`notice` is a separate optional informational outcome (`noPlayerData` or
+`unreleased`). It is not an error and does not mean zero unlocked achievements.
+The legacy `game.steam_achievements_last_error` column stores these last-check
+markers without a schema change; the public progress route moves them to `notice`
+and omits `lastError`. Do not count every non-null legacy column value as a failure.
+The last successful achievement timestamp, unlocks and set trophies remain intact.
+
 ## Steam adapter and reconciliation
 
 The adapter reads `IPlayerService/GetGameAchievements/v1` and
@@ -122,6 +129,33 @@ The UI groups by set, distinguishes base/DLC, filters/searches without leaking
 spoilers, provides explicit spoiler reveal, opt-in global rarity and partial
 progress. Labels are available in English and Spanish.
 
+### Sparse JSON and result classification
+
+- Steam legitimately returns progress-only entries such as
+  `{"internal_key":123,"progress_int":7}`. `unlocked` is optional/nullable for these
+  entries. Internal key, matching schema, unique records and a flag **or** finite
+  numeric progress are still required. A record missing both flag and progress is
+  rejected; this fix does not accept arbitrary incomplete player payloads.
+- A player response containing only matching `schema_version`/`schema_hash`, with
+  no groups or achievements, is `noPlayerData`. This also applies when playtime is
+  positive: no inference about never playing, privacy or zero unlocks is made.
+- An omitted empty achievement array is accepted only when a validated schema's
+  group totals confirm zero definitions. That is `noAchievements`, not bad JSON.
+  Missing definitions alongside positive declared totals remain a real error.
+- Provider EResult 2 triggers a small store `release_date.coming_soon` lookup,
+  cached for five minutes. Only explicit `coming_soon=true` means `unreleased`.
+  Failed/unknown lookups and released games remain `statsUnavailable` warnings;
+  provider failures must not be hidden merely because playtime is zero.
+- JSON decode errors are `invalidResponse`, not `steamUnavailable`. Logs include
+  method, AppID and JSON path, but no raw payload, SteamID, key or exception URL.
+
+Job counters are disjoint: `failedGames` counts technical/validation failures,
+`warningCount` counts actionable access/provider/fallback warnings, and `infoCount`
+counts `noPlayerData`, `unreleased` and `noAchievements`. Informational checks do
+not set `achievementsSyncSucceeded=false` or the “completed with warnings” state.
+The legacy `warnings` string list remains a bounded compatibility list for errors
+and warnings, not informational cases.
+
 ## Bulk sync operations (504 timeout fix)
 
 Interactive clients must not hold one HTTP request open while checking a large
@@ -145,6 +179,19 @@ A snapshot contains `id`, `state` (`queued`, `running`, `completed`, `failed`,
 safe `error` code, and final `result`. `processedGames` includes attempted/skipped
 games, while updated counters advance only after commit. A completed operation can
 still have warnings; clients must not present that as an error-free update.
+
+Snapshots additionally expose `infoCount`, complete aggregate `reasonCounts`,
+`issues` and `issuesTruncated`. An issue is
+`{ gameId, steamAppId, gameName, severity, code }`, scoped to the job owner, with no
+raw provider error message. Running jobs return a prioritized five-entry sample;
+terminal jobs retain up to 1000 details, evicting informational entries before
+actionable warnings/errors. Reason totals are not truncated. The final nested
+result does not duplicate this detail list in job snapshots.
+
+The UI shows the three distinct result severities, a per-cause breakdown and
+game-specific explanations/links, with severity, reason and name filters. It
+initially renders 50 rows and offers explicit “show more” rather than rendering
+an entire large library. Unknown result codes use safe translated fallbacks.
 
 ### Execution and preservation
 
@@ -243,6 +290,11 @@ owner isolation, bounded FIFO queue, safe fatal failures, interruption, explicit
 retry, per-game commit/cancellation, repeated AppIDs, account changes, browser
 recovery, retry limits, timeout cleanup, and absence of idle/background sync starts.
 
+Classification regressions use the real response **shapes** found during the
+read-only audit: progress-only records, schema-only player responses, confirmed
+empty schemas and coming-soon apps. Tests verify preservation of cached completion,
+playtime and successful timestamps, separate counters and bounded diagnostics.
+
 ## Resumen en español
 
 - **Completados** reúne completados manuales, anteriores, por conjuntos y al 100%.
@@ -264,3 +316,8 @@ recovery, retry limits, timeout cleanup, and absence of idle/background sync sta
 - Si la API se reinicia, el estado temporal de la operación se pierde, pero los
   juegos ya guardados se conservan. Se puede iniciar otra pasada explícitamente;
   no se reanuda ni se repite trabajo de forma desatendida.
+- Los juegos sin progreso consultable, sin logros publicados o pendientes de
+  lanzamiento son casos informativos, no errores. Una respuesta sin datos nunca
+  sustituye lo guardado por ceros. El detalle por juego diferencia información,
+  avisos y errores reales. Tras actualizar, ejecutar una nueva sincronización
+  explícita para reevaluar los avisos antiguos; no se reescriben para ocultarlos.

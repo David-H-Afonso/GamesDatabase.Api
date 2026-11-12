@@ -359,6 +359,98 @@ public sealed class SteamAchievementSyncTests
         Assert.Null((await db.Context.Games.AsNoTracking().SingleAsync(game => game.Id == second.Id)).SteamAchievementsSyncedAt);
     }
 
+    [Theory]
+    [InlineData("noPlayerData")]
+    [InlineData("unreleased")]
+    public async Task Informational_skips_preserve_unlocks_sets_playtime_and_last_success(string notice)
+    {
+        await using var db = await TestDatabase.CreateAsync();
+        await db.SyncAsync(SteamAchievementFixtures.Snapshot([2], [2], 0));
+        db.Game.SteamPlaytimeForever = 14351;
+        await db.Context.SaveChangesAsync();
+        var savedAt = db.Game.SteamAchievementsSyncedAt;
+        var originalUnlock = (await db.Context.SteamAchievements.FirstAsync()).UnlockTime;
+        var result = await db.SyncAsync(new() { SkipReason = notice });
+        Assert.True(result.Success);
+        Assert.Equal(notice, result.Outcome);
+        Assert.Equal(0, result.Updated);
+        Assert.Equal(savedAt, db.Game.SteamAchievementsSyncedAt);
+        Assert.Equal(14351, db.Game.SteamPlaytimeForever);
+        Assert.Equal(originalUnlock, (await db.Context.SteamAchievements.FirstAsync()).UnlockTime);
+        Assert.All(await db.Context.SteamAchievements.ToListAsync(), achievement => Assert.True(achievement.Achieved));
+        Assert.True((await db.Context.SteamAchievementSets.SingleAsync()).IsCompleted);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var profile = new SteamProfileService(db.Context, new SnapshotApi(new()), null!, cache, NullLogger<SteamProfileService>.Instance);
+        var progress = await profile.GetAchievementProgressAsync(db.Game.UserId, db.Game.Id);
+        Assert.Null(progress!.LastError);
+        Assert.Equal(notice, progress.Notice);
+        Assert.True(progress.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Progress_only_records_update_partial_progress_without_revoking_completed_sets()
+    {
+        await using var db = await TestDatabase.CreateAsync();
+        await db.SyncAsync(SteamAchievementFixtures.Snapshot([1], [1], 0));
+        var snapshot = SteamAchievementFixtures.Snapshot([2], [1]);
+        snapshot.Schema!.Achievements![1].ProgressType = 1;
+        snapshot.Schema.Achievements[1].MinProgressInt = 0;
+        snapshot.Schema.Achievements[1].MaxProgressInt = 10;
+        snapshot.Player!.Achievements!.Add(new() { InternalKey = 1, ProgressInt = 7 });
+        await db.SyncAsync(snapshot);
+        var partial = await db.Context.SteamAchievements.SingleAsync(achievement => achievement.ApiName == "ACH_1");
+        Assert.False(partial.Achieved);
+        Assert.Equal(7, partial.ProgressCurrent);
+        Assert.True((await db.Context.SteamAchievementSets.SingleAsync()).IsCompleted);
+        Assert.True(db.Game.SteamCompletionPreserved);
+    }
+
+    [Fact]
+    public async Task Bulk_result_distinguishes_information_warnings_and_actual_errors()
+    {
+        await using var db = await TestDatabase.CreateAsync();
+        await PrepareBulkAsync(db);
+        foreach (var appId in new[] { 622, 623, 624 }) db.Context.Games.Add(new Game { UserId = db.Game.UserId, StatusId = db.Game.StatusId, Name = $"Game {appId}", SteamAppId = appId, Critic = 90, Logo = "https://images.test/logo.png", Hero = "https://images.test/hero.jpg", Cover = "https://images.test/cover.jpg" });
+        await db.Context.SaveChangesAsync();
+        var api = new OutcomesApi();
+        var service = new SteamSyncService(db.Context, api, null!, NullLogger<SteamSyncService>.Instance, new(db.Context, api));
+        var events = new List<SteamSyncProgress>();
+        var result = await service.SyncAllUserGamesAsync(db.Game.UserId, events.Add);
+        Assert.True(result.Success);
+        Assert.Equal(5, result.ProcessedGames);
+        Assert.Equal(3, result.InfoCount);
+        Assert.Equal(1, result.WarningCount);
+        Assert.Equal(1, result.FailedGames);
+        Assert.Equal(5, result.ReasonCounts.Values.Sum());
+        Assert.Equal(3, result.Issues.Count(issue => issue.Severity == "info"));
+        Assert.Equal("warning", result.Issues.Single(issue => issue.Code == "profilePrivate").Severity);
+        Assert.Equal("error", result.Issues.Single(issue => issue.Code == "invalidResponse").Severity);
+        Assert.Equal(5, events.Count(progress => progress.Issue != null));
+    }
+
+    [Fact]
+    public void Diagnostic_details_are_bounded_and_keep_actionable_errors_over_normal_skips()
+    {
+        var details = Enumerable.Range(1, SteamSyncClassification.DetailLimit).Select(id => new SteamSyncIssueDto(id, id, "Game", "info", "noPlayerData")).ToList();
+        SteamSyncClassification.Retain(details, new(9999, 9999, "Error game", "error", "invalidResponse"));
+        SteamSyncClassification.Retain(details, new(9998, 9998, "Warning game", "warning", "profilePrivate"));
+        Assert.Equal(SteamSyncClassification.DetailLimit, details.Count);
+        Assert.Contains(details, detail => detail.GameId == 9999);
+        Assert.Contains(details, detail => detail.GameId == 9998);
+    }
+
+    private sealed class OutcomesApi() : SnapshotApi(new())
+    {
+        public override Task<SteamAchievementSnapshot> GetAchievementSnapshotAsync(string steamId, int appId) => Task.FromResult(appId switch
+        {
+            620 => new SteamAchievementSnapshot { SkipReason = "noPlayerData" },
+            621 => new SteamAchievementSnapshot { SkipReason = "unreleased" },
+            622 => new SteamAchievementSnapshot { Success = true, SupportsSets = true, NoAchievements = true },
+            623 => new SteamAchievementSnapshot { Error = "invalidResponse" },
+            _ => new SteamAchievementSnapshot { Error = "profilePrivate" }
+        });
+    }
+
     private static async Task<Game> PrepareBulkAsync(TestDatabase db, bool duplicateApp = false)
     {
         (await db.Context.Users.SingleAsync()).SteamId = "76561198000000000";

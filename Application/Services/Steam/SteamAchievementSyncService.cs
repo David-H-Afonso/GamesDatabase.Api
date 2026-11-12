@@ -27,6 +27,13 @@ public sealed class SteamAchievementSyncService(GamesDbContext context, ISteamAp
             game.SteamCompletionPreserved = true;
 
         var snapshot = await steamApi.GetAchievementSnapshotAsync(steamId, appId);
+        if (SteamSyncClassification.IsNotice(snapshot.SkipReason))
+        {
+            // Record an informational last-check notice, not zero unlocked achievements.
+            // Never replace definitions, trophies, progress or the last successful timestamp.
+            game.SteamAchievementsLastError = snapshot.SkipReason;
+            return new() { Success = true, Outcome = snapshot.SkipReason! };
+        }
         var incompleteSnapshot = !snapshot.NoAchievements && (snapshot.SupportsSets
             ? snapshot.Schema?.Achievements == null || snapshot.Schema.Groups == null || snapshot.Player?.Groups == null
             : snapshot.LegacySchema == null);
@@ -34,7 +41,7 @@ public sealed class SteamAchievementSyncService(GamesDbContext context, ISteamAp
         {
             // Do not change unlocks, sets, percentage or the last successful sync.
             game.SteamAchievementsLastError = snapshot.Error ?? (incompleteSnapshot ? "invalidResponse" : "steamUnavailable");
-            return new() { Error = game.SteamAchievementsLastError };
+            return new() { Error = game.SteamAchievementsLastError, Outcome = "failed" };
         }
 
         var now = DateTime.UtcNow;
@@ -156,7 +163,7 @@ public sealed class SteamAchievementSyncService(GamesDbContext context, ISteamAp
             (required.Count > 0 && required.All(achievement => achievement.Achieved));
         game.SteamAchievementsSyncedAt = now;
         game.SteamAchievementsLastError = snapshot.SupportsSets ? null : "setsUnavailable";
-        return new() { Success = true, Updated = updated };
+        return new() { Success = true, Updated = updated, Outcome = snapshot.NoAchievements ? "noAchievements" : "updated" };
     }
 
     private static DateTime? UnixDate(long? value) => value is > 0 and <= 253402300799

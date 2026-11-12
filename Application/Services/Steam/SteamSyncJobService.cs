@@ -43,7 +43,7 @@ public sealed class SteamSyncJobService(IServiceScopeFactory scopeFactory, ILogg
 
     public SteamSyncJobDto? GetCurrent(int userId) => jobs.TryGetValue(userId, out var job) ? job.Snapshot() : null;
     public SteamSyncJobDto? GetById(int userId, Guid jobId) => jobs.TryGetValue(userId, out var job) && job.Id == jobId ? job.Snapshot() : null;
-    public bool IsActive(int userId) => GetCurrent(userId) is { } job && Active(job.State);
+    public bool IsActive(int userId) => jobs.TryGetValue(userId, out var job) && job.IsActive();
     private static bool Active(string state) => state is "queued" or "running";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -65,8 +65,11 @@ public sealed class SteamSyncJobService(IServiceScopeFactory scopeFactory, ILogg
                         {
                             TotalGames = result.TotalGames, ProcessedGames = result.ProcessedGames,
                             GamesUpdated = result.GamesUpdated, AchievementsUpdated = result.AchievementsUpdated,
-                            FailedGames = result.FailedGames, WarningCount = result.WarningCount
+                            FailedGames = result.FailedGames, WarningCount = result.WarningCount, InfoCount = result.InfoCount,
+                            ReasonCounts = new Dictionary<string, int>(result.ReasonCounts)
                         };
+                        job.Issues.Clear();
+                        job.Issues.AddRange(result.Issues);
                         job.FinishedAt = DateTime.UtcNow;
                         job.State = result.Success ? "completed" : "failed";
                         job.Error = result.Success ? null : result.Error switch
@@ -124,7 +127,16 @@ public sealed class SteamSyncJobService(IServiceScopeFactory scopeFactory, ILogg
         public string? Error;
         public SteamSyncResult? Result;
         public SteamSyncProgress Progress = new();
-        public void Update(SteamSyncProgress progress) { lock (Gate) Progress = progress; }
+        public List<SteamSyncIssueDto> Issues { get; } = [];
+        public bool IsActive() { lock (Gate) return Active(State); }
+        public void Update(SteamSyncProgress progress)
+        {
+            lock (Gate)
+            {
+                Progress = progress;
+                if (progress.Issue != null) SteamSyncClassification.Retain(Issues, progress.Issue);
+            }
+        }
         public SteamSyncJobDto Snapshot()
         {
             lock (Gate) return new()
@@ -133,13 +145,17 @@ public sealed class SteamSyncJobService(IServiceScopeFactory scopeFactory, ILogg
                 TotalGames = Progress.TotalGames, ProcessedGames = Progress.ProcessedGames,
                 GamesUpdated = Progress.GamesUpdated, AchievementsUpdated = Progress.AchievementsUpdated,
                 FailedGames = Progress.FailedGames, WarningCount = Progress.WarningCount,
+                InfoCount = Progress.InfoCount, ReasonCounts = new Dictionary<string, int>(Progress.ReasonCounts),
+                Issues = Active(State) ? Issues.AsEnumerable().Reverse().OrderBy(issue => issue.Severity == "error" ? 0 : issue.Severity == "warning" ? 1 : 2).Take(5).ToList() : [.. Issues],
+                IssuesTruncated = (Active(State) ? Math.Min(Issues.Count, 5) : Issues.Count) < Progress.InfoCount + Progress.WarningCount + Progress.FailedGames,
                 CurrentGameName = Progress.CurrentGameName, Error = Error,
                 Result = Result == null ? null : new SteamSyncResult
                 {
                     Success = Result.Success, Error = Result.Error, TotalGames = Result.TotalGames,
                     ProcessedGames = Result.ProcessedGames, GamesUpdated = Result.GamesUpdated,
                     AchievementsUpdated = Result.AchievementsUpdated, FailedGames = Result.FailedGames,
-                    WarningCount = Result.WarningCount, AchievementsSyncSucceeded = Result.AchievementsSyncSucceeded,
+                    WarningCount = Result.WarningCount, InfoCount = Result.InfoCount,
+                    ReasonCounts = new Dictionary<string, int>(Result.ReasonCounts), AchievementsSyncSucceeded = Result.AchievementsSyncSucceeded,
                     Warnings = [.. Result.Warnings]
                 }
             };

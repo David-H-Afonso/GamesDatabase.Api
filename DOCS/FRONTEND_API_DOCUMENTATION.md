@@ -18,6 +18,12 @@ Do not use the legacy synchronous `/api/steam/sync` for long interactive library
 updates. Each game is committed independently; see the linked guide for lifecycle,
 partial results, retry bounds and restart semantics. This fix needs no new migration.
 
+Sync diagnostics separate `failedGames`, `warningCount` and `infoCount`; normal
+missing player progress, unreleased apps and confirmed empty schemas are not
+failures. Job snapshots include bounded per-game `issues` and full `reasonCounts`.
+The progress route exposes informational `notice` separately from `lastError`,
+preserving cached progress when no current user snapshot is available.
+
 ---
 
 ## 📑 Table of Contents
