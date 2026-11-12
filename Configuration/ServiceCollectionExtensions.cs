@@ -309,6 +309,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISteamStoreService, SteamStoreService>();
         services.AddScoped<ISteamSyncService, SteamSyncService>();
         services.AddScoped<SteamAchievementSyncService>();
+        services.AddSingleton<SteamSyncJobService>();
+        services.AddSingleton<ISteamSyncJobService>(provider => provider.GetRequiredService<SteamSyncJobService>());
+        services.AddHostedService(provider => provider.GetRequiredService<SteamSyncJobService>());
         services.AddScoped<ISteamProfileService, SteamProfileService>();
         services.AddSingleton<ISteamAuthService, SteamAuthService>();
 

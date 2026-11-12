@@ -297,13 +297,120 @@ public sealed class SteamAchievementSyncTests
         Assert.True((await db.Context.Games.AsNoTracking().SingleAsync()).SteamCompletionPreserved);
     }
 
+    [Fact]
+    public async Task Bulk_sync_commits_each_game_before_reporting_and_retains_it_on_cancellation()
+    {
+        await using var db = await TestDatabase.CreateAsync();
+        var second = await PrepareBulkAsync(db);
+        using var cancel = new CancellationTokenSource();
+        var api = new SnapshotApi(SteamAchievementFixtures.Snapshot([1], [1], 0));
+        var service = new SteamSyncService(db.Context, api, null!, NullLogger<SteamSyncService>.Instance, new(db.Context, api));
+        var committedBeforeCancellation = false;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SyncAllUserGamesAsync(db.Game.UserId, progress =>
+        {
+            if (progress.ProcessedGames != 1) return;
+            committedBeforeCancellation = db.Context.Games.AsNoTracking().Single(game => game.Id == db.Game.Id).SteamCompletionPreserved;
+            cancel.Cancel();
+        }, cancel.Token));
+        Assert.True(committedBeforeCancellation);
+        Assert.NotNull((await db.Context.Games.AsNoTracking().SingleAsync(game => game.Id == db.Game.Id)).SteamAchievementsSyncedAt);
+        Assert.Null((await db.Context.Games.AsNoTracking().SingleAsync(game => game.Id == second.Id)).SteamAchievementsSyncedAt);
+        Assert.Single(await db.Context.SteamAchievements.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Bulk_sync_handles_repeated_app_ids_without_duplicate_cache_inserts()
+    {
+        await using var db = await TestDatabase.CreateAsync();
+        await PrepareBulkAsync(db, duplicateApp: true);
+        var api = new SnapshotApi(SteamAchievementFixtures.Snapshot([1], [1], 0));
+        var service = new SteamSyncService(db.Context, api, null!, NullLogger<SteamSyncService>.Instance, new(db.Context, api));
+        var result = await service.SyncAllUserGamesAsync(db.Game.UserId);
+        Assert.True(result.Success);
+        Assert.Equal(2, result.ProcessedGames);
+        Assert.Equal(0, result.FailedGames);
+        Assert.Single(await db.Context.SteamAchievements.AsNoTracking().ToListAsync());
+        Assert.Single(await db.Context.SteamAchievementSets.AsNoTracking().ToListAsync());
+        Assert.All(await db.Context.Games.AsNoTracking().ToListAsync(), game => Assert.True(game.SteamCompletionPreserved));
+    }
+
+    [Fact]
+    public async Task Bulk_sync_continues_after_one_failed_commit_without_erasing_other_games()
+    {
+        await using var db = await TestDatabase.CreateAsync();
+        var second = await PrepareBulkAsync(db);
+        second.Name = "Second failure";
+        second.IsManuallyCompleted = true;
+        var third = new Game { UserId = db.Game.UserId, StatusId = db.Game.StatusId, Name = "Third", SteamAppId = 622, Critic = 90, Logo = "https://images.test/logo.png", Hero = "https://images.test/hero.jpg", Cover = "https://images.test/cover.jpg" };
+        db.Context.Games.Add(third);
+        await db.Context.SaveChangesAsync();
+        await db.Context.Database.ExecuteSqlRawAsync("CREATE TRIGGER reject_second_sync BEFORE UPDATE ON game WHEN OLD.name = 'Second failure' BEGIN SELECT RAISE(ABORT, 'PRIVATE_DB_ERROR'); END;");
+        var api = new SnapshotApi(SteamAchievementFixtures.Snapshot([1], [1], 0));
+        var service = new SteamSyncService(db.Context, api, null!, NullLogger<SteamSyncService>.Instance, new(db.Context, api));
+        var result = await service.SyncAllUserGamesAsync(db.Game.UserId);
+        Assert.True(result.Success);
+        Assert.Equal(3, result.ProcessedGames);
+        Assert.Equal(1, result.FailedGames);
+        Assert.False(result.AchievementsSyncSucceeded);
+        Assert.DoesNotContain("PRIVATE_DB_ERROR", string.Join(',', result.Warnings));
+        Assert.Equal(2, await db.Context.SteamAchievements.CountAsync());
+        Assert.True((await db.Context.Games.AsNoTracking().SingleAsync(game => game.Id == third.Id)).SteamCompletionPreserved);
+        Assert.True((await db.Context.Games.AsNoTracking().SingleAsync(game => game.Id == second.Id)).IsManuallyCompleted);
+        Assert.Null((await db.Context.Games.AsNoTracking().SingleAsync(game => game.Id == second.Id)).SteamAchievementsSyncedAt);
+    }
+
+    private static async Task<Game> PrepareBulkAsync(TestDatabase db, bool duplicateApp = false)
+    {
+        (await db.Context.Users.SingleAsync()).SteamId = "76561198000000000";
+        db.Game.Critic = 90;
+        db.Game.Logo = "https://images.test/logo.png";
+        db.Game.Hero = "https://images.test/hero.jpg";
+        db.Game.Cover = "https://images.test/cover.jpg";
+        var second = new Game { UserId = db.Game.UserId, StatusId = db.Game.StatusId, Name = "Second", SteamAppId = duplicateApp ? 620 : 621, Critic = 90, Logo = "https://images.test/logo.png", Hero = "https://images.test/hero.jpg", Cover = "https://images.test/cover.jpg" };
+        db.Context.Games.Add(second);
+        await db.Context.SaveChangesAsync();
+        return second;
+    }
+
+    [Fact]
+    public async Task Bulk_sync_stops_if_the_link_changes_before_commit_and_preserves_previous_completion()
+    {
+        await using var db = await TestDatabase.CreateAsync();
+        await PrepareBulkAsync(db);
+        db.Game.SteamCompletionPreserved = true;
+        await db.Context.SaveChangesAsync();
+        var options = new DbContextOptionsBuilder<GamesDbContext>().UseSqlite(db.Context.Database.GetDbConnection()).Options;
+        var api = new CallbackApi(SteamAchievementFixtures.Snapshot([1], [1], 0), async () =>
+        {
+            await using var otherRequest = new GamesDbContext(options);
+            (await otherRequest.Users.SingleAsync()).SteamId = "76561198000000009";
+            await otherRequest.SaveChangesAsync();
+        });
+        var service = new SteamSyncService(db.Context, api, null!, NullLogger<SteamSyncService>.Instance, new(db.Context, api));
+        var result = await service.SyncAllUserGamesAsync(db.Game.UserId);
+        Assert.False(result.Success);
+        Assert.Equal("steamAccountChanged", result.Error);
+        Assert.Equal(0, result.ProcessedGames);
+        Assert.Empty(await db.Context.SteamAchievements.ToListAsync());
+        Assert.True((await db.Context.Games.AsNoTracking().SingleAsync(game => game.Id == db.Game.Id)).SteamCompletionPreserved);
+    }
+
     private class SnapshotApi(SteamAchievementSnapshot snapshot) : ISteamApiService
     {
-        public Task<SteamAchievementSnapshot> GetAchievementSnapshotAsync(string steamId, int appId) => Task.FromResult(snapshot);
+        public virtual Task<SteamAchievementSnapshot> GetAchievementSnapshotAsync(string steamId, int appId) => Task.FromResult(snapshot);
         public virtual Task<List<SteamOwnedGameDto>> GetOwnedGamesAsync(string steamId) => Task.FromResult(new List<SteamOwnedGameDto>());
         public Task<SteamPlayerAchievementsResult> GetPlayerAchievementsAsync(string steamId, int appId) => throw new NotSupportedException();
         public Task<SteamGameSchemaDto?> GetGameSchemaAsync(int appId) => throw new NotSupportedException();
         public Task<SteamPlayerSummaryDto?> GetPlayerSummaryAsync(string steamId) => Task.FromResult<SteamPlayerSummaryDto?>(null);
+    }
+
+    private sealed class CallbackApi(SteamAchievementSnapshot snapshot, Func<Task> onSnapshot) : SnapshotApi(snapshot)
+    {
+        public override async Task<SteamAchievementSnapshot> GetAchievementSnapshotAsync(string steamId, int appId)
+        {
+            await onSnapshot();
+            return await base.GetAchievementSnapshotAsync(steamId, appId);
+        }
     }
 
     private sealed class BlockingApi(SteamAchievementSnapshot snapshot) : SnapshotApi(snapshot)

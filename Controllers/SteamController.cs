@@ -13,15 +13,18 @@ public class SteamController : BaseApiController
     private readonly ISteamProfileService _profile;
     private readonly ISteamSyncService _steamSync;
     private readonly ISteamStoreService _steamStore;
+    private readonly ISteamSyncJobService _syncJobs;
 
     public SteamController(
         ISteamProfileService profile,
         ISteamSyncService steamSync,
-        ISteamStoreService steamStore)
+        ISteamStoreService steamStore,
+        ISteamSyncJobService syncJobs)
     {
         _profile = profile;
         _steamSync = steamSync;
         _steamStore = steamStore;
+        _syncJobs = syncJobs;
     }
 
     /// <summary>Returns the Steam profile data linked to the current user.</summary>
@@ -43,6 +46,7 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
+        if (_syncJobs.IsActive(userId.Value)) return Conflict(new { code = "steamSyncBusy", message = "A Steam sync is already running" });
         await _profile.UnlinkSteamAsync(userId.Value);
         return NoContent();
     }
@@ -54,6 +58,7 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
+        if (_syncJobs.IsActive(userId.Value)) return Conflict(new { code = "steamSyncBusy", message = "A Steam sync is already running" });
         var result = await _profile.LinkSteamManuallyAsync(userId.Value, request.SteamId);
         if (result == null)
             return BadRequest(new { message = "SteamID must be a 17-digit SteamID64 or a Steam profile URL containing it." });
@@ -67,6 +72,7 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
+        if (_syncJobs.IsActive(userId.Value)) return Conflict(new { code = "steamSyncBusy", message = "A Steam sync is already running" });
         var (success, error, result) = await _profile.LinkGameAsync(userId.Value, request);
         if (!success) return NotFound(new { message = error });
         return Ok(result);
@@ -94,6 +100,7 @@ public class SteamController : BaseApiController
         if ((request.AppIds == null || request.AppIds.Count == 0) && (request.Games == null || request.Games.Count == 0))
             return BadRequest(new { message = "No AppIDs provided" });
 
+        if (_syncJobs.IsActive(userId.Value)) return Conflict(new { code = "steamSyncBusy", message = "A Steam sync is already running" });
         var result = await _steamSync.ImportLibraryAsync(userId.Value, request);
         return Ok(result);
     }
@@ -105,6 +112,7 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
+        if (_syncJobs.IsActive(userId.Value)) return Conflict(new { code = "steamSyncBusy", message = "A Steam sync is already running" });
         var result = await _steamSync.SyncAllUserGamesAsync(userId.Value);
         if (!result.Success) return BadRequest(new { message = result.Error });
         return Ok(result);
@@ -117,9 +125,38 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
+        if (_syncJobs.IsActive(userId.Value)) return Conflict(new { code = "steamSyncBusy", message = "A Steam sync is already running" });
         var result = await _steamSync.SyncGameAsync(userId.Value, gameId);
         if (!result.Success) return BadRequest(new { message = result.Error });
         return Ok(result);
+    }
+
+    /// <summary>Starts/deduplicates an on-demand sync without waiting for Steam.</summary>
+    [HttpPost("sync/jobs")]
+    public async Task<IActionResult> StartSyncJob(CancellationToken cancellationToken)
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        var result = await _syncJobs.StartAsync(CurrentUserId.Value, cancellationToken);
+        if (result.Error != null)
+            return StatusCode(result.Error == "queueFull" ? 429 : result.Error == "serviceStopping" ? 503 : 400, new { code = result.Error, message = result.Error });
+        return AcceptedAtAction(nameof(GetSyncJob), new { jobId = result.Job!.Id }, result.Job);
+    }
+
+    [HttpGet("sync/jobs/current")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public IActionResult GetCurrentSyncJob()
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        return Ok(new SteamSyncCurrentJobResponse(_syncJobs.GetCurrent(CurrentUserId.Value)));
+    }
+
+    [HttpGet("sync/jobs/{jobId:guid}")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public IActionResult GetSyncJob(Guid jobId)
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        var job = _syncJobs.GetById(CurrentUserId.Value, jobId);
+        return job == null ? NotFound() : Ok(job);
     }
 
     /// <summary>Returns stored achievements for a GDB game.</summary>
@@ -239,6 +276,7 @@ public class SteamController : BaseApiController
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
 
+        if (_syncJobs.IsActive(userId.Value)) return Conflict(new { code = "steamSyncBusy", message = "A Steam sync is already running" });
         var result = await _steamSync.AddStoreGameAsync(userId.Value, request.AppId, request.LogoUrl, request.HeroUrl, request.CoverUrl);
         return Ok(result);
     }

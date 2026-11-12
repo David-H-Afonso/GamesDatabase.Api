@@ -115,11 +115,81 @@ Metadata text remains English, matching the previous integration.
   endpoints. Preserve already-known set metadata and report `setsUnavailable`.
 - Sync remains on demand. The Steam tab can upgrade an unsynced legacy cache once
   when opened; Focus keeps its existing once-per-mount visible-games behavior.
-  No recurring sync task, timer or worker is added.
+  No recurring sync is scheduled. Bulk jobs are enqueued only by an explicit POST;
+  the worker waits idle otherwise and never restores/retries jobs at startup.
 
 The UI groups by set, distinguishes base/DLC, filters/searches without leaking
 spoilers, provides explicit spoiler reveal, opt-in global rarity and partial
 progress. Labels are available in English and Spanish.
+
+## Bulk sync operations (504 timeout fix)
+
+Interactive clients must not hold one HTTP request open while checking a large
+library. The new user-scoped contract is:
+
+| Request | Response |
+| --- | --- |
+| `POST /api/steam/sync/jobs` | HTTP 202 + job snapshot and `Location` immediately, without waiting for Steam. Repeated starts while queued/running return the same job. |
+| `GET /api/steam/sync/jobs/current` | `{ "job": ... }`, or an empty envelope when no job is known. Read-only; never starts work. |
+| `GET /api/steam/sync/jobs/{id}` | Latest owned snapshot, or HTTP 404 for missing/foreign IDs. |
+
+All routes require authentication. Status responses use `Cache-Control: no-store`.
+Starting without a linked account is HTTP 400; a full queue is HTTP 429; shutdown
+is HTTP 503. Competing single-game/legacy bulk sync, import/store-add, link changes
+and disconnect return HTTP 409 while the same user has an active bulk job, instead
+of waiting behind it until a proxy 504 or changing its account mid-operation.
+
+A snapshot contains `id`, `state` (`queued`, `running`, `completed`, `failed`,
+`interrupted`), UTC timestamps, `totalGames`, `processedGames`, `gamesUpdated`,
+`achievementsUpdated`, `failedGames`, `warningCount`, optional `currentGameName`,
+safe `error` code, and final `result`. `processedGames` includes attempted/skipped
+games, while updated counters advance only after commit. A completed operation can
+still have warnings; clients must not present that as an error-free update.
+
+### Execution and preservation
+
+- One FIFO worker, bounded to 16 queued jobs, plus the active job. This avoids
+  flooding Steam. Only the latest status is retained per user; a failed/finished
+  operation can be replaced only by another explicit start.
+- The worker creates its own DI scope; its lifetime is not the POST's cancellation
+  token or the browser connection. Closing the page does not cancel accepted work.
+- Playtime is fetched once, games are re-read individually, and each game's changes
+  are committed before reporting its progress. A late exception, process restart
+  or duplicate AppID cannot roll back all earlier successful games.
+- A failed game's pending EF changes are discarded before continuing; existing
+  persisted completion is not reset. A Steam-account change stops the operation
+  before committing a mismatched account snapshot.
+- No entity/schema changes or additional migration are needed for this correction.
+  The existing completion-preservation migration and criteria are unchanged.
+
+### Browser behavior
+
+`useSteamSyncJob` reads the current job when the Steam screen opens, without
+starting a new one. It polls only queued/running operations, stops on completion
+or unmount/account change, and bounds transient read retries to three. Every short
+request has a 15-second deadline. Fetch deadlines abort the request, and timers/
+abort listeners are cleaned up after completion to avoid accumulating resources.
+
+An ambiguous start failure is reconciled with **GET current**, never an automatic
+second POST. A failed status read retains the last counters and offers **Recover
+status**. All provider/proxy errors are mapped to safe EN/ES messages rather than
+displaying HTML, raw URLs or exception details. Committed progress invalidates the
+game-list cache so returning to Home loads the new completion indicators.
+
+### Lifetime and deployment limits
+
+The queue/status are in memory for the existing single-API-instance deployment.
+Returning to a page recovers status while that API process is alive. An API restart
+interrupts work and loses the operation status, **not committed game progress**.
+The UI reports the lost operation; the user may explicitly start a new library
+pass. There is no unattended resume, recurring schedule or automatic work retry.
+
+Deploy the API and frontend together (API first). The old `POST /api/steam/sync`
+remains synchronous for legacy clients and can still exceed proxy timeouts; the
+updated UI no longer calls it. There is no need to raise production proxy timeouts
+to support the new job flow. Wait for old in-flight syncs and take the agreed
+consistent backup before replacing production binaries; no production deployment
+is performed by preparing these source changes.
 
 ## Backups, rollout and rollback
 
@@ -168,6 +238,11 @@ HTTP-200 API errors, legacy fallback, CSV round trips, UI labels, spoilers,
 keyboard operation and late/cancelled tab requests. None require a real database,
 Steam key or user credentials.
 
+Job tests additionally cover HTTP 202 before long work finishes, deduplication,
+owner isolation, bounded FIFO queue, safe fatal failures, interruption, explicit
+retry, per-game commit/cancellation, repeated AppIDs, account changes, browser
+recovery, retry limits, timeout cleanup, and absence of idle/background sync starts.
+
 ## Resumen en español
 
 - **Completados** reúne completados manuales, anteriores, por conjuntos y al 100%.
@@ -183,3 +258,9 @@ Steam key or user credentials.
   anteriores. No copiar solo el archivo principal de una base WAL en uso.
 - Tras actualizar ambos repos, sincronizar Steam una vez desde la interfaz.
   No se crea ninguna sincronización programada.
+- **Sincronizar todo** inicia ahora una operación con respuesta inmediata y
+  progreso visible. Cada juego se guarda por separado; cerrar la pantalla no
+  cancela lo solicitado. Al volver se recupera el estado sin duplicar la operación.
+- Si la API se reinicia, el estado temporal de la operación se pierde, pero los
+  juegos ya guardados se conservan. Se puede iniciar otra pasada explícitamente;
+  no se reanuda ni se repite trabajo de forma desatendida.

@@ -303,6 +303,10 @@ public class SteamSyncResult
     public string? Error { get; set; }
     public int GamesUpdated { get; set; }
     public int AchievementsUpdated { get; set; }
+    public int TotalGames { get; set; }
+    public int ProcessedGames { get; set; }
+    public int FailedGames { get; set; }
+    public int WarningCount { get; set; }
     public bool AchievementsSyncSucceeded { get; set; } = true;
     public List<string> Warnings { get; set; } = new();
 }

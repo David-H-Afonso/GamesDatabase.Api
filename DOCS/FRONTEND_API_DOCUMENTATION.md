@@ -12,6 +12,12 @@ Steam progress contract, completion policy, migration safeguards and rollback.
 `allAchievements=true` is the separate strict 100% filter. The existing achievements
 array endpoint remains compatible.
 
+Bulk sync UI now starts `POST /api/steam/sync/jobs` (202) and observes owned job
+status via `GET /api/steam/sync/jobs/current` and `/api/steam/sync/jobs/{id}`.
+Do not use the legacy synchronous `/api/steam/sync` for long interactive library
+updates. Each game is committed independently; see the linked guide for lifecycle,
+partial results, retry bounds and restart semantics. This fix needs no new migration.
+
 ---
 
 ## 📑 Table of Contents

@@ -13,6 +13,7 @@ A RESTful API built with ASP.NET Core for managing personal game collections. Th
 - **Referential Integrity**: Prevents deletion of catalog items in use
 - **Automatic Scoring**: Calculated game scores based on configurable formulas
 - **Steam Achievement Sets**: Base/DLC progress, preserved completion and separate Completed / strict 100% filters. Read the [contract and safe rollout guide](DOCS/STEAM_ACHIEVEMENT_SETS.md) before migrating an existing database.
+- **On-demand Steam Sync Jobs**: Immediate HTTP 202, per-user deduplication, bounded queue, progress snapshots and per-game commits instead of a proxy-sensitive long request. No scheduled sync; interrupted operations preserve saved games.
 
 ## Tech Stack
 

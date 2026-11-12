@@ -56,71 +56,100 @@ public class SteamSyncService : ISteamSyncService
         return await SyncGameInternalAsync(user, game);
     }
 
-    public async Task<SteamSyncResult> SyncAllUserGamesAsync(int userId)
+    public async Task<SteamSyncResult> SyncAllUserGamesAsync(int userId, Action<SteamSyncProgress>? onProgress = null, CancellationToken cancellationToken = default)
     {
-        using var syncGate = await AcquireSyncGateAsync(userId);
-        var user = await _context.Users.FindAsync(userId);
+        using var syncGate = await AcquireSyncGateAsync(userId, cancellationToken);
+        var user = await _context.Users.FindAsync([userId], cancellationToken);
         if (user?.SteamId == null)
             return new SteamSyncResult { Success = false, Error = "User has no Steam account linked" };
-
-        var games = await _context.Games
-            .Where(g => g.UserId == userId && g.SteamAppId != null)
-            .ToListAsync();
-
-        if (games.Count == 0)
-            return new SteamSyncResult { Success = true };
-
-        // Get all owned games once to update playtime
-        var ownedGames = await _steamApi.GetOwnedGamesAsync(user.SteamId);
-        var playtimeMap = ownedGames.ToDictionary(g => g.AppId, g => g);
-
-        int gamesUpdated = 0;
-        int achievementsUpdated = 0;
-        var warnings = new List<string>();
-        var achievementsSyncSucceeded = true;
-
-        foreach (var game in games)
+        var steamId = user.SteamId;
+        var gameIds = await _context.Games.AsNoTracking()
+            .Where(game => game.UserId == userId && game.SteamAppId != null)
+            .OrderBy(game => game.Id).Select(game => game.Id).ToListAsync(cancellationToken);
+        var result = new SteamSyncResult { Success = true, TotalGames = gameIds.Count };
+        void Report(string? name = null) => onProgress?.Invoke(new SteamSyncProgress
         {
-            if (game.SteamAppId == null) continue;
-
-            // Only update critic score if not already set (preserve user modifications)
-            if (game.Critic == null)
-                await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
-
-            // Update playtime from bulk call
-            if (playtimeMap.TryGetValue(game.SteamAppId.Value, out var steamGame))
-            {
-                game.SteamPlaytimeForever = steamGame.PlaytimeForever;
-                game.SteamPlaytime2Weeks = steamGame.Playtime2Weeks;
-                SyncSteamManagedFinishedDate(game, steamGame);
-                gamesUpdated++;
-            }
-
-            await FillMissingSteamImagesAsync(game, playtimeMap.GetValueOrDefault(game.SteamAppId.Value));
-            NormalizeStoredSteamReleaseDate(game);
-
-            // Sync achievements
-            var achResult = await SyncAchievementsForGameAsync(user.SteamId, game);
-            achievementsUpdated += achResult;
-            if (game.SteamAchievementsLastError != null)
-            {
-                warnings.Add($"{game.Id}:{game.SteamAchievementsLastError}");
-                achievementsSyncSucceeded &= game.SteamAchievementsLastError == "setsUnavailable";
-            }
-
-            game.SteamLastSynced = DateTime.UtcNow;
+            TotalGames = result.TotalGames, ProcessedGames = result.ProcessedGames,
+            GamesUpdated = result.GamesUpdated, AchievementsUpdated = result.AchievementsUpdated,
+            FailedGames = result.FailedGames, WarningCount = result.WarningCount, CurrentGameName = name
+        });
+        void Warn(int gameId, string code)
+        {
+            result.WarningCount++;
+            if (result.Warnings.Count < 50) result.Warnings.Add($"{gameId}:{code}");
         }
+        Report();
+        if (gameIds.Count == 0) return result;
 
-        await _context.SaveChangesAsync();
-
-        return new SteamSyncResult
+        // Fetch playtime once; do not retain 1000+ tracked games until one final commit.
+        var ownedGames = await _steamApi.GetOwnedGamesAsync(steamId);
+        var playtimeMap = ownedGames.GroupBy(game => game.AppId).ToDictionary(group => group.Key, group => group.First());
+        _context.ChangeTracker.Clear();
+        foreach (var gameId in gameIds)
         {
-            Success = true,
-            GamesUpdated = gamesUpdated,
-            AchievementsUpdated = achievementsUpdated,
-            AchievementsSyncSucceeded = achievementsSyncSucceeded,
-            Warnings = warnings
-        };
+            cancellationToken.ThrowIfCancellationRequested();
+            var game = await _context.Games.FirstOrDefaultAsync(game => game.Id == gameId && game.UserId == userId, cancellationToken);
+            if (game?.SteamAppId == null)
+            {
+                result.ProcessedGames++;
+                _context.ChangeTracker.Clear();
+                Report();
+                continue;
+            }
+            Report(game.Name);
+            try
+            {
+                if (game.Critic == null) await UpdateSteamCriticScoreAsync(game, game.SteamAppId.Value);
+                var hasPlaytime = playtimeMap.TryGetValue(game.SteamAppId.Value, out var steamGame);
+                if (steamGame != null)
+                {
+                    game.SteamPlaytimeForever = steamGame.PlaytimeForever;
+                    game.SteamPlaytime2Weeks = steamGame.Playtime2Weeks;
+                    SyncSteamManagedFinishedDate(game, steamGame);
+                }
+                await FillMissingSteamImagesAsync(game, steamGame);
+                NormalizeStoredSteamReleaseDate(game);
+                var achievementCount = await SyncAchievementsForGameAsync(steamId, game);
+                cancellationToken.ThrowIfCancellationRequested();
+                // A link changed during a long sync must not receive the old account's data.
+                var currentLink = await _context.Games.AsNoTracking().Where(current => current.Id == gameId && current.UserId == userId)
+                    .Select(current => new { current.SteamAppId, SteamId = current.User.SteamId }).FirstOrDefaultAsync(cancellationToken);
+                if (currentLink == null || currentLink.SteamAppId != game.SteamAppId)
+                    throw new InvalidOperationException("Steam game link changed before commit");
+                if (currentLink.SteamId != steamId)
+                {
+                    _context.ChangeTracker.Clear();
+                    result.Success = false;
+                    result.Error = "steamAccountChanged";
+                    return result;
+                }
+                game.SteamLastSynced = DateTime.UtcNow;
+                await _context.SaveChangesAsync(cancellationToken);
+                // Report committed work, never merely fetched/in-memory changes.
+                if (hasPlaytime) result.GamesUpdated++;
+                result.AchievementsUpdated += achievementCount;
+                if (game.SteamAchievementsLastError != null)
+                {
+                    Warn(game.Id, game.SteamAchievementsLastError);
+                    if (game.SteamAchievementsLastError != "setsUnavailable")
+                    {
+                        result.FailedGames++;
+                        result.AchievementsSyncSucceeded = false;
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                result.FailedGames++;
+                result.AchievementsSyncSucceeded = false;
+                Warn(gameId, "gameSyncFailed");
+                _logger.LogWarning("Steam sync could not commit game {GameId} ({FailureType}); previous committed games are retained", gameId, ex.GetType().Name);
+            }
+            finally { _context.ChangeTracker.Clear(); }
+            result.ProcessedGames++;
+            Report();
+        }
+        return result;
     }
 
     public async Task<SteamImportResult> ImportLibraryAsync(int userId, SteamImportRequest request)
@@ -551,10 +580,10 @@ public class SteamSyncService : ISteamSyncService
         return (null, null);
     }
 
-    private static async Task<IDisposable> AcquireSyncGateAsync(int userId)
+    private static async Task<IDisposable> AcquireSyncGateAsync(int userId, CancellationToken cancellationToken = default)
     {
         var gate = _syncGates.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync();
+        await gate.WaitAsync(cancellationToken);
         return new SyncGateLease(gate);
     }
 
