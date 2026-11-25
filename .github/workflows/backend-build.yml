@@ -1,40 +1,48 @@
-name: Backend Build
+name: Backend Validation
 
 on:
   pull_request:
-    branches:
-      - main
-    paths:
-      - 'GamesDatabase.Api/**'
-      - '.github/workflows/backend-build.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'GamesDatabase.Api/**'
-      - '.github/workflows/backend-build.yml'
+    branches: [main]
+  workflow_call:
+    outputs:
+      version:
+        value: ${{ jobs.build.outputs.version }}
+      already_published:
+        value: ${{ jobs.build.outputs.already_published }}
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      already_published: ${{ steps.version.outputs.already_published }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
-        
-    - name: Restore dependencies
-      working-directory: ./GamesDatabase.Api
-      run: dotnet restore
-      
-    - name: Build
-      working-directory: ./GamesDatabase.Api
-      run: dotnet build --configuration Release --no-restore
-      
-    - name: Test
-      working-directory: ./GamesDatabase.Api
-      run: dotnet test --no-build --verbosity normal --configuration Release
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Test portable version rules
+        run: node --test scripts/versioning/core.test.mjs
+      - name: Validate every outgoing commit version
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/versioning/cli.mjs check-range --from "$BASE_SHA" --to "$HEAD_SHA"
+      - name: Restore
+        run: dotnet restore GamesDatabase.Api.sln
+      - name: Build
+        run: dotnet build GamesDatabase.Api.sln --configuration Release --no-restore
+      - name: Test with isolated test data
+        run: dotnet test tests/GamesDatabase.Api.Tests/GamesDatabase.Api.Tests.csproj --configuration Release --no-build
+      - name: Committed artifact version
+        id: version
+        run: node scripts/versioning/cli.mjs release-info | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{const v=JSON.parse(s);console.log('version='+v.version);console.log('already_published='+v.alreadyPublished)})" >> "$GITHUB_OUTPUT"

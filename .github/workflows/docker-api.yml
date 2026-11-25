@@ -2,16 +2,24 @@ name: Build & Push API Docker Image
 
 on:
   push:
-    branches: [main, master]
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: api-release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: gamesdatabase-api
 
 jobs:
+  quality:
+    uses: ./.github/workflows/backend-build.yml
+
   build-and-push:
+    needs: quality
+    if: github.ref == 'refs/heads/main' && needs.quality.outputs.already_published != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -20,6 +28,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -42,6 +52,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ needs.quality.outputs.version }}
             type=sha,prefix={{branch}}-
             type=sha
 
@@ -62,3 +73,23 @@ jobs:
 
       - name: Image digest
         run: echo ${{ steps.build.outputs.digest }}
+
+  release:
+    needs: [quality, build-and-push]
+    if: always() && github.ref == 'refs/heads/main' && needs.quality.result == 'success' && (needs.build-and-push.result == 'success' || (needs.build-and-push.result == 'skipped' && needs.quality.outputs.already_published == 'true'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Publish the tested HEAD version without a second commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_PUBLICATION_ALLOWED: 'true'
+        run: node scripts/versioning/release.mjs --publish

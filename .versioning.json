@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "productName": "Games Database API",
+  "baselineCommit": "a7ca234a8e4b07f8fd9521b4fe42919fc269e94f",
+  "tagPrefix": "",
+  "allowedTypes": ["feat", "fix", "refactor", "test", "docs", "chore", "build", "ci"],
+  "releaseBranches": ["main"],
+  "files": [
+    { "path": "GamesDatabase.Api.csproj", "format": "xml", "tags": { "Version": "semver", "AssemblyVersion": "assembly", "FileVersion": "assembly" } }
+  ]
+}
