@@ -1,8 +1,29 @@
-# 🎮 Games Database API - Frontend Integration Guide
+# Games Database API — Frontend integration
 
-**Version**: 2.0.0 (Multi-User Support)  
-**Date**: October 3, 2025  
+**Contract version**:3.0 (additive to the multi-user API)
+
+**Updated**: November 26, 2026
+
 **Base URL**: `https://localhost:7245` (Development)
+
+### Collection experience
+
+The API targets .NET10 LTS, Microsoft/EF10.0.15 and SkiaSharp4.157.0.
+See [runtime/image compatibility](RUNTIME_NET10.md) for GIF/cache/limits.
+
+The additive Home, Unicode search, guided playlist preview, statistics,
+personal GOTY, developer, backup and migration contracts are documented in
+[Collection experience](COLLECTION_EXPERIENCE.md). The older examples below are
+historical where explicitly marked. Current web APIs require a bearer session;
+an `X-User-Id` header is **not** an authentication bypass. New onboarding, daily/
+random discovery and signed metadata review contracts are in
+[Guided library](GUIDED_LIBRARY.md).
+
+Current3.0 also adds exact displayed-ID random scope, UTC view-use timestamps,
+positive-manual replacement/addition with zero returning to Steam, and optional
+retry-safe creation UUIDs. See the linked contracts; older manual-zero-override
+descriptions are superseded. Nullable GET properties may be omitted by the normal
+`WhenWritingNull` serialization policy; omitted manual time is automatic too.
 
 ### November 2026: Steam achievement sets
 
@@ -23,6 +44,41 @@ missing player progress, unreleased apps and confirmed empty schemas are not
 failures. Job snapshots include bounded per-game `issues` and full `reasonCounts`.
 The progress route exposes informational `notice` separately from `lastError`,
 preserving cached progress when no current user snapshot is available.
+
+### November 2026: draft artwork candidates
+
+`GET /api/steam/app/{appId}/artwork` requires the normal authenticated web bearer
+session. `appId` is a positive 32-bit integer. This explicit editor read returns:
+
+```json
+{
+  "logoUrl": "https://shared.akamai.steamstatic.com/community_assets/images/apps/100/resolved-hash.jpg",
+  "heroUrl": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/100/resolved-content-hash/header.jpg",
+  "coverUrl": null
+}
+```
+
+URLs above illustrate the shape, not URLs to construct. Use the provider-returned
+URLs verbatim, including modern content hashes/query strings. Each role is nullable;
+a missing Cover is never substituted for Hero/Logo. Only HTTP(S), non-credentialed
+candidates are returned. Statuses: 200 for at least one candidate, 400 with
+`code: "invalidSteamAppId"` for a non-positive ID, 404 with
+`code: "steamArtworkUnavailable"` when none is usable, and 401 without a web session.
+Responses are non-cacheable (`Cache-Control: no-store`).
+
+`SteamArtworkService` reuses public asset/icon resolution; missing Hero can fall
+back to fresh appdetails metadata without reading/writing the persistent app cache.
+Request cancellation reaches those HTTP calls. This endpoint does **not** update a
+game, delete stored images, query/sync a player's data, alter dates/time/completion,
+or require a schema migration.
+
+The Front validates a candidate image before replacing the requested draft role
+and shows its live preview. Requests are single-flight; Logo permits at most three
+attempts and Hero/Cover one. Closing/changing App ID cancels and ignores late results.
+Only the ordinary owned `PUT /api/games/{id}` on explicit Save persists dirty fields.
+An unchanged saved App ID leaves Steam cache intact; a different saved ID uses the
+existing incompatible-cache invalidation. Cancel and failed lookups do not persist
+the draft. The API test suite covers this contract and cache policy.
 
 ---
 
@@ -45,7 +101,7 @@ The API now implements **multi-user support** with **JWT-based authentication**.
 
 ### Key Changes:
 
-- ✅ JWT authentication required (or X-User-Id header for backward compatibility)
+- ✅ JWT authentication required; user IDs in headers do not authenticate a caller
 - ✅ Per-user data isolation (all games, platforms, etc. are scoped by user)
 - ✅ Role-based access control (Admin vs Standard users)
 - ✅ Default Admin user created automatically
@@ -71,12 +127,7 @@ fetch("/api/games", {
   },
 });
 
-// ✅ NEW - Header authentication (temporary fallback)
-fetch("/api/games", {
-  headers: {
-    "X-User-Id": "1",
-  },
-});
+// X-User-Id alone is not supported authentication. Use a valid bearer session.
 ```
 
 ### 2. Data Scoping
