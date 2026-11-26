@@ -6,10 +6,11 @@ using GamesDatabase.Api.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using GamesDatabase.Api.Application.Services.Steam;
+using GamesDatabase.Api.Common;
 
 namespace GamesDatabase.Api.Application.Services;
 
-public sealed class PlaylistService(GamesDbContext context, IGameService gameService) : IPlaylistService
+public sealed class PlaylistService(GamesDbContext context, IGameService gameService, TimeProvider? timeProvider = null) : IPlaylistService
 {
     public async Task<IEnumerable<PlaylistGroupDto>> GetGroupsAsync(int userId) => await context.Set<PlaylistGroup>()
         .Where(group => group.UserId == userId).OrderBy(group => group.SortOrder).ThenBy(group => group.Id)
@@ -95,6 +96,7 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
 
     public async Task<CatalogServiceResult<PlaylistDto>> CreatePlaylistAsync(PlaylistCreateDto dto, int userId)
     {
+        if (dto.IsAutomatic && ValidateRules(dto.Rules ?? new()) is { } ruleError) return CatalogServiceResult<PlaylistDto>.BadRequest(ruleError);
         var name = dto.Name.Trim();
         if (dto.MaxLength is <= 0) return CatalogServiceResult<PlaylistDto>.BadRequest("MaxLength debe ser mayor que cero o null.");
         if (name.Length == 0) return CatalogServiceResult<PlaylistDto>.BadRequest("El nombre de la playlist es obligatorio.");
@@ -122,6 +124,7 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
 
     public async Task<CatalogServiceResult<PlaylistDto>> UpdatePlaylistAsync(int id, PlaylistUpdateDto dto, int userId)
     {
+        if (dto.Rules is not null && ValidateRules(dto.Rules) is { } ruleError) return CatalogServiceResult<PlaylistDto>.BadRequest(ruleError);
         var playlist = await context.Playlists.FirstOrDefaultAsync(item => item.Id == id && item.UserId == userId);
         if (playlist is null) return CatalogServiceResult<PlaylistDto>.NotFoundResult("Playlist no encontrada.");
 
@@ -197,10 +200,13 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
             var proposedStatus = dto.StatusId ?? game.StatusId;
             if (rules.StatusIds.Count > 0 && !rules.StatusIds.Contains(proposedStatus))
                 return CatalogServiceResult<PlaylistDto>.BadRequest("Selecciona un estado admitido por las reglas de esta playlist.");
+            if (rules.PlayingNow && !await context.GameStatuses.AnyAsync(status => status.Id == proposedStatus && status.UserId == userId && status.StatusType == SpecialStatusType.Playing))
+                return CatalogServiceResult<PlaylistDto>.BadRequest("Selecciona el estado asignado a Jugando ahora.");
             if (dto.StatusId.HasValue && !await context.GameStatuses.AnyAsync(status => status.Id == proposedStatus && status.UserId == userId && status.IsActive))
                 return CatalogServiceResult<PlaylistDto>.BadRequest("El estado no está disponible para este usuario.");
             var candidateRules = ReadRules(playlist);
             candidateRules.StatusIds = [];
+            candidateRules.PlayingNow = false;
             candidateRules.ExcludedGameIds = [];
             if (!await AutomaticQuery(candidateRules, userId).AnyAsync(candidate => candidate.Id == game.Id))
                 return CatalogServiceResult<PlaylistDto>.BadRequest("El juego no cumple las otras reglas de la playlist. Cambiar el estado no basta.");
@@ -390,7 +396,47 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
         return CatalogServiceResult<PlaylistDto>.Ok((await GetPlaylistByIdAsync(playlist.Id, userId))!);
     }
 
-    private IQueryable<Playlist> PlaylistQuery() => context.Playlists
+    public async Task<CatalogServiceResult<PlaylistPreviewDto>> PreviewAsync(PlaylistPreviewRequest request, int userId)
+    {
+        if (request.Rules is null || request.PreviewCount is < 1 or > 24 || request.MaxLength is <= 0) return CatalogServiceResult<PlaylistPreviewDto>.BadRequest("Invalid preview limits.");
+        if (ValidateRules(request.Rules) is { } error) return CatalogServiceResult<PlaylistPreviewDto>.BadRequest(error);
+        var matches = await AutomaticQuery(request.Rules, userId).CountAsync();
+        var transient = new Playlist { UserId = userId, IsAutomatic = true, MaxLength = request.MaxLength, RulesJson = JsonSerializer.Serialize(request.Rules) };
+        await HydrateAutomaticItemsAsync(transient, userId);
+        var games = transient.Items.OrderBy(item => item.Position).Take(request.PreviewCount).Select(item => item.Game.ToDto()).ToList();
+        await SteamAchievementProgress.FillGamesAsync(context, games, userId);
+        return CatalogServiceResult<PlaylistPreviewDto>.Ok(new() { TotalMatches = matches, ReturnedCount = transient.Items.Count, Games = games });
+    }
+
+    public static string? ValidateRules(PlaylistRulesDto rules)
+    {
+        if (NameSearchMatching.Validate(rules.NameSearch) is { } nameError) return nameError;
+        if (rules.UpcomingReleases && ReleaseDateMatching.FindTimeZone(rules.ReleaseTimeZone) is null) return "Upcoming releases require a supported releaseTimeZone.";
+        if (rules.StatusIds is null || rules.PlatformIds is null || rules.PlayedStatusIds is null || rules.OrderedGameIds is null || rules.StatusPriorityIds is null || rules.ExcludedGameIds is null) return "Rule ID lists cannot be null.";
+        if (rules.StatusIds.Concat(rules.PlatformIds).Concat(rules.PlayedStatusIds).Concat(rules.OrderedGameIds).Concat(rules.StatusPriorityIds).Concat(rules.ExcludedGameIds).Any(id => id <= 0)) return "Rule IDs must be positive.";
+        if (rules.Limit is <= 0 || rules.Search?.Length > 250 || string.IsNullOrWhiteSpace(rules.SortBy)) return "Invalid rule search, sort or limit.";
+        if (rules.MinGrade is < 0 or > 100 || rules.MaxGrade is < 0 or > 100 || rules.MinCritic is < 0 or > 100 || rules.MaxCritic is < 0 or > 100 || rules.MinScore is < 0 or > 10 || rules.MaxScore is < 0 or > 10) return "Rule grades or scores are out of range.";
+        if (rules.MinGrade > rules.MaxGrade || rules.MinCritic > rules.MaxCritic || rules.MinScore > rules.MaxScore) return "A minimum cannot exceed its maximum.";
+        if (JsonSerializer.Serialize(rules).Length > 64_000) return "Rule configuration is too large.";
+        return null;
+    }
+
+    public async Task<CatalogServiceResult<PagedResult<GameDto>>> GetRulesPageAsync(PlaylistRulesDto rules, int? maxLength, int userId, int page, int pageSize, string? search)
+    {
+        if (ValidateRules(rules) is { } error) return CatalogServiceResult<PagedResult<GameDto>>.BadRequest(error);
+        var transient = new Playlist { UserId = userId, IsAutomatic = true, MaxLength = maxLength, RulesJson = JsonSerializer.Serialize(rules) };
+        await HydrateAutomaticItemsAsync(transient, userId);
+        var phrase = new NameSearchDto { IncludeTerms = string.IsNullOrWhiteSpace(search) ? [] : [search] };
+        var candidates = transient.Items.OrderBy(item => item.Position).Where(item => NameSearchMatching.Matches(item.Game.Name, phrase)).ToList();
+        page = Math.Clamp(page, 1, 1_000_000); pageSize = Math.Clamp(pageSize, 1, 200);
+        var games = candidates.Skip((page - 1) * pageSize).Take(pageSize).Select(item => item.Game.ToDto()).ToList();
+        await SteamAchievementProgress.FillGamesAsync(context, games, userId);
+        return CatalogServiceResult<PagedResult<GameDto>>.Ok(new() { Data = games, TotalCount = candidates.Count, Page = page, PageSize = pageSize });
+    }
+
+    // Automatic members are virtual read models, never tracked entity graphs.
+    // A later save in the same scope must not attach or persist these members.
+    private IQueryable<Playlist> PlaylistQuery() => context.Playlists.AsNoTracking()
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.Status)
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.Platform)
         .Include(playlist => playlist.Items).ThenInclude(item => item.Game).ThenInclude(game => game.PlayedStatus)
@@ -444,8 +490,14 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
             .Include(game => game.GamePlayWiths).ThenInclude(mapping => mapping.PlayWith)
             .Where(game => game.UserId == userId);
         if (rules.ExcludedGameIds.Count > 0) query = query.Where(game => !rules.ExcludedGameIds.Contains(game.Id));
-        if (!string.IsNullOrWhiteSpace(rules.Search)) query = query.Where(game => game.Name.Contains(rules.Search));
+        if (rules.NameSearch is not null)
+        {
+            var json = NameSearchMatching.Serialize(rules.NameSearch);
+            query = query.Where(game => NameSearchMatching.SqlMatch(game.Name, json));
+        }
+        else if (!string.IsNullOrWhiteSpace(rules.Search)) query = query.Where(game => game.Name.Contains(rules.Search));
         if (rules.StatusIds.Count > 0) query = query.Where(game => rules.StatusIds.Contains(game.StatusId));
+        if (rules.PlayingNow) query = query.Where(game => game.Status.StatusType == SpecialStatusType.Playing);
         if (rules.PlatformIds.Count > 0) query = query.Where(game => game.PlatformId.HasValue && rules.PlatformIds.Contains(game.PlatformId.Value));
         if (rules.PlayedStatusIds.Count > 0) query = query.Where(game => game.PlayedStatusId.HasValue && rules.PlayedStatusIds.Contains(game.PlayedStatusId.Value));
         if (rules.Favorite.HasValue) query = query.Where(game => game.Favorite == rules.Favorite.Value);
@@ -457,6 +509,15 @@ public sealed class PlaylistService(GamesDbContext context, IGameService gameSer
         if (rules.MaxScore.HasValue) query = query.Where(game => game.Score <= rules.MaxScore.Value);
         if (rules.ReleasedFromYear.HasValue) query = query.Where(game => game.Released != null && game.Released.StartsWith(rules.ReleasedFromYear.Value.ToString()));
         if (rules.ReleasedToYear.HasValue) query = query.Where(game => game.Released != null && string.Compare(game.Released, $"{rules.ReleasedToYear.Value + 1}-01-01", StringComparison.Ordinal) < 0);
+        if (rules.UpcomingReleases)
+        {
+            // Capture one local calendar day for this query. The saved rule never
+            // freezes a date, and filtering precedes ordering, capacity and paging.
+            var zone = ReleaseDateMatching.FindTimeZone(rules.ReleaseTimeZone);
+            if (zone is null) return query.Where(game => false);
+            var today = ReleaseDateMatching.Today(zone, (timeProvider ?? TimeProvider.System).GetUtcNow());
+            query = query.Where(game => ReleaseDateMatching.OnOrAfter(game.Released, today));
+        }
         if (rules.HasSteam.HasValue) query = rules.HasSteam.Value ? query.Where(game => game.SteamAppId.HasValue) : query.Where(game => !game.SteamAppId.HasValue);
         return SteamAchievementProgress.ApplyFilters(query, context, userId, rules.FullCompletion, rules.AllAchievements);
     }

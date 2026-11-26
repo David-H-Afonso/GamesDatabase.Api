@@ -37,6 +37,9 @@ public class DatabaseStartupHelper
         EnsureColumn(conn, logger, "game", "steam_achievement_schema_version", "INTEGER NULL");
         EnsureColumn(conn, logger, "game", "steam_achievement_schema_hash", "INTEGER NULL");
         EnsureColumn(conn, logger, "game", "IsManuallyCompleted", "INTEGER NOT NULL DEFAULT 0");
+        var needsHeroBackfill = !ColumnExists(conn, "game", "hero");
+        var needsCacheHeroBackfill = !ColumnExists(conn, "game_export_cache", "hero_url");
+        var needsCacheDownloadedBackfill = !ColumnExists(conn, "game_export_cache", "hero_downloaded");
         EnsureColumn(conn, logger, "game", "hero", "TEXT NULL");
         EnsureColumn(conn, logger, "game", "favorite", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, logger, "game_export_cache", "hero_url", "TEXT NULL");
@@ -44,15 +47,19 @@ public class DatabaseStartupHelper
         EnsureColumn(conn, logger, "playlist", "is_automatic", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(conn, logger, "playlist", "rules_json", "TEXT NULL");
 
-        ExecuteRepairSql(conn, logger,
-            "UPDATE game SET hero = cover WHERE hero IS NULL AND cover IS NOT NULL;",
-            "migrated legacy game.cover values into game.hero when missing");
-        ExecuteRepairSql(conn, logger,
-            "UPDATE game_export_cache SET hero_url = cover_url WHERE hero_url IS NULL AND cover_url IS NOT NULL;",
-            "migrated legacy export-cache cover_url values into hero_url when missing");
-        ExecuteRepairSql(conn, logger,
-            "UPDATE game_export_cache SET hero_downloaded = cover_downloaded WHERE hero_downloaded = 0 AND cover_downloaded = 1;",
-            "migrated legacy export-cache cover_downloaded values into hero_downloaded when missing");
+        // A missing value in the modern schema is intentional, not evidence of legacy horizontal Cover data.
+        if (needsHeroBackfill)
+            ExecuteRepairSql(conn, logger,
+                "UPDATE game SET hero = cover WHERE hero IS NULL AND cover IS NOT NULL;",
+                "migrated legacy game.cover values while adding game.hero");
+        if (needsCacheHeroBackfill)
+            ExecuteRepairSql(conn, logger,
+                "UPDATE game_export_cache SET hero_url = cover_url WHERE hero_url IS NULL AND cover_url IS NOT NULL;",
+                "migrated legacy export-cache values while adding hero_url");
+        if (needsCacheDownloadedBackfill)
+            ExecuteRepairSql(conn, logger,
+                "UPDATE game_export_cache SET hero_downloaded = cover_downloaded WHERE hero_url IS NOT NULL AND hero_url = cover_url AND hero_downloaded = 0 AND cover_downloaded = 1;",
+                "migrated legacy download flags while adding hero_downloaded");
 
         ExecuteRepairSql(conn, logger, """
             CREATE TABLE IF NOT EXISTS "steam_achievement" (
@@ -203,7 +210,8 @@ public class DatabaseStartupHelper
                 Username = "Admin",
                 PasswordHash = null,
                 Role = UserRole.Admin,
-                IsDefault = true
+                IsDefault = true,
+                TutorialEnabled = true
             };
             context.Users.Add(adminUser);
             await context.SaveChangesAsync();
@@ -226,10 +234,10 @@ public class DatabaseStartupHelper
             {
                 new GameStatus { Name = "Pending", Color = "#be9c23", SortOrder = 1, UserId = adminUser.Id },
                 new GameStatus { Name = "Next up", Color = "#793e77", SortOrder = 2, UserId = adminUser.Id },
-                new GameStatus { Name = "DEFAULT_PLAYING", Color = "#61afef", SortOrder = 3, IsDefault = true, StatusType = SpecialStatusType.Playing, UserId = adminUser.Id },
+                new GameStatus { Name = "Playing", Color = "#61afef", SortOrder = 3, IsDefault = true, StatusType = SpecialStatusType.Playing, UserId = adminUser.Id },
                 new GameStatus { Name = "Done", Color = "#3fc20f", SortOrder = 4, UserId = adminUser.Id },
                 new GameStatus { Name = "Abandoned", Color = "#b91d1d", SortOrder = 5, UserId = adminUser.Id },
-                new GameStatus { Name = "DEFAULT_NOT_FULFILLED", Color = "#919191", SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled, UserId = adminUser.Id }
+                new GameStatus { Name = "Not fulfilled", Color = "#919191", SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled, UserId = adminUser.Id }
             };
             context.GameStatuses.AddRange(statuses);
 

@@ -6,8 +6,14 @@ namespace GamesDatabase.Api.Domain.Entities;
 public class Game
 {
     public int Id { get; set; }
+    [JsonIgnore]
+    public Guid? CreationRequestId { get; set; }
+    [JsonIgnore]
+    public string? CreationRequestHash { get; set; }
     public int StatusId { get; set; }
     public string Name { get; set; } = string.Empty;
+    [MaxLength(150)]
+    public string? Developer { get; set; }
 
     [Range(0, 100)]
     public int? Grade { get; set; }
@@ -43,6 +49,9 @@ public class Game
     public string? KeyStoreUrl { get; set; }
 
     public bool Favorite { get; set; } = false;
+    [JsonIgnore]
+    public string? SampleBatchId { get; set; }
+    public string? SampleArtworkKey { get; set; }
 
     // Steam integration
     public int? SteamAppId { get; set; }
@@ -62,8 +71,9 @@ public class Game
     public string? SteamFinishedRejectedValue { get; set; }
     public string? SteamStartedRejectedValue { get; set; }
 
-    // Manual playtime override in minutes. When present, it takes priority over Steam time.
+    // Positive manual adjustment replaces or supplements Steam; zero/null use Steam.
     public int? ManualPlaytimeMinutes { get; set; }
+    public bool ManualPlaytimeIsAdditive { get; set; }
 
     // Manual completion. For non-Steam games this is also the 100% declaration.
     public bool IsManuallyCompleted { get; set; } = false;

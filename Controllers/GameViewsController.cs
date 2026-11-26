@@ -34,6 +34,14 @@ public class GameViewsController : BaseApiController
         return Ok(result);
     }
 
+    [HttpPost("{id:int}/use")]
+    public async Task<IActionResult> RecordUse(int id, CancellationToken cancellationToken)
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        var result = await _gameViewService.RecordUseAsync(id, CurrentUserId.Value, cancellationToken);
+        return result.NotFound ? NotFound(new { code = "viewUnavailable" }) : Ok(result.Data);
+    }
+
     [HttpGet("by-name/{name}")]
     public async Task<ActionResult<GameViewDto>> GetGameViewByName(string name)
     {

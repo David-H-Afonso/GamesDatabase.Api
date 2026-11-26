@@ -331,6 +331,10 @@ public class FullExportModel
 {
     public string Type { get; set; } = "";
     public string Name { get; set; } = "";
+    [Optional]
+    public string? Developer { get; set; }
+    [Optional]
+    public string? CollectionPreferencesJson { get; set; }
     public string Color { get; set; } = "";
     public string? IsActive { get; set; }
     public string? SortOrder { get; set; }
@@ -369,6 +373,8 @@ public class FullExportModel
     public string? SteamLastSynced { get; set; }
     [Name("ManualPlaytimeMinutes")]
     public string? ManualPlaytimeMinutes { get; set; }
+    [Optional, Name("ManualPlaytimeIsAdditive")]
+    public string? ManualPlaytimeIsAdditive { get; set; }
     [Optional]
     public string? IsManuallyCompleted { get; set; }
     [Optional]

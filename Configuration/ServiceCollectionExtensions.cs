@@ -16,7 +16,7 @@ public static class ServiceCollectionExtensions
 {
     public static WebApplicationBuilder LoadEnvironmentFile(this WebApplicationBuilder builder)
     {
-        if (builder.Environment.IsEnvironment("Testing"))
+        if (builder.Environment.IsEnvironment("Testing") || (builder.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("LocalDevelopment:SkipEnvironmentFile")))
         {
             return builder;
         }
@@ -246,33 +246,26 @@ public static class ServiceCollectionExtensions
             c.SwaggerDoc("v1", new()
             {
                 Title = "Games Database API",
-                Version = "v2.0",
-                Description = "API for video game database management with multi-user support"
+                Version = $"v{typeof(Program).Assembly.GetName().Version?.ToString(3)}",
+                Description = "Owned game libraries, playthroughs, Steam integrations and reviewed data workflows"
             });
 
             // Configure JWT authentication in Swagger
-            c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.OpenApiSecurityScheme
             {
                 Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",
                 Name = "Authorization",
-                In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-                Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+                In = Microsoft.OpenApi.ParameterLocation.Header,
+                Type = Microsoft.OpenApi.SecuritySchemeType.Http,
                 Scheme = "bearer",
                 BearerFormat = "JWT"
             });
 
-            c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+            c.AddSecurityRequirement(document => new Microsoft.OpenApi.OpenApiSecurityRequirement
             {
                 {
-                    new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-                    {
-                        Reference = new Microsoft.OpenApi.Models.OpenApiReference
-                        {
-                            Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                            Id = "Bearer"
-                        }
-                    },
-                    Array.Empty<string>()
+                    new Microsoft.OpenApi.OpenApiSecuritySchemeReference("Bearer", document),
+                    []
                 }
             });
         });
@@ -280,7 +273,7 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddGamesDatabaseServices(this IServiceCollection services, IWebHostEnvironment environment)
+    public static IServiceCollection AddGamesDatabaseServices(this IServiceCollection services, IWebHostEnvironment environment, IConfiguration? configuration = null)
     {
         services.AddControllers()
             .AddJsonOptions(options =>
@@ -289,6 +282,7 @@ public static class ServiceCollectionExtensions
                 options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
             });
         services.AddMemoryCache();
+        services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IViewFilterService, ViewFilterService>();
         services.AddScoped<IAuthService, AuthService>();
@@ -296,6 +290,16 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICatalogService, CatalogService>();
         services.AddScoped<IGameViewService, GameViewService>();
         services.AddScoped<IPlaylistService, PlaylistService>();
+        services.AddScoped<ICollectionService, CollectionService>();
+        services.AddScoped<IGameDiscoveryService, GameDiscoveryService>();
+        services.AddScoped<IOnboardingService, OnboardingService>();
+        services.AddScoped<IGameMetadataService, GameMetadataService>();
+        services.AddScoped<IPublicGameMetadataProvider, PublicGameMetadataProvider>();
+        services.AddHttpClient("game-metadata", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GamesDatabase/3.0 (+https://github.com/David-H-Afonso/GamesDatabase.Api)");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = System.Net.DecompressionMethods.All });
         services.AddScoped<IGameImportExportService, GameImportExportService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IHouseholdIntegrationService, HouseholdIntegrationService>();
@@ -307,6 +311,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<ISteamApiService, SteamApiService>();
         services.AddScoped<ISteamStoreService, SteamStoreService>();
+        services.AddScoped<ISteamArtworkService, SteamArtworkService>();
         services.AddScoped<ISteamSyncService, SteamSyncService>();
         services.AddScoped<SteamAchievementSyncService>();
         services.AddSingleton<SteamSyncJobService>();
@@ -317,7 +322,10 @@ public static class ServiceCollectionExtensions
 
         // Scheduled backup background service
         services.AddSingleton<BackupScheduleService>();
-        services.AddHostedService(sp => sp.GetRequiredService<BackupScheduleService>());
+        if (!(environment.IsDevelopment() && configuration?.GetValue<bool>("LocalDevelopment:DisableScheduledBackups") == true))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<BackupScheduleService>());
+        }
 
         // Configure HttpClient for CSV exports (longer timeout)
         services.AddHttpClient("TrustAllCerts")
@@ -386,15 +394,19 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddGamesDatabaseDataProtection(this IServiceCollection services, IConfiguration configuration, bool isDesktopMode)
+    public static IServiceCollection AddGamesDatabaseDataProtection(this IServiceCollection services, IConfiguration configuration, bool isDesktopMode, IWebHostEnvironment? environment = null)
     {
+        if (environment?.IsEnvironment("Testing") == true)
+        {
+            services.AddDataProtection().UseEphemeralDataProtectionProvider();
+            return services;
+        }
         var dataProtectionKeysPath = configuration["DataProtection:KeysPath"];
-        if (isDesktopMode && !string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+        var protection = services.AddDataProtection().SetApplicationName("GamesDatabase");
+        if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
         {
             Directory.CreateDirectory(dataProtectionKeysPath);
-            services.AddDataProtection()
-                .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
-                .SetApplicationName("GamesDatabase");
+            protection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
         }
 
         return services;
@@ -423,6 +435,9 @@ public static class ServiceCollectionExtensions
                 limiterOptions.Window = TimeSpan.FromMinutes(1);
                 limiterOptions.QueueLimit = 0;
             });
+            options.AddPolicy("metadata", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 12, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
         });
 
         return services;
@@ -430,7 +445,7 @@ public static class ServiceCollectionExtensions
 
     private static void OverrideFromEnv(WebApplicationBuilder builder, string configKey, string envVar)
     {
-        builder.Configuration[configKey] = Environment.GetEnvironmentVariable(envVar)
-            ?? builder.Configuration[configKey];
+        var value = Environment.GetEnvironmentVariable(envVar);
+        if (value is not null) builder.Configuration[configKey] = value;
     }
 }

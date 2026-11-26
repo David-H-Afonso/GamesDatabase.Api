@@ -1,4 +1,5 @@
 using GamesDatabase.Api.Domain.Entities;
+using GamesDatabase.Api.Common;
 using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -153,9 +154,7 @@ public class ViewFilterService : IViewFilterService
             FilterField.CreatedAt => Expression.Property(parameter, nameof(Game.CreatedAt)),
             FilterField.UpdatedAt => Expression.Property(parameter, nameof(Game.UpdatedAt)),
             FilterField.SteamAppId => Expression.Property(parameter, nameof(Game.SteamAppId)),
-            FilterField.SteamPlaytimeForever => Expression.Coalesce(
-                Expression.Property(parameter, nameof(Game.ManualPlaytimeMinutes)),
-                Expression.Property(parameter, nameof(Game.SteamPlaytimeForever))),
+            FilterField.SteamPlaytimeForever => GamePlaytime.For(parameter),
             _ => throw new ArgumentException($"Campo de filtro no soportado: {field}")
         };
     }
@@ -202,7 +201,7 @@ public class ViewFilterService : IViewFilterService
             value = jsonElement.ValueKind switch
             {
                 System.Text.Json.JsonValueKind.String => jsonElement.GetString(),
-                System.Text.Json.JsonValueKind.Number => jsonElement.GetInt32(),
+                System.Text.Json.JsonValueKind.Number => jsonElement.GetDecimal(),
                 System.Text.Json.JsonValueKind.True => true,
                 System.Text.Json.JsonValueKind.False => false,
                 _ => jsonElement.ToString()
@@ -546,7 +545,7 @@ public class ViewFilterService : IViewFilterService
             SortField.EffectiveFinished => g => g.Finished ?? "",
             SortField.CreatedAt => g => g.CreatedAt,
             SortField.UpdatedAt => g => g.UpdatedAt,
-            SortField.SteamPlaytimeForever => g => g.ManualPlaytimeMinutes ?? g.SteamPlaytimeForever ?? 0,
+            SortField.SteamPlaytimeForever => g => g.ManualPlaytimeMinutes > 0 ? (long)g.ManualPlaytimeMinutes.Value + (g.ManualPlaytimeIsAdditive ? (long)(g.SteamPlaytimeForever ?? 0) : 0L) : (long)(g.SteamPlaytimeForever ?? 0),
             SortField.Id => g => g.Id,
             _ => throw new ArgumentException($"Campo de ordenamiento no soportado: {field}")
         };
@@ -729,7 +728,7 @@ public class ViewFilterService : IViewFilterService
             value = jsonElement.ValueKind switch
             {
                 System.Text.Json.JsonValueKind.String => jsonElement.GetString(),
-                System.Text.Json.JsonValueKind.Number => jsonElement.GetInt32(),
+                System.Text.Json.JsonValueKind.Number => jsonElement.GetDecimal(),
                 System.Text.Json.JsonValueKind.True => true,
                 System.Text.Json.JsonValueKind.False => false,
                 System.Text.Json.JsonValueKind.Null => null,
@@ -764,7 +763,7 @@ public class ViewFilterService : IViewFilterService
             {
                 if (value is string stringValue)
                 {
-                    if (decimal.TryParse(stringValue, out var decimalValue))
+                    if (decimal.TryParse(stringValue, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var decimalValue))
                         return decimalValue;
                 }
                 else if (value is IConvertible)
@@ -788,7 +787,7 @@ public class ViewFilterService : IViewFilterService
             }
 
             // Para otros tipos, intentar conversión directa
-            return Convert.ChangeType(value, underlyingType);
+            return Convert.ChangeType(value, underlyingType, System.Globalization.CultureInfo.InvariantCulture);
         }
         catch
         {

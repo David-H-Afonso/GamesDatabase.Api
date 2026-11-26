@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using GamesDatabase.Api.Domain.Entities;
+using GamesDatabase.Api.Common;
+using Microsoft.Data.Sqlite;
 
 namespace GamesDatabase.Api.Infrastructure.Persistence;
 
@@ -9,6 +11,11 @@ public class GamesDbContext : DbContext
     {
         // Desactivar lazy loading para evitar ciclos
         ChangeTracker.LazyLoadingEnabled = false;
+        if (Database.IsSqlite() && Database.GetDbConnection() is SqliteConnection connection)
+        {
+            NameSearchMatching.Register(connection);
+            ReleaseDateMatching.Register(connection);
+        }
     }
 
     public override int SaveChanges()
@@ -35,7 +42,7 @@ public class GamesDbContext : DbContext
                 if (entry.Entity is Game game)
                 {
                     game.CreatedAt = DateTime.UtcNow;
-                    game.UpdatedAt = DateTime.UtcNow;
+                    game.UpdatedAt = game.CreatedAt;
                 }
                 else if (entry.Entity is GameView view)
                 {
@@ -45,7 +52,7 @@ public class GamesDbContext : DbContext
                 else if (entry.Entity is Playlist playlist)
                 {
                     playlist.CreatedAt = DateTime.UtcNow;
-                    playlist.UpdatedAt = DateTime.UtcNow;
+                    playlist.UpdatedAt = playlist.CreatedAt;
                 }
                 else if (entry.Entity is User user)
                 {
@@ -62,8 +69,6 @@ public class GamesDbContext : DbContext
             {
                 if (entry.Entity is Game game)
                 {
-                    game.UpdatedAt = DateTime.UtcNow;
-
                     // Only mark as modified if it's not just the ModifiedSinceExport flag being updated
                     var modifiedProperties = entry.Properties
                         .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt")
@@ -71,6 +76,7 @@ public class GamesDbContext : DbContext
 
                     if (modifiedProperties.Any())
                     {
+                        game.UpdatedAt = DateTime.UtcNow;
                         game.ModifiedSinceExport = true;
                     }
 
@@ -78,15 +84,14 @@ public class GamesDbContext : DbContext
                 }
                 else if (entry.Entity is GameView view)
                 {
-                    view.UpdatedAt = DateTime.UtcNow;
-
-                    // Only mark as modified if it's not just the ModifiedSinceExport flag being updated
+                    // Export bookkeeping and recent usage are not configuration edits.
                     var modifiedProperties = entry.Properties
-                        .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt")
+                        .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt" && p.Metadata.Name != "LastUsedAt")
                         .ToList();
 
                     if (modifiedProperties.Any())
                     {
+                        view.UpdatedAt = DateTime.UtcNow;
                         view.ModifiedSinceExport = true;
                     }
 
@@ -94,13 +99,13 @@ public class GamesDbContext : DbContext
                 }
                 else if (entry.Entity is Playlist playlist)
                 {
-                    playlist.UpdatedAt = DateTime.UtcNow;
                     var modifiedProperties = entry.Properties
                         .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt")
                         .ToList();
 
                     if (modifiedProperties.Any())
                     {
+                        playlist.UpdatedAt = DateTime.UtcNow;
                         playlist.ModifiedSinceExport = true;
                     }
 
@@ -145,10 +150,14 @@ public class GamesDbContext : DbContext
     public DbSet<HouseholdAuthorizationCode> HouseholdAuthorizationCodes { get; set; }
     public DbSet<HouseholdAccessToken> HouseholdAccessTokens { get; set; }
     public DbSet<HouseholdRefreshToken> HouseholdRefreshTokens { get; set; }
+    public DbSet<CollectionPreferences> CollectionPreferences { get; set; }
+    public DbSet<OnboardingState> OnboardingStates { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(GamesDbContext).Assembly);
+        modelBuilder.HasDbFunction(typeof(NameSearchMatching).GetMethod(nameof(NameSearchMatching.SqlMatch))!).HasName("gdb_name_match");
+        modelBuilder.HasDbFunction(typeof(ReleaseDateMatching).GetMethod(nameof(ReleaseDateMatching.OnOrAfter))!).HasName("gdb_release_on_or_after");
     }
 }

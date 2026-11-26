@@ -15,6 +15,10 @@ public class QueryParameters
 
 public class GameQueryParameters : QueryParameters
 {
+    public GamesDatabase.Api.Contracts.NameSearchDto? NameSearch { get; set; }
+    public string? NameSearchJson { get; set; }
+    public bool SearchMetadata { get; set; }
+    public int? MaxStory { get; set; }
     public int? StatusId { get; set; }
     public int[]? ExcludeStatusIds { get; set; }
     public int? PlatformId { get; set; }

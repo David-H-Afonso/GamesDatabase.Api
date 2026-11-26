@@ -14,8 +14,8 @@ builder.LoadEnvironmentFile();
 builder.ApplyEnvironmentOverrides();
 
 builder.Services.BindConfigurationSections(builder.Configuration);
-builder.Services.AddGamesDatabaseServices(builder.Environment);
-builder.Services.AddGamesDatabaseDataProtection(builder.Configuration, isDesktopMode);
+builder.Services.AddGamesDatabaseServices(builder.Environment, builder.Configuration);
+builder.Services.AddGamesDatabaseDataProtection(builder.Configuration, isDesktopMode, builder.Environment);
 builder.Services.AddGamesDatabasePersistence(builder.Configuration);
 builder.Services.AddGamesDatabaseCors(builder.Configuration, builder.Environment);
 builder.Services.AddGamesDatabaseAuth(builder.Configuration, builder.Environment);
@@ -49,7 +49,7 @@ using (var scope = app.Services.CreateScope())
         // The integration fixture uses an empty isolated database; historical
         // migrations assume the original pre-migration schema already exists.
         if (app.Environment.IsEnvironment("Testing")) context.Database.EnsureCreated();
-        else context.Database.Migrate();
+        else await DatabaseInitialization.InitializeAsync(context);
     }
     catch (Exception ex)
     {
@@ -104,7 +104,7 @@ app.UseRateLimiter();
 app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
-    version = "0.9.0",
+    version = typeof(Program).Assembly.GetName().Version?.ToString(3),
     timestamp = DateTime.UtcNow
 })).AllowAnonymous();
 

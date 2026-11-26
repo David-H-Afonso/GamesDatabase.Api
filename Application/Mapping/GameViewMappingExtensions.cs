@@ -74,7 +74,8 @@ public static class GameViewMappingExtensions
             IsPublic = view.IsPublic,
             CreatedBy = view.CreatedBy,
             CreatedAt = view.CreatedAt,
-            UpdatedAt = view.UpdatedAt
+            UpdatedAt = view.UpdatedAt,
+            LastUsedAt = view.LastUsedAt.HasValue ? DateTime.SpecifyKind(view.LastUsedAt.Value, DateTimeKind.Utc) : null
         };
     }
 
@@ -144,6 +145,7 @@ public static class GameViewMappingExtensions
             CreatedBy = view.CreatedBy,
             CreatedAt = view.CreatedAt,
             UpdatedAt = view.UpdatedAt,
+            LastUsedAt = view.LastUsedAt.HasValue ? DateTime.SpecifyKind(view.LastUsedAt.Value, DateTimeKind.Utc) : null,
             FilterCount = totalFilterCount,
             SortCount = sortCount
         };

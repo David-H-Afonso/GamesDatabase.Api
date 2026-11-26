@@ -47,6 +47,8 @@ public class UsersController : ControllerBase
         if (!currentUserId.HasValue)
             return Unauthorized(new { message = "User ID required" });
 
+        var current = await _userService.GetUserByIdAsync(currentUserId.Value, currentUserId.Value);
+        if (!current.Success || current.Data?.Role != "Admin") return Forbid();
         var result = await _userService.GetUsersAsync(currentUserId.Value);
         return Ok(result);
     }

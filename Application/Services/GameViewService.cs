@@ -25,6 +25,7 @@ public class GameViewService : IGameViewService
             .Where(v => v.UserId == userId)
             .OrderBy(v => v.SortOrder)
             .ThenBy(v => v.Name)
+            .ThenBy(v => v.Id)
             .ToListAsync();
 
         return views.Select(v => v.ToSummaryDto()).ToList();
@@ -36,6 +37,20 @@ public class GameViewService : IGameViewService
             .FirstOrDefaultAsync(v => v.Id == id && v.UserId == userId);
 
         return view?.ToDto();
+    }
+
+    public async Task<CatalogServiceResult<List<GameViewSummaryDto>>> RecordUseAsync(int id, int userId, CancellationToken cancellationToken = default)
+    {
+        var owned = await _context.GameViews.AsNoTracking().Where(view => view.UserId == userId).OrderBy(view => view.SortOrder).ThenBy(view => view.Name).ThenBy(view => view.Id).ToListAsync(cancellationToken);
+        var view = owned.SingleOrDefault(view => view.Id == id);
+        if (view is null) return CatalogServiceResult<List<GameViewSummaryDto>>.NotFoundResult("View unavailable.");
+        // Every actual use matters for later LRU eviction, including a default
+        // shortcut. The client preserves manual order within the recent pair.
+        // Usage never edits filters, sort order, UpdatedAt or export-dirty flags.
+        var now = DateTime.UtcNow;
+        await _context.GameViews.Where(candidate => candidate.Id == id && candidate.UserId == userId).ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.LastUsedAt, now), cancellationToken);
+        view.LastUsedAt = now;
+        return CatalogServiceResult<List<GameViewSummaryDto>>.Ok(owned.Select(view => view.ToSummaryDto()).ToList());
     }
 
     public async Task<GameViewDto?> GetViewByNameAsync(string name, int userId)
@@ -230,7 +245,7 @@ public class GameViewService : IGameViewService
     {
         try
         {
-            var view = await _context.GameViews.FindAsync(id);
+            var view = await _context.GameViews.SingleOrDefaultAsync(view => view.Id == id && view.UserId == userId);
             if (view == null)
             {
                 return CatalogServiceResult<GameViewDto>.NotFoundResult($"Vista con ID {id} no encontrada.");

@@ -11,6 +11,8 @@ public interface IPlaylistService
     Task<CatalogServiceResult> MovePlaylistAsync(int id, PlaylistMoveDto dto, int userId);
     Task<IEnumerable<PlaylistSummaryDto>> GetPlaylistsAsync(int userId);
     Task<PlaylistDto?> GetPlaylistByIdAsync(int id, int userId);
+    Task<CatalogServiceResult<PlaylistPreviewDto>> PreviewAsync(PlaylistPreviewRequest request, int userId);
+    Task<CatalogServiceResult<GamesDatabase.Api.Common.PagedResult<GameDto>>> GetRulesPageAsync(PlaylistRulesDto rules, int? maxLength, int userId, int page, int pageSize, string? search);
     Task<CatalogServiceResult<PlaylistDto>> CreatePlaylistAsync(PlaylistCreateDto dto, int userId);
     Task<CatalogServiceResult<PlaylistDto>> UpdatePlaylistAsync(int id, PlaylistUpdateDto dto, int userId);
     Task<CatalogServiceResult> DeletePlaylistAsync(int id, int userId);

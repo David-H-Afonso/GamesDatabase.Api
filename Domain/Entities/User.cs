@@ -29,6 +29,8 @@ public class User
     public bool UseScoreColors { get; set; } = false;
     public string ScoreProvider { get; set; } = "Metacritic";
     public bool ShowPriceComparisonIcon { get; set; } = false;
+    // Existing accounts stay uninterrupted; new users explicitly choose the guide.
+    public bool TutorialEnabled { get; set; }
 
     // Steam integration
     public string? SteamId { get; set; }

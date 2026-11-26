@@ -31,10 +31,12 @@ public class GameServiceResult<T>
 {
     public bool Success { get; set; }
     public bool NotFound { get; set; }
+    public bool Conflict { get; set; }
     public string? Error { get; set; }
     public T? Data { get; set; }
 
     public static GameServiceResult<T> Ok(T data) => new() { Success = true, Data = data };
     public static GameServiceResult<T> NotFoundResult(string? error = null) => new() { NotFound = true, Error = error };
     public static GameServiceResult<T> BadRequest(string error) => new() { Error = error };
+    public static GameServiceResult<T> ConflictResult(string error) => new() { Conflict = true, Error = error };
 }

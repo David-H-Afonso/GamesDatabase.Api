@@ -360,7 +360,7 @@ public class GameImportExportService : IGameImportExportService
                 : "";
             allRecords.Add(new FullExportModel
             {
-                Type = "Game", Name = g.Name, GameId = g.Id.ToString(CultureInfo.InvariantCulture),
+                Type = "Game", Name = g.Name, Developer = g.Developer, GameId = g.Id.ToString(CultureInfo.InvariantCulture),
                 Status = g.Status?.Name ?? "", Platform = g.Platform?.Name ?? "", PlayWith = playWithNames,
                 PlayedStatus = g.PlayedStatus?.Name ?? "", Released = g.Released ?? "", Started = g.Started ?? "", Finished = g.Finished ?? "",
                 Score = g.Score?.ToString() ?? "", Critic = g.Critic?.ToString() ?? "", CriticProvider = g.CriticProvider ?? "",
@@ -370,6 +370,7 @@ public class GameImportExportService : IGameImportExportService
                 SteamAppId = g.SteamAppId?.ToString() ?? "", SteamPlaytimeForever = g.SteamPlaytimeForever?.ToString() ?? "",
                 SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "", SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "",
                 ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "",
+                ManualPlaytimeIsAdditive = g.ManualPlaytimeIsAdditive.ToString(),
                 IsManuallyCompleted = g.IsManuallyCompleted.ToString(), SteamCompletionPreserved = g.SteamCompletionPreserved.ToString()
             });
         }
@@ -429,6 +430,8 @@ public class GameImportExportService : IGameImportExportService
             });
         }
 
+        if (await CollectionPreferencesArchive.ExportAsync(_context, userId) is { } preferences) allRecords.Add(preferences);
+
         using var memoryStream = new MemoryStream();
         using var writer = new StreamWriter(memoryStream, Encoding.UTF8);
         using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture) { Delimiter = _exportSettings.CsvDelimiter });
@@ -446,6 +449,8 @@ public class GameImportExportService : IGameImportExportService
         csv.ReadHeader();
         var hasHeroHeader = csv.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
         var hasFavoriteHeader = csv.HeaderRecord?.Any(header => string.Equals(header, "Favorite", StringComparison.OrdinalIgnoreCase)) == true;
+        var hasDeveloperHeader = csv.HeaderRecord?.Any(header => string.Equals(header, "Developer", StringComparison.OrdinalIgnoreCase)) == true;
+        var hasAdditiveHeader = csv.HeaderRecord?.Any(header => string.Equals(header, "ManualPlaytimeIsAdditive", StringComparison.OrdinalIgnoreCase)) == true;
         var allRecords = csv.GetRecords<FullExportModel>().ToList();
         var platforms = allRecords.Where(r => r.Type == "Platform").ToList();
         var statuses = allRecords.Where(r => r.Type == "Status").ToList();
@@ -571,6 +576,8 @@ public class GameImportExportService : IGameImportExportService
             try
             {
                 if (string.IsNullOrWhiteSpace(record.Name)) { results.errors.Add("Juego sin nombre encontrado"); continue; }
+                var manualMinutes = ReadManualMinutes(record.ManualPlaytimeMinutes);
+                var additiveMode = hasAdditiveHeader ? ReadManualAdditive(record.ManualPlaytimeIsAdditive) : (bool?)null;
                 var status = string.IsNullOrWhiteSpace(record.Status) ? null : await _context.GameStatuses.FirstOrDefaultAsync(s => s.Name.ToLower() == record.Status.ToLower() && s.UserId == userId);
                 var platform = string.IsNullOrWhiteSpace(record.Platform) ? null : await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Platform.ToLower() && p.UserId == userId);
 
@@ -602,6 +609,7 @@ public class GameImportExportService : IGameImportExportService
                     existing.Completion = ParseNullableInt(record.Completion);
                     existing.Story = ParseNullableInt(record.Story);
                     existing.Comment = record.Comment;
+                    if (hasDeveloperHeader) existing.Developer = ReadDeveloper(record.Developer);
                     existing.Logo = record.Logo;
                     existing.Hero = ResolveLegacyHero(record.Hero, record.Cover, hasHeroHeader);
                     existing.Cover = ResolveLegacyCover(record.Hero, record.Cover, hasHeroHeader);
@@ -613,7 +621,8 @@ public class GameImportExportService : IGameImportExportService
                     existing.SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever);
                     existing.SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks);
                     existing.SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced);
-                    existing.ManualPlaytimeMinutes = ParseNullableInt(record.ManualPlaytimeMinutes);
+                    existing.ManualPlaytimeMinutes = manualMinutes;
+                    if (additiveMode.HasValue) existing.ManualPlaytimeIsAdditive = additiveMode.Value;
                     if (bool.TryParse(record.IsManuallyCompleted, out var manualCompletion)) existing.IsManuallyCompleted = manualCompletion;
                     // History is monotonic. Old/missing/false CSV values cannot erase it.
                     existing.SteamCompletionPreserved |= bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion;
@@ -640,6 +649,7 @@ public class GameImportExportService : IGameImportExportService
                     {
                         UserId = userId,
                         Name = record.Name,
+                        Developer = ReadDeveloper(record.Developer),
                         StatusId = status.Id,
                         PlatformId = platform?.Id,
                         PlayedStatusId = playedStatus?.Id,
@@ -662,7 +672,8 @@ public class GameImportExportService : IGameImportExportService
                         SteamPlaytimeForever = ParseNullableInt(record.SteamPlaytimeForever),
                         SteamPlaytime2Weeks = ParseNullableInt(record.SteamPlaytime2Weeks),
                         SteamLastSynced = ParseNullableDateTime(record.SteamLastSynced),
-                        ManualPlaytimeMinutes = ParseNullableInt(record.ManualPlaytimeMinutes),
+                        ManualPlaytimeMinutes = manualMinutes,
+                        ManualPlaytimeIsAdditive = additiveMode ?? false,
                         IsManuallyCompleted = bool.TryParse(record.IsManuallyCompleted, out var manualCompletion) && manualCompletion,
                         SteamCompletionPreserved = bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion
                     };
@@ -938,6 +949,24 @@ public class GameImportExportService : IGameImportExportService
         }
         await _context.SaveChangesAsync();
 
+        var preferencesRestored = false;
+        var preferenceRecords = allRecords.Where(record => record.Type == "CollectionPreferences").ToList();
+        if (preferenceRecords.Count > 1) results.errors.Add("Collection preferences were not restored: duplicate archive records.");
+        else if (preferenceRecords.Count == 1)
+        {
+            try
+            {
+                await CollectionPreferencesArchive.ImportAsync(_context, userId, preferenceRecords[0].CollectionPreferencesJson ?? "null");
+                preferencesRestored = true;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Collection preferences archive could not be restored for user {UserId}", userId);
+                _context.ChangeTracker.Clear();
+                results.errors.Add("Collection preferences were not restored: the format or one of its owned references is invalid, missing, or ambiguous.");
+            }
+        }
+
         return new
         {
             message = "Importación completa finalizada (modo MERGE)",
@@ -954,6 +983,7 @@ public class GameImportExportService : IGameImportExportService
             replays = new { imported = results.replaysImported, updated = results.replaysUpdated },
             playlists = new { imported = results.playlistsImported, updated = results.playlistsUpdated },
             history = new { imported = results.historyImported },
+            collectionPreferences = new { restored = preferencesRestored },
             errors = results.errors.Count > 0 ? results.errors : null
         };
     }
@@ -1002,6 +1032,7 @@ public class GameImportExportService : IGameImportExportService
                 Completion = ApplyExportString(g.Completion?.ToString() ?? "", "completion", effectiveConfig),
                 Story = ApplyExportString(g.Story?.ToString() ?? "", "story", effectiveConfig),
                 Comment = ApplyExportString(g.Comment ?? "", "comment", effectiveConfig),
+                Developer = ApplyExportString(g.Developer ?? "", "developer", effectiveConfig),
                 Logo = ApplyExportString(g.Logo ?? "", "logo", effectiveConfig),
                 Hero = ApplyExportString(g.Hero ?? "", "hero", effectiveConfig),
                 Cover = ApplyExportString(g.Cover ?? "", "cover", effectiveConfig),
@@ -1013,6 +1044,7 @@ public class GameImportExportService : IGameImportExportService
                 SteamPlaytime2Weeks = ApplyExportString(g.SteamPlaytime2Weeks?.ToString() ?? "", "steamPlaytime2Weeks", effectiveConfig),
                 SteamLastSynced = ApplyExportString(g.SteamLastSynced?.ToString("O") ?? "", "steamLastSynced", effectiveConfig),
                 ManualPlaytimeMinutes = ApplyExportString(g.ManualPlaytimeMinutes?.ToString() ?? "", "manualPlaytimeMinutes", effectiveConfig),
+                ManualPlaytimeIsAdditive = ApplyExportString(g.ManualPlaytimeIsAdditive.ToString(), "manualPlaytimeIsAdditive", effectiveConfig),
                 // Completion declarations/history are portable metadata, not cached Steam definitions.
                 IsManuallyCompleted = g.IsManuallyCompleted.ToString(),
                 SteamCompletionPreserved = g.SteamCompletionPreserved.ToString(),
@@ -1060,6 +1092,8 @@ public class GameImportExportService : IGameImportExportService
         List<FullExportModel> gameRows;
         bool hasHeroHeader;
         bool hasFavoriteHeader;
+        bool hasDeveloperHeader;
+        bool hasAdditiveHeader;
         var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             Delimiter = _exportSettings.CsvDelimiter,
@@ -1075,6 +1109,8 @@ public class GameImportExportService : IGameImportExportService
             csvReader.ReadHeader();
             hasHeroHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
             hasFavoriteHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Favorite", StringComparison.OrdinalIgnoreCase)) == true;
+            hasDeveloperHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Developer", StringComparison.OrdinalIgnoreCase)) == true;
+            hasAdditiveHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "ManualPlaytimeIsAdditive", StringComparison.OrdinalIgnoreCase)) == true;
             gameRows = csvReader.GetRecords<FullExportModel>()
                 .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
                 .ToList();
@@ -1087,6 +1123,8 @@ public class GameImportExportService : IGameImportExportService
             csvReader.ReadHeader();
             hasHeroHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Hero", StringComparison.OrdinalIgnoreCase)) == true;
             hasFavoriteHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Favorite", StringComparison.OrdinalIgnoreCase)) == true;
+            hasDeveloperHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "Developer", StringComparison.OrdinalIgnoreCase)) == true;
+            hasAdditiveHeader = csvReader.HeaderRecord?.Any(header => string.Equals(header, "ManualPlaytimeIsAdditive", StringComparison.OrdinalIgnoreCase)) == true;
             gameRows = csvReader.GetRecords<FullExportModel>()
                 .Where(r => r.Type == "Game" && !string.IsNullOrWhiteSpace(r.Name))
                 .ToList();
@@ -1140,6 +1178,8 @@ public class GameImportExportService : IGameImportExportService
                 var resolvedCompletion = ResolveImportString(record.Completion, "completion", effectiveConfig);
                 var resolvedStory = ResolveImportString(record.Story, "story", effectiveConfig);
                 var resolvedComment = ResolveImportString(record.Comment, "comment", effectiveConfig);
+                var importDeveloper = hasDeveloperHeader || effectiveConfig.Mode == "custom" && effectiveConfig.Properties?.ContainsKey("developer") == true;
+                var developer = importDeveloper ? ReadDeveloper(ResolveImportString(record.Developer, "developer", effectiveConfig)) : null;
                 var resolvedLogo = ResolveImportString(record.Logo, "logo", effectiveConfig);
                 var resolvedHero = ResolveImportString(record.Hero, "hero", effectiveConfig);
                 var resolvedCover = ResolveImportString(record.Cover, "cover", effectiveConfig);
@@ -1153,6 +1193,10 @@ public class GameImportExportService : IGameImportExportService
                 var resolvedSteamPlaytime2Weeks = ResolveImportString(record.SteamPlaytime2Weeks, "steamPlaytime2Weeks", effectiveConfig);
                 var resolvedSteamLastSynced = ResolveImportString(record.SteamLastSynced, "steamLastSynced", effectiveConfig);
                 var resolvedManualPlaytimeMinutes = ResolveImportString(record.ManualPlaytimeMinutes, "manualPlaytimeMinutes", effectiveConfig);
+                var manualMinutes = ReadManualMinutes(resolvedManualPlaytimeMinutes);
+                var importAdditive = hasAdditiveHeader || effectiveConfig.Mode == "custom" && effectiveConfig.Properties?.ContainsKey("manualPlaytimeIsAdditive") == true;
+                var resolvedAdditive = importAdditive ? ResolveImportString(record.ManualPlaytimeIsAdditive, "manualPlaytimeIsAdditive", effectiveConfig) : null;
+                var additiveMode = importAdditive ? ReadManualAdditive(resolvedAdditive) : (bool?)null;
 
                 var status = string.IsNullOrWhiteSpace(resolvedStatus)
                     ? notFulfilledStatus
@@ -1210,6 +1254,7 @@ public class GameImportExportService : IGameImportExportService
                     existing.Completion = ParseNullableInt(resolvedCompletion);
                     existing.Story = ParseNullableInt(resolvedStory);
                     existing.Comment = resolvedComment;
+                    if (importDeveloper) existing.Developer = developer;
                     existing.Logo = resolvedLogo;
                     existing.Hero = normalizedHero;
                     existing.Cover = normalizedCover;
@@ -1221,7 +1266,8 @@ public class GameImportExportService : IGameImportExportService
                     existing.SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever);
                     existing.SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks);
                     existing.SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced);
-                    existing.ManualPlaytimeMinutes = ParseNullableInt(resolvedManualPlaytimeMinutes);
+                    existing.ManualPlaytimeMinutes = manualMinutes;
+                    if (additiveMode.HasValue) existing.ManualPlaytimeIsAdditive = additiveMode.Value;
                     if (bool.TryParse(record.IsManuallyCompleted, out var manualCompletion)) existing.IsManuallyCompleted = manualCompletion;
                     existing.SteamCompletionPreserved |= bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion;
                     existing.CalculateScore();
@@ -1252,6 +1298,7 @@ public class GameImportExportService : IGameImportExportService
                         Completion = ParseNullableInt(resolvedCompletion),
                         Story = ParseNullableInt(resolvedStory),
                         Comment = resolvedComment,
+                        Developer = developer,
                         Logo = resolvedLogo,
                         Hero = normalizedHero,
                         Cover = normalizedCover,
@@ -1262,7 +1309,8 @@ public class GameImportExportService : IGameImportExportService
                         SteamPlaytimeForever = ParseNullableInt(resolvedSteamPlaytimeForever),
                         SteamPlaytime2Weeks = ParseNullableInt(resolvedSteamPlaytime2Weeks),
                         SteamLastSynced = ParseNullableDateTime(resolvedSteamLastSynced),
-                        ManualPlaytimeMinutes = ParseNullableInt(resolvedManualPlaytimeMinutes),
+                        ManualPlaytimeMinutes = manualMinutes,
+                        ManualPlaytimeIsAdditive = additiveMode ?? false,
                         IsManuallyCompleted = bool.TryParse(record.IsManuallyCompleted, out var manualCompletion) && manualCompletion,
                         SteamCompletionPreserved = bool.TryParse(record.SteamCompletionPreserved, out var preservedCompletion) && preservedCompletion,
                     };
@@ -1301,6 +1349,27 @@ public class GameImportExportService : IGameImportExportService
             try { File.Delete(file); }
             catch { /* ignore locked files */ }
         }
+    }
+
+    private static string? ReadDeveloper(string? value)
+    {
+        var text = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (text?.Length > 150) throw new ArgumentException("Developer must be at most 150 characters.");
+        return text;
+    }
+
+    private static int? ReadManualMinutes(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes) || minutes < 0 || minutes > GamePlaytime.MaximumManualMinutes) throw new ArgumentException("Manual time must be between 0 and 600000 minutes.");
+        return GamePlaytime.NormalizeManual(minutes);
+    }
+
+    private static bool ReadManualAdditive(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (bool.TryParse(value, out var additive)) return additive;
+        throw new ArgumentException("Manual playtime mode must be True or False.");
     }
 
     private static string? ApplyExportString(string? storedValue, string propertyKey, GameExportConfig config)

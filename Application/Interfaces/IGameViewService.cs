@@ -15,4 +15,5 @@ public interface IGameViewService
     Task<CatalogServiceResult> DeleteViewAsync(int id, int userId);
     Task<CatalogServiceResult<GameViewDto>> DuplicateViewAsync(int id, string newName, int userId);
     Task<CatalogServiceResult<GameViewDto>> UpdateViewConfigurationAsync(int id, JsonElement body, int userId);
+    Task<CatalogServiceResult<List<GameViewSummaryDto>>> RecordUseAsync(int id, int userId, CancellationToken cancellationToken = default);
 }

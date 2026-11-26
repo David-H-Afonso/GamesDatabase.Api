@@ -15,7 +15,7 @@ namespace GamesDatabase.Api.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.BackupSchedule", b =>
                 {
@@ -102,6 +102,36 @@ namespace GamesDatabase.Api.Migrations
                     b.ToTable("backup_schedule", (string)null);
                 });
 
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.CollectionPreferences", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("GotySelectionsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("goty_selections_json");
+
+                    b.Property<string>("HomeConfigJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("home_config_json");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("revision");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("collection_preferences", (string)null);
+                });
+
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.DuplicateGameDismissal", b =>
                 {
                     b.Property<int>("Id")
@@ -160,6 +190,15 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("CreationRequestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("creation_request_hash");
+
+                    b.Property<Guid?>("CreationRequestId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("creation_request_id");
+
                     b.Property<int?>("Critic")
                         .HasColumnType("INTEGER")
                         .HasColumnName("critic");
@@ -167,6 +206,11 @@ namespace GamesDatabase.Api.Migrations
                     b.Property<string>("CriticProvider")
                         .HasColumnType("TEXT")
                         .HasColumnName("critic_provider");
+
+                    b.Property<string>("Developer")
+                        .HasMaxLength(150)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("developer");
 
                     b.Property<bool>("Favorite")
                         .ValueGeneratedOnAdd()
@@ -200,6 +244,12 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("logo");
 
+                    b.Property<bool>("ManualPlaytimeIsAdditive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("manual_playtime_is_additive");
+
                     b.Property<int?>("ManualPlaytimeMinutes")
                         .HasColumnType("INTEGER")
                         .HasColumnName("manual_playtime_minutes");
@@ -226,6 +276,16 @@ namespace GamesDatabase.Api.Migrations
                     b.Property<string>("Released")
                         .HasColumnType("TEXT")
                         .HasColumnName("released");
+
+                    b.Property<string>("SampleArtworkKey")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sample_artwork_key");
+
+                    b.Property<string>("SampleBatchId")
+                        .HasMaxLength(36)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sample_batch_id");
 
                     b.Property<decimal?>("Score")
                         .HasColumnType("TEXT")
@@ -321,7 +381,10 @@ namespace GamesDatabase.Api.Migrations
 
                     b.HasIndex("StatusId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "CreationRequestId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "SampleBatchId");
 
                     b.ToTable("game", (string)null);
                 });
@@ -374,6 +437,12 @@ namespace GamesDatabase.Api.Migrations
                     b.Property<string>("LogoUrl")
                         .HasColumnType("TEXT")
                         .HasColumnName("logo_url");
+
+                    b.Property<int>("MetadataVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0)
+                        .HasColumnName("metadata_version");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")
@@ -799,6 +868,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("is_public");
 
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("last_used_at");
+
                     b.Property<bool>("ModifiedSinceExport")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -1088,6 +1161,48 @@ namespace GamesDatabase.Api.Migrations
                     b.ToTable("household_refresh_token", (string)null);
                 });
 
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.OnboardingState", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("CompletedVersion")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("completed_version");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("SampleBatchId")
+                        .HasMaxLength(36)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sample_batch_id");
+
+                    b.Property<int?>("SampleStatusId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("sample_status_id");
+
+                    b.Property<string>("Step")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("step");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("SampleStatusId");
+
+                    b.ToTable("onboarding_state", (string)null);
+                });
+
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Playlist", b =>
                 {
                     b.Property<int>("Id")
@@ -1148,6 +1263,11 @@ namespace GamesDatabase.Api.Migrations
                     b.Property<string>("RulesJson")
                         .HasColumnType("TEXT")
                         .HasColumnName("rules_json");
+
+                    b.Property<string>("SampleBatchId")
+                        .HasMaxLength(36)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sample_batch_id");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("INTEGER")
@@ -1626,6 +1746,12 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("steam_nickname");
 
+                    b.Property<bool>("TutorialEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("tutorial_enabled");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")
                         .HasColumnName("updated_at");
@@ -1653,6 +1779,17 @@ namespace GamesDatabase.Api.Migrations
                     b.HasOne("GamesDatabase.Api.Domain.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.CollectionPreferences", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("GamesDatabase.Api.Domain.Entities.CollectionPreferences", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -1920,6 +2057,22 @@ namespace GamesDatabase.Api.Migrations
                     b.Navigation("Connection");
 
                     b.Navigation("ReplacedByToken");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.OnboardingState", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.GameStatus", null)
+                        .WithMany()
+                        .HasForeignKey("SampleStatusId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("GamesDatabase.Api.Domain.Entities.OnboardingState", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.Playlist", b =>

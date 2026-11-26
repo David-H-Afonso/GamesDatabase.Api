@@ -8,6 +8,7 @@ public enum PlaylistExportReference
 
 public sealed class PlaylistDto
 {
+    public bool IsSample { get; set; }
     public int? GroupId { get; set; }
     public int? MaxLength { get; set; }
     public int Id { get; set; }
@@ -30,6 +31,7 @@ public sealed class PlaylistDto
 
 public sealed class PlaylistSummaryDto
 {
+    public bool IsSample { get; set; }
     public int? GroupId { get; set; }
     public int? MaxLength { get; set; }
     public int Id { get; set; }
@@ -87,11 +89,15 @@ public sealed class PlaylistUpdateDto
 
 public sealed class PlaylistRulesDto
 {
+    public NameSearchDto? NameSearch { get; set; }
     public string? Search { get; set; }
     public List<int> StatusIds { get; set; } = [];
     public List<int> PlatformIds { get; set; } = [];
     public List<int> PlayedStatusIds { get; set; } = [];
     public bool? Favorite { get; set; }
+    public bool PlayingNow { get; set; }
+    public bool UpcomingReleases { get; set; }
+    public string? ReleaseTimeZone { get; set; }
     public int? MinGrade { get; set; }
     public int? MaxGrade { get; set; }
     public int? MinCritic { get; set; }
@@ -110,6 +116,22 @@ public sealed class PlaylistRulesDto
     public List<int> StatusPriorityIds { get; set; } = [];
     public bool GroupByStatus { get; set; }
     public List<int> ExcludedGameIds { get; set; } = [];
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalProperties { get; set; }
+}
+
+public sealed class PlaylistPreviewRequest
+{
+    public PlaylistRulesDto Rules { get; set; } = new();
+    public int? MaxLength { get; set; }
+    public int PreviewCount { get; set; } = 5;
+}
+
+public sealed class PlaylistPreviewDto
+{
+    public int TotalMatches { get; set; }
+    public int ReturnedCount { get; set; }
+    public List<GameDto> Games { get; set; } = [];
 }
 
 public sealed class AddPlaylistItemDto

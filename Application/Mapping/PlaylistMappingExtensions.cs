@@ -11,6 +11,7 @@ public static class PlaylistMappingExtensions
         var firstGame = playlist.Items.OrderBy(item => item.Position).FirstOrDefault()?.Game;
         return new PlaylistSummaryDto
         {
+            IsSample = playlist.SampleBatchId != null,
             MaxLength = playlist.MaxLength,
             GroupId = playlist.GroupId,
             Id = playlist.Id,
@@ -35,6 +36,7 @@ public static class PlaylistMappingExtensions
         var firstGame = playlist.Items.OrderBy(item => item.Position).FirstOrDefault()?.Game;
         return new PlaylistDto
         {
+            IsSample = playlist.SampleBatchId != null,
             MaxLength = playlist.MaxLength,
             GroupId = playlist.GroupId,
             Id = playlist.Id,

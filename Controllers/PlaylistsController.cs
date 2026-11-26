@@ -48,6 +48,14 @@ public sealed class PlaylistsController(IPlaylistService playlistService) : Base
     [HttpGet]
     public async Task<ActionResult<IEnumerable<PlaylistSummaryDto>>> GetPlaylists() => Ok(await playlistService.GetPlaylistsAsync(GetCurrentUserIdOrDefault(1)));
 
+    [HttpPost("preview")]
+    public async Task<IActionResult> Preview(PlaylistPreviewRequest request)
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        var result = await playlistService.PreviewAsync(request, CurrentUserId.Value);
+        return result.Success ? Ok(result.Data) : BadRequest(new { error = result.Error });
+    }
+
     [HttpGet("{id}")]
     public async Task<ActionResult<PlaylistDto>> GetPlaylist(int id)
     {

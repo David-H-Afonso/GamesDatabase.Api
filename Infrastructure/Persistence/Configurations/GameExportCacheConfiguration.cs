@@ -13,6 +13,7 @@ public class GameExportCacheConfiguration : IEntityTypeConfiguration<GameExportC
         entity.HasKey(e => e.Id);
         entity.Property(e => e.Id).HasColumnName("id");
         entity.Property(e => e.GameId).HasColumnName("game_id").IsRequired();
+        entity.Property(e => e.MetadataVersion).HasColumnName("metadata_version").HasDefaultValue(0);
         entity.Property(e => e.LastExportedAt).HasColumnName("last_exported_at");
         entity.Property(e => e.LogoDownloaded).HasColumnName("logo_downloaded").HasDefaultValue(false);
         entity.Property(e => e.HeroDownloaded).HasColumnName("hero_downloaded").HasDefaultValue(false);

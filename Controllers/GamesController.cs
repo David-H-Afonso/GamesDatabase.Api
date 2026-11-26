@@ -122,6 +122,9 @@ public class GamesController : BaseApiController
         var userId = GetCurrentUserIdOrDefault(1);
         var result = await _gameService.CreateGameAsync(gameDto, userId);
 
+        if (result.Conflict)
+            return Conflict(new { code = "creationRequestConflict", message = result.Error });
+
         if (!result.Success)
             return BadRequest(new { message = result.Error });
 

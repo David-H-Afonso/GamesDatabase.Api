@@ -63,6 +63,7 @@ public class CreateUserRequest
 
     [Required]
     public string Role { get; set; } = "Standard";
+    public bool TutorialEnabled { get; set; } = true;
 }
 
 public class UpdateUserRequest
@@ -77,6 +78,7 @@ public class UpdateUserRequest
     public string? ScoreProvider { get; set; }
 
     public bool? ShowPriceComparisonIcon { get; set; }
+    public bool? TutorialEnabled { get; set; }
 }
 
 public class ChangePasswordRequest
@@ -95,6 +97,7 @@ public class UserDto
     public bool UseScoreColors { get; set; }
     public string ScoreProvider { get; set; } = "Metacritic";
     public bool ShowPriceComparisonIcon { get; set; }
+    public bool TutorialEnabled { get; set; }
     public string? SteamId { get; set; }
     public string? SteamNickname { get; set; }
     public string? SteamAvatarUrl { get; set; }

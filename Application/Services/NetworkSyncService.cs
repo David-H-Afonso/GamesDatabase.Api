@@ -99,7 +99,7 @@ public class NetworkSyncService : INetworkSyncService
             var csvContent = Encoding.UTF8.GetString(csvBytes);
 
             // Remove BOM if present
-            if (csvContent.StartsWith("\uFEFF"))
+            if (csvContent.StartsWith("\uFEFF", StringComparison.Ordinal))
             {
                 csvContent = csvContent.Substring(1);
             }
@@ -314,6 +314,9 @@ public class NetworkSyncService : INetworkSyncService
         }).ToList();
         if (await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "Playlists.json"), playlists))
             settingsSynced++;
+
+        var preferences = records.SingleOrDefault(record => record.Type == "CollectionPreferences")?.CollectionPreferencesJson;
+        if (!string.IsNullOrWhiteSpace(preferences) && await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "CollectionPreferences.json"), JsonSerializer.Deserialize<JsonElement>(preferences))) settingsSynced++;
 
         if (settingsSynced > 0)
             _logger.LogInformation("Synced {Count} settings files that changed", settingsSynced);
@@ -541,9 +544,43 @@ public class NetworkSyncService : INetworkSyncService
             var gamePath = Path.Combine(gamesPath, folderName);
             Directory.CreateDirectory(gamePath);
 
+            // ZIP and network exports share the database cache, but not their files.
+            // Compare this destination's metadata even if a ZIP just consumed the
+            // dirty/version flags; unchanged JSON is neither rewritten nor counted.
+            var gameInfo = new
+            {
+                Name = game.Name,
+                Developer = game.Developer,
+                Status = game.Status ?? "",
+                Platform = game.Platform ?? "",
+                PlayWith = game.PlayWith ?? "",
+                PlayedStatus = game.PlayedStatus ?? "",
+                Released = game.Released ?? "",
+                Started = game.Started ?? "",
+                Finished = game.Finished ?? "",
+                Score = game.Score ?? "",
+                Critic = game.Critic ?? "",
+                CriticProvider = game.CriticProvider ?? "",
+                Grade = game.Grade ?? "",
+                Completion = game.Completion ?? "",
+                Story = game.Story ?? "",
+                Comment = game.Comment ?? "",
+                Description = game.Description ?? "",
+                Favorite = game.Favorite ?? "",
+                SteamAppId = game.SteamAppId ?? "",
+                SteamPlaytimeForever = game.SteamPlaytimeForever ?? "",
+                SteamPlaytime2Weeks = game.SteamPlaytime2Weeks ?? "",
+                SteamLastSynced = game.SteamLastSynced ?? "",
+                ManualPlaytimeMinutes = game.ManualPlaytimeMinutes ?? "",
+                ManualPlaytimeIsAdditive = game.ManualPlaytimeIsAdditive ?? "",
+                IsManuallyCompleted = game.IsManuallyCompleted ?? "",
+                SteamCompletionPreserved = game.SteamCompletionPreserved ?? ""
+            };
+            var metadataWritten = await WriteJsonToFileIfChangedAsync(Path.Combine(gamePath, "info.json"), gameInfo);
+
             // Check if sync needed
             var cache = exportCaches.GetValueOrDefault(dbGame.Id);
-            bool needsSync = fullSync || dbGame.ModifiedSinceExport || cache == null;
+            bool needsSync = fullSync || dbGame.ModifiedSinceExport || cache == null || cache.MetadataVersion < GameExportCache.CurrentMetadataVersion || metadataWritten;
 
             // Check images - sync if URL changed, previous download failed, or the physical file is missing.
             // The cache can survive migrations/manual cleanup, but the NAS folder must be the source of truth.
@@ -572,40 +609,9 @@ public class NetworkSyncService : INetworkSyncService
             // Track failed images for this game
             var failedImageTypes = new List<string>();
 
-            // Sync info.json
-            if (needsSync)
+            if (metadataWritten)
             {
-                var gameInfo = new
-                {
-                    Name = game.Name,
-                    Status = game.Status ?? "",
-                    Platform = game.Platform ?? "",
-                    PlayWith = game.PlayWith ?? "",
-                    PlayedStatus = game.PlayedStatus ?? "",
-                    Released = game.Released ?? "",
-                    Started = game.Started ?? "",
-                    Finished = game.Finished ?? "",
-                    Score = game.Score ?? "",
-                    Critic = game.Critic ?? "",
-                    CriticProvider = game.CriticProvider ?? "",
-                    Grade = game.Grade ?? "",
-                    Completion = game.Completion ?? "",
-                    Story = game.Story ?? "",
-                    Comment = game.Comment ?? "",
-                    Description = game.Description ?? "",
-                    Favorite = game.Favorite ?? "",
-                    SteamAppId = game.SteamAppId ?? "",
-                    SteamPlaytimeForever = game.SteamPlaytimeForever ?? "",
-                    SteamPlaytime2Weeks = game.SteamPlaytime2Weeks ?? "",
-                    SteamLastSynced = game.SteamLastSynced ?? "",
-                    ManualPlaytimeMinutes = game.ManualPlaytimeMinutes ?? "",
-                    IsManuallyCompleted = game.IsManuallyCompleted ?? "",
-                    SteamCompletionPreserved = game.SteamCompletionPreserved ?? ""
-                };
-                if (await WriteJsonToFileIfChangedAsync(Path.Combine(gamePath, "info.json"), gameInfo))
-                {
-                    result.FilesWritten++;
-                }
+                result.FilesWritten++;
             }
 
             // Initialize or update cache
@@ -625,6 +631,7 @@ public class NetworkSyncService : INetworkSyncService
                 cache.UpdatedAt = DateTime.UtcNow;
                 cache.LastExportedAt = DateTime.UtcNow;
             }
+            cache.MetadataVersion = GameExportCache.CurrentMetadataVersion;
 
             // Sync logo
             if (!string.IsNullOrWhiteSpace(game.Logo) && (needsSync || logoNeedsSync))

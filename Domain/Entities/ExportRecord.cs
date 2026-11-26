@@ -9,6 +9,10 @@ public class ExportRecord
 
     [Name("Name")]
     public string Name { get; set; } = string.Empty;
+    [Optional, Name("Developer")]
+    public string? Developer { get; set; }
+    [Optional, Name("CollectionPreferencesJson")]
+    public string? CollectionPreferencesJson { get; set; }
 
     [Name("Color")]
     public string? Color { get; set; }
@@ -99,6 +103,8 @@ public class ExportRecord
 
     [Name("ManualPlaytimeMinutes")]
     public string? ManualPlaytimeMinutes { get; set; }
+    [Optional, Name("ManualPlaytimeIsAdditive")]
+    public string? ManualPlaytimeIsAdditive { get; set; }
 
     [Optional, Name("IsManuallyCompleted")]
     public string? IsManuallyCompleted { get; set; }

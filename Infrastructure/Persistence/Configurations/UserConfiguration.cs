@@ -19,6 +19,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         entity.Property(e => e.UseScoreColors).HasColumnName("use_score_colors");
         entity.Property(e => e.ScoreProvider).HasColumnName("score_provider");
         entity.Property(e => e.ShowPriceComparisonIcon).HasColumnName("show_price_comparison_icon");
+        entity.Property(e => e.TutorialEnabled).HasColumnName("tutorial_enabled").HasDefaultValue(false);
         entity.Property(e => e.SteamId).HasColumnName("steam_id");
         entity.Property(e => e.SteamNickname).HasColumnName("steam_nickname");
         entity.Property(e => e.SteamAvatarUrl).HasColumnName("steam_avatar_url");

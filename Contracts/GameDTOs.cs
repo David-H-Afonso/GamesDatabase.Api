@@ -5,6 +5,7 @@ public class GameDto
     public int Id { get; set; }
     public int StatusId { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Developer { get; set; }
     public int? Grade { get; set; }
     public int? Critic { get; set; }
     public string? CriticProvider { get; set; }
@@ -26,6 +27,8 @@ public class GameDto
     public bool? IsCheaperByKey { get; set; }
     public string? KeyStoreUrl { get; set; }
     public bool Favorite { get; set; }
+    public bool IsSample { get; set; }
+    public string? SampleArtworkKey { get; set; }
 
     // Steam integration
     public int? SteamAppId { get; set; }
@@ -45,6 +48,7 @@ public class GameDto
     public string? SteamFinishedRejectedValue { get; set; }
     public string? SteamStartedRejectedValue { get; set; }
     public int? ManualPlaytimeMinutes { get; set; }
+    public bool ManualPlaytimeIsAdditive { get; set; }
 
     // Manual 100% completion
     public bool IsManuallyCompleted { get; set; }
@@ -63,8 +67,12 @@ public class GameDto
 
 public class GameCreateDto
 {
+    /// <summary>Optional client-generated UUID. Retrying the same row returns its game, never a duplicate.</summary>
+    public Guid? CreationRequestId { get; set; }
     public int StatusId { get; set; }
     public string Name { get; set; } = string.Empty;
+    [System.ComponentModel.DataAnnotations.MaxLength(150)]
+    public string? Developer { get; set; }
     public int? Grade { get; set; }
     public int? Critic { get; set; }
     public string? CriticProvider { get; set; }
@@ -89,6 +97,7 @@ public class GameCreateDto
     // Steam integration
     public int? SteamAppId { get; set; }
     public int? ManualPlaytimeMinutes { get; set; }
+    public bool ManualPlaytimeIsAdditive { get; set; }
 
     // Manual 100% completion
     public bool? IsManuallyCompleted { get; set; }
@@ -98,6 +107,8 @@ public class GameUpdateDto
 {
     public int? StatusId { get; set; }
     public string? Name { get; set; }
+    [System.ComponentModel.DataAnnotations.MaxLength(150)]
+    public string? Developer { get; set; }
     public int? Grade { get; set; }
     public int? Critic { get; set; }
     public string? CriticProvider { get; set; }
@@ -123,6 +134,7 @@ public class GameUpdateDto
     // Steam integration
     public int? SteamAppId { get; set; }
     public int? ManualPlaytimeMinutes { get; set; }
+    public bool? ManualPlaytimeIsAdditive { get; set; }
 
     // Manual 100% completion
     public bool? IsManuallyCompleted { get; set; }

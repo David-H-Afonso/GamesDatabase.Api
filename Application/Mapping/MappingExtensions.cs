@@ -12,6 +12,7 @@ public static class MappingExtensions
             Id = game.Id,
             StatusId = game.StatusId,
             Name = game.Name,
+            Developer = game.Developer,
             Grade = game.Grade,
             Critic = game.Critic,
             CriticProvider = game.CriticProvider,
@@ -31,6 +32,8 @@ public static class MappingExtensions
             IsCheaperByKey = game.IsCheaperByKey,
             KeyStoreUrl = game.KeyStoreUrl,
             Favorite = game.Favorite,
+            IsSample = game.SampleBatchId != null,
+            SampleArtworkKey = game.SampleArtworkKey,
             SteamAppId = game.SteamAppId,
             SteamPlaytimeForever = game.SteamPlaytimeForever,
             SteamPlaytime2Weeks = game.SteamPlaytime2Weeks,
@@ -44,6 +47,7 @@ public static class MappingExtensions
             SteamFinishedRejectedValue = game.SteamFinishedRejectedValue,
             SteamStartedRejectedValue = game.SteamStartedRejectedValue,
             ManualPlaytimeMinutes = game.ManualPlaytimeMinutes,
+            ManualPlaytimeIsAdditive = game.ManualPlaytimeIsAdditive,
             IsManuallyCompleted = game.IsManuallyCompleted,
             CreatedAt = game.CreatedAt,
             UpdatedAt = game.UpdatedAt,
@@ -67,6 +71,7 @@ public static class MappingExtensions
         {
             StatusId = dto.StatusId,
             Name = dto.Name,
+            Developer = string.IsNullOrWhiteSpace(dto.Developer) ? null : dto.Developer.Trim(),
             Grade = dto.Grade,
             Critic = dto.Critic,
             CriticProvider = dto.CriticProvider,
@@ -86,7 +91,8 @@ public static class MappingExtensions
             KeyStoreUrl = dto.KeyStoreUrl,
             Favorite = dto.Favorite ?? false,
             SteamAppId = dto.SteamAppId,
-            ManualPlaytimeMinutes = dto.ManualPlaytimeMinutes,
+            ManualPlaytimeMinutes = GamesDatabase.Api.Common.GamePlaytime.NormalizeManual(dto.ManualPlaytimeMinutes),
+            ManualPlaytimeIsAdditive = dto.ManualPlaytimeIsAdditive,
             IsManuallyCompleted = dto.IsManuallyCompleted ?? false
         };
 
@@ -121,7 +127,8 @@ public static class MappingExtensions
 
         if (dto.KeyStoreUrl != null) entity.KeyStoreUrl = dto.KeyStoreUrl;
         if (dto.SteamAppId.HasValue) entity.SteamAppId = dto.SteamAppId.Value;
-        if (dto.ManualPlaytimeMinutes.HasValue) entity.ManualPlaytimeMinutes = dto.ManualPlaytimeMinutes.Value;
+        if (dto.ManualPlaytimeMinutes.HasValue) entity.ManualPlaytimeMinutes = GamesDatabase.Api.Common.GamePlaytime.NormalizeManual(dto.ManualPlaytimeMinutes.Value);
+        if (dto.ManualPlaytimeIsAdditive.HasValue) entity.ManualPlaytimeIsAdditive = dto.ManualPlaytimeIsAdditive.Value;
         if (dto.IsManuallyCompleted.HasValue) entity.IsManuallyCompleted = dto.IsManuallyCompleted.Value;
 
         entity.CalculateScore();

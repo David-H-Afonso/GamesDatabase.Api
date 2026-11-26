@@ -33,6 +33,7 @@ public class UserService : IUserService
                 UseScoreColors = u.UseScoreColors,
                 ScoreProvider = u.ScoreProvider,
                 ShowPriceComparisonIcon = u.ShowPriceComparisonIcon,
+                TutorialEnabled = u.TutorialEnabled,
                 SteamId = u.SteamId,
                 SteamNickname = u.SteamNickname,
                 SteamAvatarUrl = u.SteamAvatarUrl,
@@ -68,6 +69,7 @@ public class UserService : IUserService
             UseScoreColors = user.UseScoreColors,
             ScoreProvider = user.ScoreProvider,
             ShowPriceComparisonIcon = user.ShowPriceComparisonIcon,
+            TutorialEnabled = user.TutorialEnabled,
             SteamId = user.SteamId,
             SteamNickname = user.SteamNickname,
             SteamAvatarUrl = user.SteamAvatarUrl,
@@ -93,6 +95,7 @@ public class UserService : IUserService
         {
             Username = request.Username,
             Role = role,
+            TutorialEnabled = request.TutorialEnabled,
             PasswordHash = !string.IsNullOrEmpty(request.Password)
                 ? _authService.HashPassword(request.Password)
                 : null
@@ -113,6 +116,7 @@ public class UserService : IUserService
             UseScoreColors = newUser.UseScoreColors,
             ScoreProvider = newUser.ScoreProvider,
             ShowPriceComparisonIcon = newUser.ShowPriceComparisonIcon,
+            TutorialEnabled = newUser.TutorialEnabled,
             CreatedAt = newUser.CreatedAt,
             UpdatedAt = newUser.UpdatedAt
         });
@@ -170,6 +174,16 @@ public class UserService : IUserService
         if (request.ShowPriceComparisonIcon.HasValue)
         {
             user.ShowPriceComparisonIcon = request.ShowPriceComparisonIcon.Value;
+        }
+
+        if (request.TutorialEnabled.HasValue)
+        {
+            if (request.TutorialEnabled.Value && !user.TutorialEnabled)
+            {
+                var state = await _context.OnboardingStates.SingleOrDefaultAsync(value => value.UserId == id);
+                if (state is not null) { state.Step = "welcome"; state.CompletedVersion = null; state.Revision++; state.UpdatedAt = DateTime.UtcNow; }
+            }
+            user.TutorialEnabled = request.TutorialEnabled.Value;
         }
 
         await _context.SaveChangesAsync();
@@ -269,10 +283,10 @@ public class UserService : IUserService
         {
             new() { Name = "Pending", Color = "#be9c23", SortOrder = 1, UserId = userId },
             new() { Name = "Next up", Color = "#793e77", SortOrder = 2, UserId = userId },
-            new() { Name = "DEFAULT_PLAYING", Color = "#61afef", SortOrder = 3, IsDefault = true, StatusType = SpecialStatusType.Playing, UserId = userId },
+            new() { Name = "Playing", Color = "#61afef", SortOrder = 3, IsDefault = true, StatusType = SpecialStatusType.Playing, UserId = userId },
             new() { Name = "Done", Color = "#3fc20f", SortOrder = 4, UserId = userId },
             new() { Name = "Abandoned", Color = "#b91d1d", SortOrder = 5, UserId = userId },
-            new() { Name = "DEFAULT_NOT_FULFILLED", Color = "#919191", SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled, UserId = userId }
+            new() { Name = "Not fulfilled", Color = "#919191", SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled, UserId = userId }
         };
 
         var playWiths = new List<GamePlayWith>

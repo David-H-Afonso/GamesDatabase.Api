@@ -8,6 +8,7 @@ using CsvHelper;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Infrastructure.Persistence;
 using GamesDatabase.Api.Domain.Entities;
+using GamesDatabase.Api.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -37,6 +38,8 @@ public class ZipExportService : IZipExportService
 
     public async Task<ZipExportResult> BuildZipAsync(string? authorizationHeader, bool fullExport = false)
     {
+        var userId = _httpContextAccessor.HttpContext?.GetUserId();
+        if (!userId.HasValue) throw new UnauthorizedAccessException("An authenticated owner is required to export games.");
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var stats = new ZipExportResult();
 
@@ -72,7 +75,7 @@ public class ZipExportService : IZipExportService
             await AddSettingsAsync(archive, records);
 
             // Add games
-            await AddGamesAsync(archive, records, fullExport, stats);
+            await AddGamesAsync(archive, records, fullExport, stats, userId.Value);
 
             // Add playlists and their ordered game references/assets.
             await AddPlaylistsAsync(archive, records, fullExport);
@@ -116,7 +119,7 @@ public class ZipExportService : IZipExportService
     private List<ExportRecord> ParseCsv(string csvContent)
     {
         // Remove BOM if present
-        if (csvContent.StartsWith("\uFEFF"))
+        if (csvContent.StartsWith("\uFEFF", StringComparison.Ordinal))
         {
             csvContent = csvContent.Substring(1);
         }
@@ -229,6 +232,8 @@ public class ZipExportService : IZipExportService
                 .ToList()
         }).ToList();
         await AddJsonToZip(archive, "Games Database/Settings/Playlists.json", playlists);
+        var preferences = records.SingleOrDefault(record => record.Type == "CollectionPreferences")?.CollectionPreferencesJson;
+        if (!string.IsNullOrWhiteSpace(preferences)) await AddJsonToZip(archive, "Games Database/Settings/CollectionPreferences.json", JsonSerializer.Deserialize<JsonElement>(preferences));
 
         _logger.LogInformation("Added settings files");
     }
@@ -276,7 +281,7 @@ public class ZipExportService : IZipExportService
         }
     }
 
-    private async Task AddGamesAsync(ZipArchive archive, List<ExportRecord> records, bool fullExport, ZipExportResult stats)
+    private async Task AddGamesAsync(ZipArchive archive, List<ExportRecord> records, bool fullExport, ZipExportResult stats, int userId)
     {
         var games = records.Where(r => r.Type == "Game").ToList();
         stats.TotalGames = games.Count;
@@ -286,7 +291,7 @@ public class ZipExportService : IZipExportService
         // Load all game IDs and their cache status
         var gameNames = games.Select(g => g.Name).ToList();
         var dbGames = await _context.Games
-            .Where(g => gameNames.Contains(g.Name))
+            .Where(g => g.UserId == userId && gameNames.Contains(g.Name))
             .Select(g => new { g.Id, g.Name, g.ModifiedSinceExport, g.Logo, g.Hero, g.Cover })
             .ToListAsync();
 
@@ -313,7 +318,7 @@ public class ZipExportService : IZipExportService
 
             // Check if we can skip this game
             var cache = exportCaches.GetValueOrDefault(dbGame.Id);
-            bool needsExport = fullExport || dbGame.ModifiedSinceExport || cache == null;
+            bool needsExport = fullExport || dbGame.ModifiedSinceExport || cache == null || cache.MetadataVersion < GameExportCache.CurrentMetadataVersion;
 
             // Check if images need retry
             bool logoNeedsRetry = !string.IsNullOrWhiteSpace(game.Logo) &&
@@ -338,6 +343,7 @@ public class ZipExportService : IZipExportService
                 var gameInfo = new
                 {
                     Name = game.Name,
+                    Developer = game.Developer,
                     Status = game.Status ?? "",
                     Platform = game.Platform ?? "",
                     PlayWith = game.PlayWith ?? "",
@@ -359,6 +365,7 @@ public class ZipExportService : IZipExportService
                     SteamPlaytime2Weeks = game.SteamPlaytime2Weeks ?? "",
                     SteamLastSynced = game.SteamLastSynced ?? "",
                     ManualPlaytimeMinutes = game.ManualPlaytimeMinutes ?? "",
+                    ManualPlaytimeIsAdditive = game.ManualPlaytimeIsAdditive ?? "",
                     IsManuallyCompleted = game.IsManuallyCompleted ?? "",
                     SteamCompletionPreserved = game.SteamCompletionPreserved ?? ""
                 };
@@ -384,6 +391,7 @@ public class ZipExportService : IZipExportService
             }
 
             // Download and add logo
+            cache.MetadataVersion = GameExportCache.CurrentMetadataVersion;
             bool logoDownloaded = false;
             if (!string.IsNullOrWhiteSpace(game.Logo) && (needsExport || logoNeedsRetry))
             {

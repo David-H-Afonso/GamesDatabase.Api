@@ -264,6 +264,12 @@ public class GameHistoryService : IGameHistoryService
                 entries.Add(Changed("Finished", before.Finished, newVal, $"Fin: '{before.Finished ?? "—"}' → '{newVal ?? "—"}'")!);
         }
 
+        if (patch.TryGetProperty("developer", out var developerEl))
+        {
+            var newVal = developerEl.ValueKind == System.Text.Json.JsonValueKind.Null ? null : developerEl.GetString()?.Trim();
+            if (before.Developer != newVal) entries.Add(Changed("Developer", before.Developer, newVal, "Desarrollador actualizado")!);
+        }
+
         if (patch.TryGetProperty("comment", out var commentEl))
         {
             var newVal = commentEl.ValueKind == System.Text.Json.JsonValueKind.Null ? null : commentEl.GetString();
@@ -322,7 +328,7 @@ public class GameHistoryService : IGameHistoryService
 
         if (patch.TryGetProperty("manualPlaytimeMinutes", out var manualPlaytimeEl))
         {
-            var newVal = manualPlaytimeEl.ValueKind == System.Text.Json.JsonValueKind.Null ? (int?)null : manualPlaytimeEl.GetInt32();
+            var newVal = GamePlaytime.NormalizeManual(manualPlaytimeEl.ValueKind == System.Text.Json.JsonValueKind.Null ? (int?)null : manualPlaytimeEl.GetInt32());
             if (before.ManualPlaytimeMinutes != newVal)
             {
                 entries.Add(Changed(
@@ -333,6 +339,11 @@ public class GameHistoryService : IGameHistoryService
             }
         }
 
+        if (patch.TryGetProperty("manualPlaytimeIsAdditive", out var additiveElement) && additiveElement.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+        {
+            var additive = additiveElement.GetBoolean();
+            if (before.ManualPlaytimeIsAdditive != additive) entries.Add(Changed("ManualPlaytimeIsAdditive", before.ManualPlaytimeIsAdditive.ToString(), additive.ToString(), additive ? "Tiempo manual sumado a Steam" : "Tiempo manual sustituye a Steam")!);
+        }
         return entries.Where(e => e != null).ToList();
     }
 

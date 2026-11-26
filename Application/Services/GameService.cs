@@ -12,7 +12,7 @@ namespace GamesDatabase.Api.Application.Services;
 
 public class GameService : IGameService
 {
-    private const int MaxManualPlaytimeMinutes = 600_000;
+    private const int MaxManualPlaytimeMinutes = GamePlaytime.MaximumManualMinutes;
     private readonly GamesDbContext _context;
     private readonly IViewFilterService _viewFilterService;
     private readonly IGameHistoryService _historyService;
@@ -29,6 +29,17 @@ public class GameService : IGameService
 
     public async Task<GameServiceResult<PagedResult<GameDto>>> GetGamesAsync(GameQueryParameters parameters, int userId)
     {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(parameters.NameSearchJson)) parameters.NameSearch = NameSearchMatching.Read(parameters.NameSearchJson);
+            var searchError = NameSearchMatching.Validate(parameters.NameSearch);
+            if (searchError is not null) return GameServiceResult<PagedResult<GameDto>>.BadRequest(searchError);
+            if (parameters.MaxStory is < 0) return GameServiceResult<PagedResult<GameDto>>.BadRequest("Maximum story duration cannot be negative.");
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException)
+        {
+            return GameServiceResult<PagedResult<GameDto>>.BadRequest("Invalid name-search configuration.");
+        }
         var requestedViewName = parameters.ViewName?.Trim();
         requestedViewName = string.Equals(requestedViewName, "default", StringComparison.OrdinalIgnoreCase)
             ? null
@@ -241,6 +252,23 @@ public class GameService : IGameService
 
     public async Task<GameServiceResult<GameDto>> CreateGameAsync(GameCreateDto gameDto, int userId)
     {
+        if (gameDto.CreationRequestId == Guid.Empty)
+            return GameServiceResult<GameDto>.BadRequest("CreationRequestId must be a non-empty UUID.");
+        var creationHash = gameDto.CreationRequestId.HasValue
+            ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(gameDto))))
+            : null;
+        async Task<GameServiceResult<GameDto>?> FindCreatedRow()
+        {
+            if (!gameDto.CreationRequestId.HasValue) return null;
+            var existing = await _context.Games.AsNoTracking().Where(game => game.UserId == userId && game.CreationRequestId == gameDto.CreationRequestId).Select(game => new { game.Id, game.CreationRequestHash }).SingleOrDefaultAsync();
+            if (existing is null) return null;
+            if (existing.CreationRequestHash != creationHash) return GameServiceResult<GameDto>.ConflictResult("This draft row was already created with different fields. Review the existing game before adding another.");
+            var created = await GetGameByIdAsync(existing.Id, userId);
+            return created is null ? GameServiceResult<GameDto>.NotFoundResult() : GameServiceResult<GameDto>.Ok(created);
+        }
+        var replay = await FindCreatedRow();
+        if (replay is not null) return replay;
+
         var statusExists = await _context.GameStatuses
             .AnyAsync(s => s.Id == gameDto.StatusId && s.UserId == userId);
         if (!statusExists)
@@ -268,14 +296,10 @@ public class GameService : IGameService
             return GameServiceResult<GameDto>.BadRequest(manualPlaytimeValidation);
         }
 
-        var game = gameDto.ToEntity();
-        game.UserId = userId;
-        _context.Games.Add(game);
-        await _context.SaveChangesAsync();
-
+        var validPlayWithIds = new List<int>();
         if (gameDto.PlayWithIds != null && gameDto.PlayWithIds.Any())
         {
-            var validPlayWithIds = await _context.GamePlayWiths
+            validPlayWithIds = await _context.GamePlayWiths
                 .Where(pw => gameDto.PlayWithIds.Contains(pw.Id) && pw.UserId == userId)
                 .Select(pw => pw.Id)
                 .ToListAsync();
@@ -283,15 +307,24 @@ public class GameService : IGameService
             if (validPlayWithIds.Count != gameDto.PlayWithIds.Count)
                 return GameServiceResult<GameDto>.BadRequest("One or more PlayWithIds are invalid for current user");
 
-            foreach (var playWithId in validPlayWithIds)
-            {
-                _context.GamePlayWithMappings.Add(new GamePlayWithMapping
-                {
-                    GameId = game.Id,
-                    PlayWithId = playWithId
-                });
-            }
-            await _context.SaveChangesAsync();
+        }
+        // Validate the entire owned catalog before persisting a game. A rejected
+        // row must not leave a created record that a retry could duplicate.
+        var game = gameDto.ToEntity();
+        game.UserId = userId;
+        game.CreationRequestId = gameDto.CreationRequestId;
+        game.CreationRequestHash = creationHash;
+        foreach (var playWithId in validPlayWithIds) game.GamePlayWiths.Add(new GamePlayWithMapping { PlayWithId = playWithId });
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        _context.Games.Add(game);
+        try { await _context.SaveChangesAsync(); }
+        catch (DbUpdateException error) when (gameDto.CreationRequestId.HasValue && error.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteExtendedErrorCode: 2067 })
+        {
+            await transaction.RollbackAsync();
+            _context.ChangeTracker.Clear();
+            var duplicate = await FindCreatedRow();
+            if (duplicate is not null) return duplicate;
+            throw;
         }
 
         // Cargar las relaciones para el DTO de respuesta
@@ -316,6 +349,7 @@ public class GameService : IGameService
         }
 
         await _historyService.RecordCreatedAsync(game, userId);
+        await transaction.CommitAsync();
 
         return GameServiceResult<GameDto>.Ok(game.ToDto());
     }
@@ -377,6 +411,7 @@ public class GameService : IGameService
         {
             Id = game.Id,
             Name = game.Name,
+            Developer = game.Developer,
             StatusId = game.StatusId,
             Grade = game.Grade,
             Critic = game.Critic,
@@ -396,6 +431,7 @@ public class GameService : IGameService
             KeyStoreUrl = game.KeyStoreUrl,
             Favorite = game.Favorite,
             ManualPlaytimeMinutes = game.ManualPlaytimeMinutes,
+            ManualPlaytimeIsAdditive = game.ManualPlaytimeIsAdditive,
             IsManuallyCompleted = game.IsManuallyCompleted
         };
 
@@ -458,6 +494,14 @@ public class GameService : IGameService
                 game.SteamFinishedSource = string.IsNullOrWhiteSpace(finishedValue) ? null : "manual";
             }
             game.Finished = finishedValue;
+        }
+
+        if (gameDto.TryGetProperty("developer", out var developerElement))
+        {
+            if (developerElement.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) return GameServiceResult.BadRequest("Developer must be text or null.");
+            var developer = developerElement.ValueKind == JsonValueKind.Null ? null : developerElement.GetString()?.Trim();
+            if (developer?.Length > 150) return GameServiceResult.BadRequest("Developer must contain at most 150 characters.");
+            game.Developer = string.IsNullOrWhiteSpace(developer) ? null : developer;
         }
 
         if (gameDto.TryGetProperty("comment", out var commentElement))
@@ -548,7 +592,21 @@ public class GameService : IGameService
 
         if (gameDto.TryGetProperty("steamAppId", out var steamAppIdElement))
         {
-            game.SteamAppId = steamAppIdElement.ValueKind == JsonValueKind.Null ? null : steamAppIdElement.GetInt32();
+            var nextAppId = steamAppIdElement.ValueKind == JsonValueKind.Null ? (int?)null : steamAppIdElement.GetInt32();
+            if (nextAppId is <= 0) return GameServiceResult.BadRequest("Steam App ID must be positive or null.");
+            if (nextAppId != game.SteamAppId)
+            {
+                game.SteamPlaytimeForever = null;
+                game.SteamPlaytime2Weeks = null;
+                game.SteamLastSynced = null;
+                game.SteamCompletionPreserved = false;
+                game.SteamAchievementsSource = null;
+                game.SteamAchievementsSyncedAt = null;
+                game.SteamAchievementsLastError = null;
+                game.SteamAchievementSchemaVersion = null;
+                game.SteamAchievementSchemaHash = null;
+            }
+            game.SteamAppId = nextAppId;
             if (game.SteamAppId == null)
             {
                 game.SteamFinishedSource = string.IsNullOrWhiteSpace(game.Finished) ? null : "manual";
@@ -568,7 +626,12 @@ public class GameService : IGameService
                 return GameServiceResult.BadRequest(validationError);
             }
 
-            game.ManualPlaytimeMinutes = manualPlaytime;
+            game.ManualPlaytimeMinutes = GamePlaytime.NormalizeManual(manualPlaytime);
+        }
+        if (gameDto.TryGetProperty("manualPlaytimeIsAdditive", out var additiveElement))
+        {
+            if (additiveElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return GameServiceResult.BadRequest("manualPlaytimeIsAdditive must be a boolean.");
+            game.ManualPlaytimeIsAdditive = additiveElement.GetBoolean();
         }
 
         if (gameDto.TryGetProperty("isManuallyCompleted", out var isManuallyCompletedElement))
@@ -576,7 +639,7 @@ public class GameService : IGameService
             game.IsManuallyCompleted = isManuallyCompletedElement.ValueKind != JsonValueKind.Null && isManuallyCompletedElement.GetBoolean();
         }
 
-        game.CalculateScore();
+        if (gameDto.TryGetProperty("critic", out _) || gameDto.TryGetProperty("story", out _)) game.CalculateScore();
 
         try
         {
@@ -711,34 +774,17 @@ public class GameService : IGameService
     {
         var includeReplayDates = parameters.IncludeReplayDates != false;
 
-        if (!string.IsNullOrEmpty(parameters.Search))
+        if (parameters.NameSearch is not null)
         {
-            var searchLower = parameters.Search.ToLower();
-            var searchNoAccents = RemoveDiacritics(searchLower);
-
-            var searchWithE = searchNoAccents.Replace("e", "é");
-            var searchWithO = searchNoAccents.Replace("o", "ó");
-            var searchWithA = searchNoAccents.Replace("a", "á");
-            var searchWithI = searchNoAccents.Replace("i", "í");
-            var searchWithU = searchNoAccents.Replace("u", "ú");
-
-            query = query.Where(g =>
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchLower}%") ||
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchNoAccents}%") ||
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithE}%") ||
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithO}%") ||
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithA}%") ||
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithI}%") ||
-                EF.Functions.Like(EF.Functions.Collate(g.Name, "NOCASE"), $"%{searchWithU}%") ||
-                (g.Comment != null && (
-                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchLower}%") ||
-                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchNoAccents}%") ||
-                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithE}%") ||
-                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithO}%") ||
-                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithA}%") ||
-                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithI}%") ||
-                    EF.Functions.Like(EF.Functions.Collate(g.Comment, "NOCASE"), $"%{searchWithU}%")
-                )));
+            var json = NameSearchMatching.Serialize(parameters.NameSearch);
+            query = parameters.SearchMetadata
+                ? query.Where(game => NameSearchMatching.SqlMatch(game.Name + " · " + (game.Comment ?? "") + " · " + (game.Developer ?? ""), json))
+                : query.Where(game => NameSearchMatching.SqlMatch(game.Name, json));
+        }
+        else if (!string.IsNullOrWhiteSpace(parameters.Search))
+        {
+            var json = NameSearchMatching.Serialize(new NameSearchDto { IncludeTerms = [parameters.Search] });
+            query = query.Where(game => NameSearchMatching.SqlMatch(game.Name + " · " + (game.Comment ?? "") + " · " + (game.Developer ?? ""), json));
         }
 
         if (parameters.StatusId.HasValue)
@@ -837,6 +883,8 @@ public class GameService : IGameService
         {
             query = query.Where(g => g.IsCheaperByKey == parameters.IsCheaperByKey.Value);
         }
+
+        if (parameters.MaxStory.HasValue) query = query.Where(game => game.Story.HasValue && game.Story <= parameters.MaxStory.Value);
 
         if (parameters.Favorite.HasValue)
         {
@@ -956,7 +1004,7 @@ public class GameService : IGameService
                 "finished" => parameters.SortDescending ? query.OrderByDescending(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.Finished).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "createdat" or "created" => parameters.SortDescending ? query.OrderByDescending(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.CreatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "updatedat" or "updated" or "lastedited" => parameters.SortDescending ? query.OrderByDescending(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.UpdatedAt).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
-                "steamplaytime" or "steamplaytimeforever" or "steamhours" => parameters.SortDescending ? query.OrderByDescending(g => g.ManualPlaytimeMinutes ?? g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(g => g.ManualPlaytimeMinutes ?? g.SteamPlaytimeForever ?? 0).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
+                "steamplaytime" or "steamplaytimeforever" or "steamhours" => parameters.SortDescending ? query.OrderByDescending(GamePlaytime.EffectiveExpression).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")) : query.OrderBy(GamePlaytime.EffectiveExpression).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE")),
                 "creation" or "id" => parameters.SortDescending ? query.OrderByDescending(g => g.Id) : query.OrderBy(g => g.Id),
                 _ => query.OrderBy(g => g.Status.SortOrder).ThenBy(g => EF.Functions.Collate(g.Status.Name, "NOCASE")).ThenBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
             };

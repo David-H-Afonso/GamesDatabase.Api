@@ -24,6 +24,8 @@ public class Playlist
     public string? LogoUrl { get; set; }
 
     public bool IsAutomatic { get; set; }
+    [JsonIgnore]
+    public string? SampleBatchId { get; set; }
     public int? MaxLength { get; set; }
     public int? GroupId { get; set; }
     public string? RulesJson { get; set; }

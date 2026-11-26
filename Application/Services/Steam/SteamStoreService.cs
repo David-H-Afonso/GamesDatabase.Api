@@ -76,16 +76,23 @@ public class SteamStoreService : ISteamStoreService
         return MapToDto(fresh);
     }
 
-    private async Task<SteamAppCache?> FetchFromStoreAsync(int appId)
+    /// <summary>Fresh public metadata without reading or writing the persistent app cache.</summary>
+    public async Task<SteamAppDetailsDto?> GetAppDetailsAsync(int appId, CancellationToken cancellationToken = default)
+    {
+        var details = await FetchFromStoreAsync(appId, cancellationToken);
+        return details is null ? null : MapToDto(details);
+    }
+
+    private async Task<SteamAppCache?> FetchFromStoreAsync(int appId, CancellationToken cancellationToken = default)
     {
         var url = $"{_settings.StoreApiBaseUrl}/api/appdetails?appids={appId}&l=english";
 
         try
         {
-            var response = await _httpClient.GetAsync(url);
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
 
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
             using var doc = JsonDocument.Parse(json);
 
             if (!doc.RootElement.TryGetProperty(appId.ToString(), out var appElement)) return null;
@@ -112,6 +119,7 @@ public class SteamStoreService : ISteamStoreService
                 LastFetched = DateTime.UtcNow
             };
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching store details for AppID {AppId}", appId);
@@ -201,7 +209,7 @@ public class SteamStoreService : ISteamStoreService
         }
     }
 
-    public async Task<string?> GetCommunityIconUrlAsync(int appId)
+    public async Task<string?> GetCommunityIconUrlAsync(int appId, CancellationToken cancellationToken = default)
     {
         var url = $"https://store.steampowered.com/app/{appId}/?l=english";
 
@@ -211,10 +219,10 @@ public class SteamStoreService : ISteamStoreService
             request.Headers.TryAddWithoutValidation("Cookie", "birthtime=568022401; lastagecheckage=1-0-1988; wants_mature_content=1");
             request.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
 
-            var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
 
-            var html = await response.Content.ReadAsStringAsync();
+            var html = await response.Content.ReadAsStringAsync(cancellationToken);
             var appIconIndex = html.IndexOf("apphub_AppIcon", StringComparison.OrdinalIgnoreCase);
             if (appIconIndex >= 0)
             {
@@ -225,6 +233,7 @@ public class SteamStoreService : ISteamStoreService
 
             return FindCommunityIconUrl(html, appId);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error fetching Steam community icon for AppID {AppId}", appId);
@@ -232,7 +241,7 @@ public class SteamStoreService : ISteamStoreService
         }
     }
 
-    public async Task<SteamAssetUrlsDto?> GetAssetUrlsAsync(int appId)
+    public async Task<SteamAssetUrlsDto?> GetAssetUrlsAsync(int appId, CancellationToken cancellationToken = default)
     {
         var requestJson = JsonSerializer.Serialize(new
         {
@@ -244,10 +253,10 @@ public class SteamStoreService : ISteamStoreService
 
         try
         {
-            using var response = await _httpClient.GetAsync(url);
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
 
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
             if (!document.RootElement.TryGetProperty("response", out var responseElement)
                 || !responseElement.TryGetProperty("store_items", out var storeItems)
                 || storeItems.ValueKind != JsonValueKind.Array
@@ -280,6 +289,7 @@ public class SteamStoreService : ISteamStoreService
                     : $"https://shared.akamai.steamstatic.com/community_assets/images/apps/{appId}/{communityIcon}.jpg"
             };
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error fetching Steam library assets for AppID {AppId}", appId);

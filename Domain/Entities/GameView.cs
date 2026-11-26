@@ -42,6 +42,7 @@ public class GameView
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
 
     /// <summary>
     /// Flag to indicate if the view has been modified since last export

@@ -18,11 +18,22 @@ public class BackupScheduleService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<BackupScheduleService> _logger;
+    private readonly IConfiguration? _configuration;
+    private readonly IHostEnvironment? _environment;
 
-    public BackupScheduleService(IServiceScopeFactory scopeFactory, ILogger<BackupScheduleService> logger)
+    public BackupScheduleService(IServiceScopeFactory scopeFactory, ILogger<BackupScheduleService> logger, IConfiguration? configuration = null, IHostEnvironment? environment = null)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _configuration = configuration;
+        _environment = environment;
+    }
+
+    public static string ResolveDestination(BackupSchedule schedule, bool isolated, string? localRoot)
+    {
+        if (!isolated) return schedule.DestinationPath.Trim();
+        if (string.IsNullOrWhiteSpace(localRoot) || !Path.IsPathFullyQualified(localRoot) || localRoot.StartsWith("\\\\", StringComparison.Ordinal)) throw new InvalidOperationException("Local test backups require an explicit local export root.");
+        return Path.Combine(Path.GetFullPath(localRoot), "backups", schedule.UserId.ToString(CultureInfo.InvariantCulture));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -100,7 +111,8 @@ public class BackupScheduleService : BackgroundService
         try
         {
             // Ensure destination directory exists
-            var dest = schedule.DestinationPath.Trim();
+            var isolated = _environment?.IsDevelopment() == true && _configuration?.GetValue<bool>("LocalDevelopment:DisableScheduledBackups") == true;
+            var dest = ResolveDestination(schedule, isolated, _configuration?["ExportSettings:DefaultExportPath"]);
             if (!Directory.Exists(dest))
                 Directory.CreateDirectory(dest);
 
@@ -185,6 +197,7 @@ public class BackupScheduleService : BackgroundService
                 {
                     Type = "Game",
                     Name = g.Name,
+                    Developer = g.Developer,
                     GameId = g.Id.ToString(CultureInfo.InvariantCulture),
                     Status = g.Status?.Name ?? "",
                     Platform = g.Platform?.Name ?? "",
@@ -211,6 +224,7 @@ public class BackupScheduleService : BackgroundService
                     SteamPlaytime2Weeks = g.SteamPlaytime2Weeks?.ToString() ?? "",
                     SteamLastSynced = g.SteamLastSynced?.ToString("O") ?? "",
                     ManualPlaytimeMinutes = g.ManualPlaytimeMinutes?.ToString() ?? "",
+                    ManualPlaytimeIsAdditive = g.ManualPlaytimeIsAdditive.ToString(),
                     IsManuallyCompleted = g.IsManuallyCompleted.ToString(),
                     SteamCompletionPreserved = g.SteamCompletionPreserved.ToString()
                 });
@@ -238,6 +252,8 @@ public class BackupScheduleService : BackgroundService
                 .ToListAsync(ct);
             foreach (var h in historyEntries)
                 allRecords.Add(new FullExportModel { Type = "History", Name = h.GameName, Status = h.ActionType, Started = h.ChangedAt.ToString("O"), HistoryField = h.Field, HistoryOldValue = h.OldValue ?? "", HistoryNewValue = h.NewValue ?? "" });
+
+            if (await CollectionPreferencesArchive.ExportAsync(db, userId, ct) is { } preferences) allRecords.Add(preferences);
 
             // ── Write CSV ────────────────────────────────────────────────────────
             var date = now.ToString("yyyyMMdd");

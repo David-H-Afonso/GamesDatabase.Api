@@ -21,6 +21,7 @@ public class GameViewConfiguration : IEntityTypeConfiguration<GameView>
         entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
         entity.Property(e => e.CreatedAt).HasColumnName("created_at");
         entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+        entity.Property(e => e.LastUsedAt).HasColumnName("last_used_at");
         entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
 
         entity.HasOne(e => e.User)

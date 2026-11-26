@@ -12,8 +12,12 @@ public class GameConfiguration : IEntityTypeConfiguration<Game>
 
         entity.HasKey(e => e.Id);
         entity.Property(e => e.Id).HasColumnName("id");
+        entity.Property(e => e.CreationRequestId).HasColumnName("creation_request_id");
+        entity.Property(e => e.CreationRequestHash).HasColumnName("creation_request_hash").HasMaxLength(64);
+        entity.HasIndex(e => new { e.UserId, e.CreationRequestId }).IsUnique();
         entity.Property(e => e.StatusId).HasColumnName("status_id").IsRequired();
         entity.Property(e => e.Name).HasColumnName("name").IsRequired();
+        entity.Property(e => e.Developer).HasColumnName("developer").HasMaxLength(150);
         entity.Property(e => e.Grade).HasColumnName("grade");
         entity.Property(e => e.Critic).HasColumnName("critic");
         entity.Property(e => e.CriticProvider).HasColumnName("critic_provider");
@@ -30,6 +34,9 @@ public class GameConfiguration : IEntityTypeConfiguration<Game>
         entity.Property(e => e.Hero).HasColumnName("hero");
         entity.Property(e => e.Cover).HasColumnName("cover");
         entity.Property(e => e.Favorite).HasColumnName("favorite").HasDefaultValue(false);
+        entity.Property(e => e.SampleBatchId).HasColumnName("sample_batch_id").HasMaxLength(36);
+        entity.Property(e => e.SampleArtworkKey).HasColumnName("sample_artwork_key").HasMaxLength(32);
+        entity.HasIndex(e => new { e.UserId, e.SampleBatchId });
         entity.Property(e => e.SteamAppId).HasColumnName("steam_app_id");
         entity.Property(e => e.SteamPlaytimeForever).HasColumnName("steam_playtime_forever");
         entity.Property(e => e.SteamPlaytime2Weeks).HasColumnName("steam_playtime_2weeks");
@@ -46,6 +53,7 @@ public class GameConfiguration : IEntityTypeConfiguration<Game>
         entity.Property(e => e.SteamFinishedRejectedValue).HasColumnName("steam_finished_rejected_value");
         entity.Property(e => e.SteamStartedRejectedValue).HasColumnName("steam_started_rejected_value");
         entity.Property(e => e.ManualPlaytimeMinutes).HasColumnName("manual_playtime_minutes");
+        entity.Property(e => e.ManualPlaytimeIsAdditive).HasColumnName("manual_playtime_is_additive").HasDefaultValue(false);
         entity.Property(e => e.IsManuallyCompleted).HasColumnName("IsManuallyCompleted");
         entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
         entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();

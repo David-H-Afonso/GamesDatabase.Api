@@ -14,17 +14,20 @@ public class SteamController : BaseApiController
     private readonly ISteamSyncService _steamSync;
     private readonly ISteamStoreService _steamStore;
     private readonly ISteamSyncJobService _syncJobs;
+    private readonly ISteamArtworkService _artwork;
 
     public SteamController(
         ISteamProfileService profile,
         ISteamSyncService steamSync,
         ISteamStoreService steamStore,
-        ISteamSyncJobService syncJobs)
+        ISteamSyncJobService syncJobs,
+        ISteamArtworkService artwork)
     {
         _profile = profile;
         _steamSync = steamSync;
         _steamStore = steamStore;
         _syncJobs = syncJobs;
+        _artwork = artwork;
     }
 
     /// <summary>Returns the Steam profile data linked to the current user.</summary>
@@ -188,6 +191,17 @@ public class SteamController : BaseApiController
         if (details == null)
             return NotFound(new { message = $"Could not retrieve metadata for AppID {appId}" });
         return Ok(details);
+    }
+
+    /// <summary>Read-only artwork candidates for an explicit editor action; never syncs/saves a game.</summary>
+    [HttpGet("app/{appId:int}/artwork")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> GetAppArtwork(int appId, CancellationToken cancellationToken)
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        if (appId <= 0) return BadRequest(new { code = "invalidSteamAppId" });
+        var result = await _artwork.GetAsync(appId, cancellationToken);
+        return result is null ? NotFound(new { code = "steamArtworkUnavailable" }) : Ok(result);
     }
 
     /// <summary>Suggests GDB games that might match unlinked Steam library games by name similarity.</summary>

@@ -16,6 +16,7 @@ public class GameViewDto
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
 }
 
 /// <summary>
@@ -54,6 +55,7 @@ public class GameViewSummaryDto
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
     public int FilterCount { get; set; }
     public int SortCount { get; set; }
 }

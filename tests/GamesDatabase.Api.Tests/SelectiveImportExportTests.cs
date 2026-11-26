@@ -78,6 +78,22 @@ public sealed class SelectiveImportExportTests(GamesDatabaseApiFactory factory) 
     }
 
     [Fact]
+    public async Task Developer_roundtrips_and_legacy_imports_do_not_erase_it()
+    {
+        var client = await ClientAsync();
+        (await client.PutAsJsonAsync($"/api/games/{factory.UserAGameId}", new { developer = "Assigned studio" })).EnsureSuccessStatusCode();
+        var exported = await client.PostAsJsonAsync("/api/DataExport/selective-games-export", new { gameIds = new[] { factory.UserAGameId } });
+        exported.EnsureSuccessStatusCode(); var csv = await exported.Content.ReadAsStringAsync();
+        Assert.Contains("Developer", csv); Assert.Contains("Assigned studio", csv);
+        using (var legacy = ImportForm("{}", "Type,Name,Status,Comment\nGame,Game A,Backlog A,Legacy import\n")) (await client.PostAsync("/api/DataExport/selective-games-import", legacy)).EnsureSuccessStatusCode();
+        Assert.Equal("Assigned studio", (await client.GetFromJsonAsync<GameDto>($"/api/games/{factory.UserAGameId}"))!.Developer);
+        using (var cleared = ImportForm("{}", "Type,Name,Status,Developer\nGame,Game A,Backlog A,\n")) (await client.PostAsync("/api/DataExport/selective-games-import", cleared)).EnsureSuccessStatusCode();
+        Assert.Null((await client.GetFromJsonAsync<GameDto>($"/api/games/{factory.UserAGameId}"))!.Developer);
+        using (var restore = ImportForm("{}", csv)) (await client.PostAsync("/api/DataExport/selective-games-import", restore)).EnsureSuccessStatusCode();
+        Assert.Equal("Assigned studio", (await client.GetFromJsonAsync<GameDto>($"/api/games/{factory.UserAGameId}"))!.Developer);
+    }
+
+    [Fact]
     public async Task Full_export_import_roundtrip_preserves_critic_provider()
     {
         var client = await ClientAsync();

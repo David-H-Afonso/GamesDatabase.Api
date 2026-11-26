@@ -2,8 +2,10 @@ namespace GamesDatabase.Api.Domain.Entities;
 
 public class GameExportCache
 {
+    public const int CurrentMetadataVersion = 2;
     public int Id { get; set; }
     public int GameId { get; set; }
+    public int MetadataVersion { get; set; }
     public Game Game { get; set; } = null!;
 
     public DateTime LastExportedAt { get; set; }
