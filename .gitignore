@@ -34,6 +34,19 @@ obj/
 # Uncomment if you have tasks that create the project's static files in wwwroot
 #wwwroot/
 .env
+.env.*
+!.env.example
+.tmp/
+BEFORE_READY.md
+*.lscache
+*.tsbuildinfo
+TestResults/
+# Historical implementation/repair notes are local records, not the public guide.
+DOCS/COMPLETE_REORDERING_FIX_SUMMARY.md
+DOCS/FIX_*.md
+DOCS/backend/01-backend-refactor-plan.md
+DOCS/backend/03-backend-implementation-guide.md
+DOCS/backend/
 
 # appsettings.Development.json contains a hardcoded JWT secret (known default).
 # Exclude it so the key is not committed to source control.

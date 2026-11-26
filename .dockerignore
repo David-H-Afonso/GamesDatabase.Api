@@ -31,6 +31,7 @@ exports/
 *.md
 README*
 LICENSE*
+!LICENSE.md
 DOCS/
 
 # Docker files
@@ -51,12 +52,16 @@ dist/
 .env
 .env.*
 !.env.example
+appsettings.Development.json
 
 # Logs
 *.log
 logs/
 
 # Temporary files
+.tmp/
+.playwright-mcp/
+BEFORE_READY.md
 *.tmp
 *.temp
 *~
