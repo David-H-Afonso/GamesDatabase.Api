@@ -1,8 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Webp;
-using SixLabors.ImageSharp.Processing;
+using GamesDatabase.Api.Common;
 
 namespace GamesDatabase.Api.Controllers;
 
@@ -11,7 +9,6 @@ namespace GamesDatabase.Api.Controllers;
 [AllowAnonymous]
 public class ImageProxyController : ControllerBase
 {
-    private static readonly WebpEncoder _encoder = new() { Quality = 75 };
     private static readonly string[] _supportedImageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".ico", ".bmp"];
 
     // Used when the UNC network path is inaccessible — falls back to fetching
@@ -67,85 +64,78 @@ public class ImageProxyController : ControllerBase
         h = h > 0 ? Math.Clamp(h, 1, 2560) : 0;
 
         // ETag is derived from the source file's modification time, size and requested
-        // dimensions. Including the file size catches uploads that preserve timestamps.
+        // dimensions AND encoder version, so a quality/codec change cannot return a
+        // false 304 for a thumbnail produced by the previous encoder.
         var sourceInfo = new System.IO.FileInfo(requestedFull);
         var sourceLastModified = sourceInfo.LastWriteTimeUtc;
-        var eTag = $"\"{sourceLastModified.Ticks}-{sourceInfo.Length}-{w}-{h}\"";
+        var eTag = $"\"{ImageThumbnailEncoder.CacheVersion}-{sourceLastModified.Ticks}-{sourceInfo.Length}-{w}-{h}\"";
 
         // Respond with 304 if the browser already has the current version.
         var ifNoneMatch = Request.Headers["If-None-Match"].FirstOrDefault();
         if (ifNoneMatch == eTag)
+        {
+            SetCacheHeaders(eTag, sourceLastModified);
             return StatusCode(304);
+        }
 
         var resolvedRelativePath = Path.GetRelativePath(rootFull, requestedFull);
-        var cacheDir = Path.Combine(rootFull, "_proxy_cache", Path.GetDirectoryName(resolvedRelativePath) ?? "");
+        var isolated = _configuration.GetValue<bool>("LocalDevelopment:DisableScheduledBackups");
+        var configuredCache = _configuration["ImageSettings:ProxyCachePath"];
+        // Local verification may read NAS artwork, never create/delete its production cache.
+        var cacheRoot = !string.IsNullOrWhiteSpace(configuredCache)
+            && Path.IsPathFullyQualified(configuredCache)
+            && (!isolated || !configuredCache.StartsWith(@"\\", StringComparison.Ordinal))
+            ? Path.GetFullPath(configuredCache)
+            : isolated ? null : Path.Combine(rootFull, "_proxy_cache");
+        var cacheDir = cacheRoot is null ? null : Path.Combine(cacheRoot, Path.GetDirectoryName(resolvedRelativePath) ?? "");
         // Include ticks + file size in the cache filename so a replaced file (even with
         // preserved timestamp) always gets a fresh cache entry without timestamp comparisons.
-        var cacheFile = $"{Path.GetFileNameWithoutExtension(resolvedRelativePath)}_{sourceLastModified.Ticks}_{sourceInfo.Length}_{w}x{h}.webp";
-        var cachePath = Path.Combine(cacheDir, cacheFile);
+        var cacheFile = $"{Path.GetFileNameWithoutExtension(resolvedRelativePath)}_{ImageThumbnailEncoder.CacheVersion}_{sourceLastModified.Ticks}_{sourceInfo.Length}_{w}x{h}.webp";
+        var cachePath = cacheDir is null ? null : Path.Combine(cacheDir, cacheFile);
 
-        if (System.IO.File.Exists(cachePath))
+        if (cachePath is not null && System.IO.File.Exists(cachePath))
         {
             SetCacheHeaders(eTag, sourceLastModified);
             return File(System.IO.File.OpenRead(cachePath), "image/webp");
         }
 
         // Delete any stale cache entries for this image (different ticks/size).
-        if (Directory.Exists(cacheDir))
+        if (cacheDir is not null && Directory.Exists(cacheDir))
         {
             var baseName = Path.GetFileNameWithoutExtension(resolvedRelativePath) + "_";
             foreach (var stale in Directory.EnumerateFiles(cacheDir, $"{baseName}*.webp"))
                 try { System.IO.File.Delete(stale); } catch { }
         }
 
-        // ICO files (Vista+ PNG-compressed frames) fail ImageSharp's default loader;
-        // extract the largest embedded frame first.
+        // Prefer the largest embedded ICO frame, including Vista+ PNG frames.
         byte[]? rawBytes = null;
         if (Path.GetExtension(requestedFull).Equals(".ico", StringComparison.OrdinalIgnoreCase))
             rawBytes = await ExtractLargestIcoFrameAsync(requestedFull, ct);
 
         try
         {
-            Image image;
-            if (rawBytes != null)
-            {
-                image = await Image.LoadAsync(new MemoryStream(rawBytes), ct);
-            }
-            else
-            {
-                image = await Image.LoadAsync(requestedFull, ct);
-            }
+            if (sourceInfo.Length > 64L * 1024 * 1024) throw new InvalidDataException("Image exceeds the input byte budget.");
+            rawBytes ??= await System.IO.File.ReadAllBytesAsync(requestedFull, ct);
+            ct.ThrowIfCancellationRequested();
+            var bytes = ImageThumbnailEncoder.EncodeWebp(rawBytes, w, h);
+            var ms = new MemoryStream(bytes, writable: false);
 
-            using (image)
+            if (cacheDir is not null && cachePath is not null)
             {
-                if (w > 0 || h > 0)
-                {
-                    image.Mutate(x => x.Resize(new ResizeOptions
-                    {
-                        Mode = ResizeMode.Max,
-                        Size = new Size(w > 0 ? w : int.MaxValue, h > 0 ? h : int.MaxValue),
-                    }));
-                }
-
-                var ms = new MemoryStream();
-                await image.SaveAsync(ms, _encoder, ct);
-                ms.Position = 0;
-
                 try
                 {
                     Directory.CreateDirectory(cacheDir);
-                    await System.IO.File.WriteAllBytesAsync(cachePath, ms.ToArray(), ct);
-                    ms.Position = 0;
+                    await System.IO.File.WriteAllBytesAsync(cachePath, bytes, ct);
                 }
                 catch (Exception cacheEx)
                 {
                     _logger.LogWarning(cacheEx, "Could not write image cache for {Path}", cachePath);
                 }
-
-                SetCacheHeaders(eTag, sourceLastModified);
-                return File(ms, "image/webp");
             }
+            SetCacheHeaders(eTag, sourceLastModified);
+            return File(ms, "image/webp");
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Image optimisation failed for {Path}; falling back to original", resolvedRelativePath);
@@ -235,7 +225,13 @@ public class ImageProxyController : ControllerBase
 
     private static bool IsSafeRelativeImagePath(string imagePath)
     {
-        if (string.IsNullOrWhiteSpace(imagePath) || Path.IsPathRooted(imagePath))
+        if (string.IsNullOrWhiteSpace(imagePath) || Path.IsPathRooted(imagePath)
+            || imagePath.StartsWith('\\') || imagePath.Length > 1 && imagePath[1] == ':')
+            return false;
+
+        var extension = Path.GetExtension(imagePath);
+        if (!_supportedImageExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
+            && !(extension.Length == 0 && new[] { "cover", "hero", "logo" }.Contains(Path.GetFileName(imagePath), StringComparer.OrdinalIgnoreCase)))
             return false;
 
         return imagePath

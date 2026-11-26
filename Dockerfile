@@ -1,7 +1,7 @@
 # Build stage: run the SDK natively on the builder and publish for the target
 # architecture. This keeps the final image multi-architecture without running
 # the .NET compiler through QEMU for arm64.
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
 WORKDIR /src
 
@@ -20,7 +20,7 @@ COPY . .
 RUN dotnet publish GamesDatabase.Api.csproj -c Release -o /app/publish --no-restore --arch "$(cat /tmp/dotnet-arch)"
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 # Install curl for healthcheck
@@ -32,6 +32,7 @@ RUN mkdir -p /app/exports
 
 # Copy published app
 COPY --from=build /app/publish .
+COPY --from=build /src/LICENSE.md /app/LICENSE.md
 
 # Environment variables for configuration
 ENV ASPNETCORE_URLS=http://+:8080
