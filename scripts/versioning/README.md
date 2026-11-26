@@ -7,6 +7,9 @@ Portable Node 22+ tooling, no npm dependency and no AI/network classification.
 - `feat(scope): ...` → MINOR.
 - `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci` → PATCH, so **every allowed commit has a version**, including documentation/tooling.
 - `!` after type/scope or a `BREAKING CHANGE:` footer → MAJOR.
+- An explicit `Release-As: MAJOR.MINOR.PATCH` trailer selects an owner-reviewed
+  product milestone without claiming an incompatible API. It must be strictly
+  newer than the parent and cannot weaken the classified increment.
 - Vague/untyped messages stop before commit rather than guessing compatibility from file count.
 - Existing numeric tags are retained (`tagPrefix: ""`). Old public history before the explicit baseline is not rewritten or retrospectively versioned.
 
@@ -34,6 +37,17 @@ node scripts/versioning/cli.mjs prepare --message "feat(home): add configurable 
 
 `plan` is read-only. `prepare` updates working version fields only; it does not stage, commit or push. Inspect/stage the exact diff and obtain fresh approval. Using the same message for the eventual commit does not bump twice.
 
+Example of an explicit product milestone:
+
+```text
+feat(collection): launch games database 3.0
+
+Release-As: 3.0.0
+```
+
+Pass this exact multiline message to plan/prepare and the eventual commit. The
+same explicit version is verified locally and by CI; old tags remain immutable.
+
 ## Safety before push
 
 The pre-push hook checks every new first-parent commit after the baseline and verifies its increment and synchronized files. CI repeats the check so `--no-verify` cannot bypass the remote gate. It never amends, rebases, force-pushes, tags or publishes. A failed check blocks with diagnostics.
@@ -43,6 +57,11 @@ An explicitly requested amend is calculated from the original parent; commits al
 ## CI / release identity
 
 Each commit contains its own number. When several commits are pushed together, CI validates all, but only the tested/build HEAD gets a published Docker artifact and GitHub release. Artifact/release numbers come from that committed HEAD. Publication is not production deployment. GitHub-token-created tags must not be expected to trigger a second workflow; release/build steps must be explicitly chained in the workflow.
+
+Prepared human notes at `docs/releases/<committed-version>.md` are published as
+the release body, including migration/compatibility and known limitations. Older
+versions without that file retain generated notes. Local/default execution of
+`release.mjs` remains a read-only plan; publication is still gated to CI.
 
 ## Export to another project
 
@@ -56,7 +75,7 @@ The first command is a plan. The exporter only copies this kit and refuses to ov
 ## Verification
 
 ```sh
-node --test scripts/versioning/core.test.mjs
+node --test scripts/versioning/core.test.mjs scripts/versioning/release.test.mjs
 node scripts/versioning/cli.mjs check
 ```
 

@@ -18,7 +18,11 @@ export function classifyMessage(message, allowedTypes = DEFAULT_TYPES) {
   }
   const type = header[1].toLowerCase();
   const breaking = Boolean(header[3]) || /(?:^|\r?\n)BREAKING[ -]CHANGE:\s*\S/.test(message);
-  return { type, subject, bump: breaking ? 'major' : type === 'feat' ? 'minor' : 'patch', breaking };
+  const releases = String(message).split(/\r?\n/).slice(1).filter(line => /^Release-As:/i.test(line));
+  if (releases.length > 1) throw new Error('Only one explicit Release-As trailer is permitted.');
+  const releaseAs = releases[0]?.replace(/^Release-As:\s*/i, '').trim();
+  if (releaseAs !== undefined) parseVersion(releaseAs);
+  return { type, subject, bump: breaking ? 'major' : type === 'feat' ? 'minor' : 'patch', breaking, ...(releaseAs !== undefined ? { releaseAs } : {}) };
 }
 
 export function nextVersion(previous, bump) {
@@ -30,6 +34,18 @@ export function nextVersion(previous, bump) {
   const result = `${major}.${minor}.${patch}`;
   parseVersion(result);
   return result;
+}
+
+/** An owner-selected product milestone is explicit, without claiming an API break. */
+export function plannedVersion(previous, classification) {
+  if (!classification.releaseAs) return nextVersion(previous, classification.bump);
+  const from = parseVersion(previous), to = parseVersion(classification.releaseAs);
+  const firstDifference = to.findIndex((part, index) => part !== from[index]);
+  if (firstDifference < 0 || to[firstDifference] < from[firstDifference]) throw new Error('Release-As must be strictly newer than the committed parent version.');
+  const automatic = parseVersion(nextVersion(previous, classification.bump));
+  const difference = to.findIndex((part, index) => part !== automatic[index]);
+  if (difference >= 0 && to[difference] < automatic[difference]) throw new Error('Release-As cannot weaken the classified version increment.');
+  return classification.releaseAs;
 }
 
 // Locate JSON string values without reformatting lockfiles or unstaged edits.
@@ -137,7 +153,7 @@ export function validateConfig(config) {
 
 export function verifyCommit({ previousVersion, message, files }, config) {
   const classification = classifyMessage(message, config.allowedTypes ?? DEFAULT_TYPES);
-  const expected = nextVersion(previousVersion, classification.bump);
+  const expected = plannedVersion(previousVersion, classification);
   for (const target of config.files) checkTarget(files[target.path], target, expected);
   return { version: expected, ...classification };
 }

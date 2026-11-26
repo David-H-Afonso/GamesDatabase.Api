@@ -29,16 +29,16 @@ jobs:
           node-version: '22'
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
       - name: Test portable version rules
-        run: node --test scripts/versioning/core.test.mjs
+        run: node --test scripts/versioning/core.test.mjs scripts/versioning/release.test.mjs
       - name: Validate every outgoing commit version
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/versioning/cli.mjs check-range --from "$BASE_SHA" --to "$HEAD_SHA"
       - name: Restore
-        run: dotnet restore GamesDatabase.Api.sln
+        run: dotnet restore GamesDatabase.Api.sln -p:NuGetAuditMode=all -p:NuGetAuditLevel=moderate -warnaserror:NU1902,NU1903,NU1904
       - name: Build
         run: dotnet build GamesDatabase.Api.sln --configuration Release --no-restore
       - name: Test with isolated test data

@@ -3,7 +3,7 @@ import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, 
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { assertImmutableTagUpdate, canonicalVersion, classifyMessage, nextVersion, rewriteTarget, validateConfig, verifyCommit } from './core.mjs';
+import { assertImmutableTagUpdate, canonicalVersion, classifyMessage, plannedVersion, rewriteTarget, validateConfig, verifyCommit } from './core.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const CONFIG = '.versioning.json';
@@ -34,7 +34,7 @@ export function makePlan(message, { amend = false, staged = false } = {}) {
   const baseRef = amend ? 'HEAD^1' : 'HEAD';
   const previous = canonicalVersion(blob(baseRef, settings.files[0].path), settings.files[0]);
   const classification = classifyMessage(message, settings.allowedTypes);
-  return { settings, baseRef, from: previous, version: nextVersion(previous, classification.bump), ...classification, files: settings.files.map(file => file.path) };
+  return { settings, baseRef, from: previous, version: plannedVersion(previous, classification), ...classification, files: settings.files.map(file => file.path) };
 }
 
 function prepareWorking(plan) {

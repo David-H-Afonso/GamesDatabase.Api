@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { assertImmutableTagUpdate, assertPublicationContext, canonicalVersion, classifyMessage, locateJson, nextVersion, parseVersion, rewriteTarget, validateConfig, verifyCommit } from './core.mjs';
+import { assertImmutableTagUpdate, assertPublicationContext, canonicalVersion, classifyMessage, locateJson, nextVersion, plannedVersion, parseVersion, rewriteTarget, validateConfig, verifyCommit } from './core.mjs';
 
 const json = { path: 'package.json', format: 'json', pointers: [['version']] };
 const lock = { path: 'package-lock.json', format: 'json', pointers: [['version'], ['packages', '', 'version']] };
@@ -27,6 +27,18 @@ test('unknown or vague messages are rejected, not assigned an invented major/min
 test('custom project types can be explicitly configured without changing the engine', () => {
   assert.equal(classifyMessage('perf(query): optimize', ['perf']).bump, 'patch');
   assert.throws(() => classifyMessage('perf(query): optimize'));
+});
+test('an explicit product milestone is validated without inventing a breaking contract', () => {
+  const classification = classifyMessage('feat(collection): introduce the guided collection experience\n\nRelease-As: 3.0.0');
+  assert.equal(classification.breaking, false);
+  assert.equal(plannedVersion('2.0.2', classification), '3.0.0');
+  assert.equal(verifyCommit({ previousVersion: '2.0.2', message: 'feat(collection): introduce the guided collection experience\n\nRelease-As: 3.0.0', files: { 'package.json': '{"version":"3.0.0"}' } }, settings).version, '3.0.0');
+});
+test('explicit release selection cannot downgrade, duplicate, weaken a break or accept malformed trailers', () => {
+  for (const value of ['2.0.2', '1.9.0']) assert.throws(() => plannedVersion('2.0.2', classifyMessage(`feat: meaningful feature\n\nRelease-As: ${value}`)));
+  assert.throws(() => plannedVersion('2.0.2', classifyMessage('fix!: incompatible change\n\nRelease-As: 2.1.0')));
+  assert.throws(() => classifyMessage('feat: meaningful feature\n\nRelease-As: 3.0.0\nRelease-As: 4.0.0'));
+  for (const value of ['', 'v3.0.0', '3.0', '3.0.0-beta']) assert.throws(() => classifyMessage(`feat: meaningful feature\n\nRelease-As: ${value}`));
 });
 test('semver resets lower positions, accepts zero and rejects malformed/unsafe versions', () => {
   assert.equal(nextVersion('2.3.4', 'patch'), '2.3.5');
