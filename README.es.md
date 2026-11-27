@@ -1,298 +1,138 @@
 # Games Database API
 
-[English](README.md) · [Español](README.es.md) · **Backend API** ·
-[Web: English](https://github.com/David-H-Afonso/GamesDatabase.Front/blob/HEAD/README.md) /
-[Español](https://github.com/David-H-Afonso/GamesDatabase.Front/blob/HEAD/README.es.md)
+[English](README.md) · [Español](README.es.md) · [Cliente web](https://github.com/David-H-Afonso/GamesDatabase.Front) · [Versiones](https://github.com/David-H-Afonso/GamesDatabase.Api/releases)
 
-**La capa de datos propios e integraciones de Games Database.**
-
-API ASP.NET Core/.NET 10 para bibliotecas personales: juegos, catálogos,
-playlists, partidas, estadísticas, Steam, importaciones y recuperación. Cada
-cuenta tiene su colección; el cliente no elige la identidad de otro usuario.
-
-[Inicio rápido](#requisitos-e-inicio-rápido) · [Recorrido práctico](#de-la-api-a-la-biblioteca) ·
-[Contratos](#contratos-api) · [Arquitectura](DOCS/ARCHITECTURE.es.md)
-
-![Cliente web pareado usando esta API para una colección demo del catálogo Steam real](DOCS/images/demo-home-es.webp)
-
-> Son capturas del **cliente web pareado**, no de un panel API ni de una cuenta pública
-> de jugador. La demo independiente de 24 juegos utiliza datos/imágenes reales de Steam;
-> estados, favoritos y listas ilustran organización. No se han copiado ni inventado
-> logros de jugador, tiempo jugado, notas o fechas de partida.
-> [Fuentes y alcance de las capturas](DOCS/SCREENSHOTS.es.md).
-
-**Código y releases:** esta guía sigue el código del repositorio. El baseline
-comprobado antes del seguimiento del 27 de noviembre era API **3.0.0** / Front **3.0.1**.
-Consulta versión/SHA exactos en [releases API](https://github.com/David-H-Afonso/GamesDatabase.Api/releases)
-y [releases Web](https://github.com/David-H-Afonso/GamesDatabase.Front/releases).
-Una copia sin commit puede ir por delante de la última imagen; la documentación
-no demuestra que una imagen antigua incluya los cambios posteriores de crítica/fechas/
-chinchetas o seguridad.
+El backend de Games Database, desarrollado con ASP.NET Core, EF Core y SQLite.
+Almacena la biblioteca de cada usuario y ofrece los servicios que utiliza el cliente
+web: playlists, estadísticas, integración con Steam, metadatos y transferencia de datos.
 
 ## Funciones
 
-- Autenticación JWT, administración de usuarios y datos/catálogos propios.
-- CRUD, actualización parcial, búsqueda Unicode literal, filtros y vistas con dos plazas de chincheta propias.
-- Playlists manuales/automáticas, carpetas, capacidad y orden atómico.
-- Preferencias Inicio/GOTY con revisión y estadísticas de toda la colección.
-- Conjuntos Steam base/DLC, completado conservado, jobs explícitos y revisión de fechas por campo.
-- Candidatos de imágenes independientes y thumbnails SkiaSharp/WebP limitados.
-- Metadatos Steam/Wikidata y estimaciones atribuidas desde Deku Deals público,
-  con planes firmados/caducables y explicación de horas originales/redondeo.
-- Guía opcional, vistas retenidas, juegos de ejemplo opt-in y limpieza revisada.
-- Juego aleatorio propio y recomendaciones estables con cambio diario UTC.
-- CSV/JSON/ZIP, backups y controles de sincronización de red.
+- Autenticación JWT, administración de usuarios y bibliotecas y catálogos independientes.
+- Búsqueda de juegos, filtros, vistas guardadas, playlists manuales y automáticas, y carpetas.
+- Configuración de Inicio, Focus, registro de partidas y estadísticas de la colección.
+- Importación desde Steam, seguimiento de logros y sugerencias de fechas para revisar.
+- Datos de Steam y Wikidata, críticas con su fuente y estimaciones de HLTB a través
+  de Deku Deals. Los lotes de autorrellenado se guardan en SQLite y pueden reanudarse.
+- Herramientas CSV, JSON y ZIP, configuración de copias de seguridad e integración opcional con Household.
 
-## De la API a la biblioteca
+<details>
+<summary>Ver el cliente web</summary>
 
-### 1. Empieza por una cuenta y sus catálogos
+![Biblioteca de Games Database](DOCS/images/demo-library-es.webp)
 
-Arranca la API con una base vacía/local elegida siguiendo la instalación inferior,
-comprueba `GET /health` y abre `/swagger` en Development. Entra desde el cliente web
-o `POST /api/users/login`. Usa su sesión bearer en las siguientes llamadas; no la
-sustituyas por `X-User-Id` ni por IDs de otra cuenta.
+![Revisión de información](DOCS/images/demo-metadata-es.webp)
 
-Consulta `GET /api/gamestatus/active` y `GET /api/gameplatforms/active` para obtener
-**tus** IDs de catálogo. Un alta manual puede ser tan pequeña como:
+</details>
 
-```http
-POST /api/games
-Authorization: Bearer <your-token>
-Content-Type: application/json
+[Créditos de las capturas](DOCS/SCREENSHOTS.es.md).
 
-{
-  "name": "Portal 2",
-  "statusId": 17,
-  "creationRequestId": "1ca8ce95-7339-464b-a1b8-b3d5845ff845"
-}
-```
+## Ejecutar en local
 
-`17` es ilustrativo: usa un estado activo propio. Genera un UUID por fila nueva;
-reintenta esa fila exacta con el mismo UUID/payload, no creando otro juego. El alta
-compacta de la web conserva borradores y recibos por fila.
+Instala el **SDK de .NET 10**. SQLite viene incluido, por lo que no hace falta un
+servidor de base de datos. Node.js 22+ solo es necesario para las herramientas de
+versionado del repositorio.
 
-![Biblioteca propia en Cards con imágenes Steam reales y dos vistas rápidas fijas](DOCS/images/demo-library-es.webp)
-
-### 2. Añade catálogo sin importar progreso de jugadores
-
-Usa **Rellenar información automáticamente** o pide
-`POST /api/games/{id}/metadata/preview` con `overwrite`, `includeArtwork`,
-`includeDurations`, `includeCritic`, `reviewVersion: 2` y una identidad revisada opcional. Examina `fields`, `matches` y
-`notices`; envía solo los nombres de campos elegidos y el token del plan a
-`POST /api/games/{id}/metadata/apply`. Consultar nunca guarda por sí solo.
-
-El plan vincula cuenta, juego, timestamp de edición y caducidad de diez minutos.
-Los datos generales usan Steam/Wikidata; historia/completista usa cifras HLTB
-atribuidas publicadas en Deku Deals. `sourceHours` conserva precisión y la web
-explica el valor propuesto en horas enteras. Ni estimaciones ni imágenes son progreso.
-
-La crítica conserva el proveedor real: Metacritic de la edición Steam y después
-Metacritic/OpenCritic atribuidos en Deku, explicando su ámbito de plataforma.
-Reemplazar consulta grupos rellenados; confirmar coincidencias no inventa fechas ni
-historial. Importar/sincronizar ya no etiqueta un porcentaje calculado de usuarios
-como "SteamDB" y no reescribe notas existentes. Los trabajos explícitos de selección/
-posimportación se guardan en SQLite y usan el servicio firmado en secuencia. Guardado
-y recibo se confirman juntos: cerrar la web o reiniciar la API no pierde pendientes.
-Esta ampliación posterior requiere `AddMetadataAutofillJobs` y no está en el artefacto
-3.2.2 anterior. Idempotencia por cuenta, cancelación/historial, pausas y revisiones
-múltiples no cambian vínculos ni sincronizan jugadores. [Revisión v2 y contratos de trabajos](DOCS/METADATA_REVIEW.es.md).
-
-![Revisión real de Hades con fuentes y aceptación campo por campo](DOCS/images/demo-metadata-es.webp)
-
-![Horas HLTB originales y propuesta entera explicada en la revisión real](DOCS/images/demo-metadata-hours-es.webp)
-
-Usa `PUT /api/games/{id}` para cambios parciales normales. Omitir conserva; Logo/Hero/
-Cover siguen independientes. Vincular Steam es otra decisión explícita, no un efecto
-secundario de consultar metadatos públicos.
-
-### 3. Reutiliza playlists, vistas y orígenes reales de Inicio
-
-- `POST /api/playlists` crea listas manuales o automáticas por reglas; `maxLength`
-  opcional limita altas sin eliminar miembros existentes.
-- `POST /api/playlists/{id}/items` añade un juego propio. Agrupar/mover/ordenar es
-  atómico. Focus es una playlist manual normal, no otra tabla de juegos.
-- Las vistas guardan filtros/orden. `POST /api/gameviews/{id}/use` solo registra uso
-  UTC; `POST /api/gameviews/{id}/pin` fija/desfija una de dos plazas propias. Una
-  tercera devuelve `409` sin expulsar ninguna elección existente.
-- `GET/PUT /api/home/config` y `POST /api/home/rows/resolve` configuran/resuelven filas
-  desde listas, vistas, filtros, recomendaciones, Jugando o estadísticas. Quitar una
-  fila no borra el origen; guardar usa la revisión compartida de preferencias.
-
-![Carpetas y playlist manual servidas por la API al cliente web pareado](DOCS/images/demo-playlist-es.webp)
-
-Estanterías usa esas mismas listas manuales. Las recomendaciones son propias y
-estables durante el día UTC; el aleatorio acepta toda la biblioteca o los IDs exactos
-mostrados, sin ampliar silenciosamente una selección vacía/obsoleta.
-
-### 4. Separa calendario, estimaciones y horas acumuladas
-
-`GET /api/collection/statistics?year=2026&dateKind=finished` agrega todos los juegos y
-Replays propios. `dateKind=started` usa inicios. `GET /api/collection/games` abre la
-métrica paginada; GOTY es una elección explícita con revisión, no un premio generado.
-Las estadísticas por estudio usan datos de catálogo guardados.
-
-![Estadísticas por estudio desde catálogo real, sin una cronología de jugador inventada](DOCS/images/demo-statistics-es.webp)
-
-Steam aporta tiempo acumulado, no sesiones reconstruidas. El manual positivo lo
-sustituye o se suma explícitamente; cero/vacío recupera Steam. Las horas estimadas
-de historia/completista no declaran completado. Los conjuntos base/DLC y el 100%
-estricto tienen políticas diferentes.
-
-`GET /api/steam/date-suggestions?reviewVersion=2&timeZone=Europe%2FMadrid` ofrece
-**referencias para campos vacíos**, no inicios/finales confirmados. Se elige cada
-campo; Apply usa `expectedUpdatedAt` y devuelve recibos exactos/historial. Las fechas
-existentes se conservan y sincronizar no desplaza un fin aceptado. Se filtran
-sentinelas/futuros antes de elegir eventos. [Fechas Steam](DOCS/STEAM_DATES.es.md)
-detalla zonas, alternativa de último logro, resultados parciales y clientes antiguos.
-
-### 5. Ofrece guía sin apropiarte de los datos
-
-`GET /api/onboarding` lee progreso/capacidades sin crear datos. La guía permite aceptar
-seis juegos ficticios identificados y una playlist de ejemplo. Su
-`POST /api/onboarding/views` crea **vistas normales retenidas**, sin depender de aceptar
-juegos. Limpiar revisa el lote/timestamps, conserva editados por defecto y nunca borra
-vistas normales ni miembros ajenos de playlists.
-
-![Guía opcional explicando vistas retenidas sobre la demo de catálogo público](DOCS/images/demo-guide-es.webp)
-
-Los administradores pueden activar la guía al crear/editar usuarios. Cada cuenta
-mantiene sus catálogos, vistas, listas, chinchetas y preferencias. La procedencia es
-informativa, nunca permiso para acceder a otra cuenta o borrar sus registros.
-
-### 6. Sincroniza y transfiere solo el ámbito previsto
-
-Vincula un jugador Steam solo cuando quieras. `POST /api/steam/sync/jobs` inicia/deduplica
-un job explícito; consulta estado propio en lugar de repetir POST. Los commits por juego
-sobreviven al reinicio, no el estado temporal del job. Consultar Store es independiente
-y no requiere pedir claves ajenas ni bibliotecas privadas.
-
-La importación Steam y los ajustes `PATCH /api/games/bulk` tienen confirmaciones separadas.
-El lote reserva transacción SQLite corta antes de leer y valida catálogos propios. Los
-recibos no-op no falsean timestamps. Un bloqueo devuelve `503 databaseBusy` saneado con
-`Retry-After: 1`, no un `400` engañoso de entrada inválida. Conserva una importación correcta
-y reintenta solo ajustes pendientes si procede.
-
-Usa CSV/JSON/ZIP según sus ámbitos documentados. Chinchetas, uso/orden de vistas y
-preferencias admitidas se transfieren sin desalojar chinchetas del destino. La copia
-SQLite completa sigue siendo necesaria para auth/historial/caché; no sustituyas datos
-nuevos por un export antiguo para hacer pasar una prueba.
-
-## Requisitos e inicio rápido
-
-- **SDK .NET 10**; Microsoft/EF 10.0.15, Swashbuckle 10.3.1 y SkiaSharp 4.157.0.
-- EF Core incluye SQLite; no hace falta otro servidor de base de datos.
-- Node 22+ solo para herramientas de versión/release, no para ejecutar la API.
+Antes de arrancar la API, configura una clave de firma privada, la ruta de la base
+de datos y los callbacks indicados abajo. La [guía de instalación](DOCS/GETTING_STARTED.es.md)
+explica la configuración y el primer acceso.
 
 ```sh
 git clone https://github.com/David-H-Afonso/GamesDatabase.Api.git
 cd GamesDatabase.Api
 dotnet restore GamesDatabase.Api.sln
 dotnet build GamesDatabase.Api.sln --configuration Release
-dotnet test tests/GamesDatabase.Api.Tests/GamesDatabase.Api.Tests.csproj --configuration Release
-```
-
-Antes de arrancar, configura una clave de firma privada y la ruta de datos
-explícitamente deseada. Sigue [Primeros pasos](DOCS/GETTING_STARTED.es.md): una
-base existente requiere copia consistente antes del arranque y sus migraciones.
-
-```sh
 dotnet run --project GamesDatabase.Api.csproj
 ```
 
-Los perfiles de desarrollo usan HTTP en el puerto 5011/HTTPS en el 7245 y `/swagger`.
-El contenedor escucha en el puerto 8080. `/health` informa de la versión ejecutada.
+Los perfiles de desarrollo usan HTTP en el puerto **5011** y HTTPS en el **7245**.
+Swagger está disponible en `/swagger` en Development; `GET /health` muestra la
+versión en ejecución. El contenedor escucha en el puerto **8080**.
 
-## Instalación nueva y recuperación
+En una instalación nueva, el arranque prepara la base y un administrador inicial. Establece su
+contraseña antes de compartir el acceso y crea después las demás cuentas.
+Cada usuario puede elegir el idioma de la interfaz; un administrador también puede
+asignarlo al crear o editar la cuenta.
 
-Una SQLite realmente vacía se inicializa desde el modelo EF actual y registra
-su baseline de migraciones. Una base con tablas/historial no se trata como nueva:
-sus migraciones pendientes siguen siendo la referencia. Se crea el administrador
-inicial y los catálogos, **no** juegos de ejemplo.
-
-El administrador inicial no tiene contraseña para el bootstrap local. Establécela
-antes de ampliar acceso. La guía es opcional al crear usuarios y se puede reactivar
-sin añadir ejemplos ni cambiar su colección.
-
-En una instancia existente, conserva la imagen anterior por digest, crea una
-copia SQLite consistente con WAL y prueba una restauración aislada antes de
-actualizar. Down puede borrar metadatos nuevos y no es un rollback automático
-que conserve datos. Consulta [Despliegue y recuperación](DOCS/DEPLOYMENT.es.md).
+Las bases existentes se migran al arrancar. **Haz una copia de SQLite antes de
+actualizar.** [Despliegue y recuperación](DOCS/DEPLOYMENT.es.md) explica las copias
+de seguridad y la vuelta a una versión anterior.
 
 ## Configuración
 
-| Nombre | Uso |
+| Variable | Uso |
 | --- | --- |
-| `GAMESDATABASE_DB_PATH` | Archivo SQLite privado elegido |
-| `JWT_SECRET_KEY` | Clave privada y robusta de firma |
-| `JWT_ISSUER` / `JWT_AUDIENCE` | Emisor y audiencia |
-| `JWT_EXPIRATION_MINUTES` / `JWT_REFRESH_TOKEN_EXPIRATION_DAYS` | Duración de tokens |
-| `ExportSettings__DefaultExportPath` | Directorio privado de exportación |
-| `CorsSettings__AllowedOrigins__0` | Origen explícito del navegador |
-| `ASPNETCORE_URLS` | Direcciones/puertos de escucha |
-| `STEAM_API_KEY` | Clave de servidor para datos de jugador Steam |
-| `HOUSEHOLD_REDIRECT_URIS` | Lista obligatoria de callbacks exactos separados por comas, sin comodines |
-| `HOUSEHOLD_CLIENT_ID` | Identificador si se cambia el cliente Household incorporado |
+| `GAMESDATABASE_DB_PATH` | Archivo de la base de datos SQLite |
+| `JWT_SECRET_KEY` | Clave de firma privada, de al menos 32 caracteres |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | Emisor y audiencia de los tokens |
+| `JWT_EXPIRATION_MINUTES` / `JWT_REFRESH_TOKEN_EXPIRATION_DAYS` | Duración de las sesiones |
+| `CorsSettings__AllowedOrigins__0` | Origen permitido para el cliente web |
+| `ASPNETCORE_URLS` | Direcciones y puertos de escucha |
+| `ExportSettings__DefaultExportPath` | Directorio de exportación |
+| `STEAM_API_KEY` | Clave del servidor para las funciones de jugador de Steam |
+| `HOUSEHOLD_REDIRECT_URIS` | Callbacks exactos de Household, separados por comas |
+| `HOUSEHOLD_CLIENT_ID` | Identificador de Household, si se cambia el predeterminado |
 
-No expongas claves JWT/Steam/red en variables del Front. `.env*`, configuración
-Development, bases y exports locales quedan fuera del repositorio y del contexto
-Docker. Revisa TLS, orígenes, cabeceras y exposición reales, no solo valores Docker.
+`HOUSEHOLD_REDIRECT_URIS` es obligatorio al arrancar, también en instalaciones
+independientes. Si no utilizas Household, configura un callback reservado `.invalid`
+como se indica en la [guía de instalación](DOCS/GETTING_STARTED.es.md).
 
-El arranque valida los callbacks también en una instalación independiente. Sin
-Household, reserva un callback `.invalid` no enrutable según
-[Primeros pasos](DOCS/GETTING_STARTED.es.md), sin ampliar permisos de redirección.
+Las claves JWT, las claves de Steam y los archivos de la base de datos deben
+permanecer en el servidor, fuera de las variables del frontend y del repositorio.
 
-## Contratos API
+## Resumen de la API
 
-- [Referencia para el Front](DOCS/FRONTEND_API_DOCUMENTATION.md)
-- [Colección, Inicio, estadísticas y descubrimiento](DOCS/COLLECTION_EXPERIENCE.md)
-- [Guía y metadatos revisados](DOCS/GUIDED_LIBRARY.md)
-- [Conjuntos de logros Steam](DOCS/STEAM_ACHIEVEMENT_SETS.md)
-- [Referencias de fechas Steam y ajustes concurrentes](DOCS/STEAM_DATES.es.md)
-- [Runtime e imágenes](DOCS/RUNTIME_NET10.md)
-- [Autorización Household](DOCS/HOUSEHOLD_INTEGRATION.md)
+Inicia sesión con `POST /api/users/login` y envía el token recibido en
+`Authorization: Bearer <token>` al consultar la biblioteca. Los endpoints de la
+colección trabajan con los datos de la cuenta autenticada.
 
-Inicio y GOTY comparten revisiones propias y devuelven 409 en conflicto. El tiempo
-manual positivo sustituye a Steam o se suma con `manualPlaytimeIsAdditive=true`.
-Cero/vacío recupera Steam; ambas fuentes siguen separadas. Completado no equivale a las horas
-estimadas de historia/completista. Replays guarda registros, no sesiones inventadas.
+| Área | Rutas principales |
+| --- | --- |
+| Usuarios y sesiones | `/api/users`, `/api/users/login`, `/api/users/refresh` |
+| Biblioteca | `/api/games`, `/api/gameviews`, `/api/playlists` |
+| Inicio y estadísticas | `/api/home/config`, `/api/collection/statistics` |
+| Revisión de información | `/api/games/{id}/metadata/preview`, `/api/games/{id}/metadata/apply` |
+| Autorrellenado en segundo plano | `/api/metadata-autofill/jobs` |
+| Steam | `/api/steam` |
+| Guía inicial | `/api/onboarding` |
 
-El aleatorio acepta toda la biblioteca propia o IDs exactos mostrados. El uso de
-vistas guarda `lastUsedAt` UTC sin editar su configuración. `creationRequestId`
-opcional evita duplicar reintentos manuales mientras exista el registro asociado.
+Para actualizar un juego basta con enviar los campos modificados. La revisión de
+información devuelve una propuesta firmada; para aplicarla se envían su token y los
+campos elegidos. La [referencia API](DOCS/FRONTEND_API_DOCUMENTATION.md) y los
+[contratos de metadatos](DOCS/METADATA_REVIEW.es.md) detallan los cuerpos, las
+respuestas y los ejemplos de uso.
 
-Consultar metadatos no guarda ni sincroniza jugadores. Aplicar acepta campos revisados
-y rechaza timestamps antiguos. Steam Store depende de disponibilidad y Wikidata aporta
-datos CC0. Las estimaciones atribuidas Deku Deals/HLTB son opcionales, no tiempos
-garantizados; se muestran horas originales y redondeo. La falta de datos no borra campos.
-[Guía y metadatos](DOCS/GUIDED_LIBRARY.md) detalla límites, elección, caducidad y rate limits.
-
-## Comprobación
+## Desarrollo
 
 ```sh
-dotnet restore GamesDatabase.Api.sln -p:NuGetAuditMode=all -p:NuGetAuditLevel=moderate -warnaserror:NU1902,NU1903,NU1904
-dotnet build GamesDatabase.Api.sln --configuration Release --no-restore
-dotnet test tests/GamesDatabase.Api.Tests/GamesDatabase.Api.Tests.csproj --configuration Release --no-build
-node --test scripts/versioning/core.test.mjs scripts/versioning/release.test.mjs
-node scripts/versioning/cli.mjs check
+dotnet test tests/GamesDatabase.Api.Tests/GamesDatabase.Api.Tests.csproj --configuration Release
 ```
 
-Los tests usan bases `Testing` aisladas y respuestas de proveedores ficticias.
-No necesitan datos/sesiones personales ni `.env.test` versionado. Los tests Windows
-no sustituyen la prueba de imagen Linux y codificación nativa.
+Las pruebas de integración ejecutan la aplicación con bases SQLite aisladas y
+respuestas de proveedores simuladas. [Contribuir](CONTRIBUTING.es.md) detalla las
+comprobaciones, las migraciones y el flujo de versionado.
 
-## Publicación y contribución
+## Documentación y soporte
 
-Front y API versionan por separado con un hito de producto pareado 3.0. El
-[kit de versiones](scripts/versioning/README.md) valida cada commit preparado;
-`Release-As: 3.0.0` registra el hito elegido explícitamente. La publicación está
-gated por comprobaciones del HEAD exacto. Publicar no es desplegar.
+| Guía | Contenido |
+| --- | --- |
+| [Primeros pasos](DOCS/GETTING_STARTED.es.md) | Configuración, primera cuenta y arranque local |
+| [Arquitectura](DOCS/ARCHITECTURE.es.md) | Servicios, persistencia y estructura de la aplicación |
+| [Idioma de la cuenta](DOCS/ACCOUNT_LANGUAGE.es.md) | Asignación por el administrador, preferencias y tutorial |
+| [API de colección (en inglés)](DOCS/COLLECTION_EXPERIENCE.md) | Inicio, playlists, estadísticas y recomendaciones |
+| [Revisión de información](DOCS/METADATA_REVIEW.es.md) | Fuentes, propuestas firmadas y trabajos persistentes |
+| [Fechas de Steam](DOCS/STEAM_DATES.es.md) | Fechas sugeridas, zonas horarias y revisión por campo |
+| [Despliegue y recuperación](DOCS/DEPLOYMENT.es.md) | Contenedores, actualizaciones, copias de seguridad y vuelta atrás |
 
-Consulta [Contribuir](CONTRIBUTING.es.md) para tests, migraciones y reportes seguros.
-Los bugs reproducibles van a [Issues](https://github.com/David-H-Afonso/GamesDatabase.Api/issues).
-Los reportes sensibles siguen [Seguridad](SECURITY.md), sin divulgación pública.
+Si la API no arranca, comprueba primero la clave de firma y los callbacks.
+Si el navegador no conecta, revisa la URL de la API y el origen permitido.
+La [guía de despliegue](DOCS/DEPLOYMENT.es.md) también explica el proxy de imágenes
+y el almacenamiento.
 
-## Licencia y alcance
+Puedes comunicar errores en [Issues](https://github.com/David-H-Afonso/GamesDatabase.Api/issues).
+Los problemas de seguridad se notifican siguiendo [SECURITY.md](SECURITY.md).
 
-La API conserva su [GPL-3.0](LICENSE.md), también copiada al contenedor. SkiaSharp
-mantiene su MIT; la licencia de aplicación no sustituye avisos de terceros.
-La release cubre web/API, no Electron ni certifica un hosting/rollback sin revisar.
+## Licencia
+
+[GPL-3.0-or-later](LICENSE.md). Las dependencias conservan sus propias licencias;
+las imágenes de los juegos pertenecen a sus titulares.
