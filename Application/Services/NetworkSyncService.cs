@@ -15,15 +15,13 @@ namespace GamesDatabase.Api.Application.Services;
 
 public class NetworkSyncService : INetworkSyncService
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> SyncGates = new();
     private readonly HttpClient _httpClient;
-    private readonly HttpClient _imageHttpClient;
+    private readonly ExportMediaDownloader _mediaDownloader;
     private readonly DataExportOptions _exportOptions;
     private readonly NetworkSyncOptions _syncOptions;
     private readonly GamesDbContext _context;
     private readonly ILogger<NetworkSyncService> _logger;
-    private readonly Dictionary<string, bool> _cdnHealthCache = new();
-    private readonly TimeSpan _cdnHealthCacheDuration = TimeSpan.FromMinutes(5);
-    private DateTime _cdnHealthCacheExpiry = DateTime.MinValue;
     private static readonly HashSet<string> EditionTokens = new(StringComparer.OrdinalIgnoreCase)
     {
         "anniversary", "complete", "cut", "definitive", "deluxe", "director", "edition",
@@ -36,10 +34,11 @@ public class NetworkSyncService : INetworkSyncService
         IOptions<DataExportOptions> exportOptions,
         IOptions<NetworkSyncOptions> syncOptions,
         GamesDbContext context,
-        ILogger<NetworkSyncService> logger)
+        ILogger<NetworkSyncService> logger,
+        ExportMediaDownloader? mediaDownloader = null)
     {
         _httpClient = httpClientFactory.CreateClient("TrustAllCerts");
-        _imageHttpClient = httpClientFactory.CreateClient("ImageDownloader");
+        _mediaDownloader = mediaDownloader ?? new ExportMediaDownloader(httpClientFactory, Options.Create(new ExportMediaOptions()), Microsoft.Extensions.Logging.Abstractions.NullLogger<ExportMediaDownloader>.Instance);
         _exportOptions = exportOptions.Value;
         _syncOptions = syncOptions.Value;
         _context = context;
@@ -47,6 +46,15 @@ public class NetworkSyncService : INetworkSyncService
     }
 
     public async Task<NetworkSyncResult> SyncToNetworkAsync(int userId, string? authorizationHeader, bool fullSync = false)
+    {
+        if (userId <= 0) return new() { Success = false, ErrorMessage = "Invalid backup owner" };
+        var gate = SyncGates.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+        if (!await gate.WaitAsync(0)) return new() { Success = false, ErrorMessage = "syncAlreadyRunning" };
+        try { return await SyncOwnedToNetworkAsync(userId, authorizationHeader, fullSync); }
+        finally { gate.Release(); }
+    }
+
+    private async Task<NetworkSyncResult> SyncOwnedToNetworkAsync(int userId, string? authorizationHeader, bool fullSync)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var result = new NetworkSyncResult { Success = false };
@@ -408,7 +416,7 @@ public class NetworkSyncService : INetworkSyncService
                     continue;
                 }
 
-                var bytes = await SafeDownloadAsync(url, attempt: 1, maxAttempts: 1);
+                var bytes = await SafeDownloadAsync(url, userId, attempt: 1, maxAttempts: 1);
                 if (bytes is null)
                 {
                     result.ImagesFailed++;
@@ -670,7 +678,7 @@ public class NetworkSyncService : INetworkSyncService
                     // External URL: download FIRST, only delete old files on success
                     await ApplyRateLimitAsync(game.Logo, domainLastRequest, minDelayBetweenRequestsMs);
 
-                    var logoBytes = await SafeDownloadAsync(game.Logo, attempt: 1, maxAttempts: 1);
+                    var logoBytes = await SafeDownloadAsync(game.Logo, userId, attempt: 1, maxAttempts: 1);
                     if (logoBytes != null)
                     {
                         // Download succeeded - now safe to replace old files
@@ -730,7 +738,7 @@ public class NetworkSyncService : INetworkSyncService
                 {
                     await ApplyRateLimitAsync(game.Hero, domainLastRequest, minDelayBetweenRequestsMs);
 
-                    var heroBytes = await SafeDownloadAsync(game.Hero, attempt: 1, maxAttempts: 1);
+                    var heroBytes = await SafeDownloadAsync(game.Hero, userId, attempt: 1, maxAttempts: 1);
                     if (heroBytes != null)
                     {
                         if (urlChanged && cache?.HeroUrl != null)
@@ -791,7 +799,7 @@ public class NetworkSyncService : INetworkSyncService
                     // External URL: download FIRST, only delete old files on success
                     await ApplyRateLimitAsync(game.Cover, domainLastRequest, minDelayBetweenRequestsMs);
 
-                    var coverBytes = await SafeDownloadAsync(game.Cover, attempt: 1, maxAttempts: 1);
+                    var coverBytes = await SafeDownloadAsync(game.Cover, userId, attempt: 1, maxAttempts: 1);
                     if (coverBytes != null)
                     {
                         // Download succeeded - now safe to replace old files
@@ -884,7 +892,7 @@ public class NetworkSyncService : INetworkSyncService
 
                     await Task.Delay(retryDelayMs); // Wait before each retry
 
-                    var imageBytes = await SafeDownloadAsync(url, attempt: 1, maxAttempts: 1); // 1 intento por cada reintento
+                    var imageBytes = await SafeDownloadAsync(url, userId, attempt: 1, maxAttempts: 1); // 1 intento por cada reintento
                     if (imageBytes != null)
                     {
                         var extension = GetExtensionFromUrl(url);
@@ -1059,87 +1067,11 @@ public class NetworkSyncService : INetworkSyncService
         return Convert.ToBase64String(hash);
     }
 
-    private async Task CheckCdnHealthAsync()
-    {
-        // Check if cache is still valid
-        if (DateTime.UtcNow < _cdnHealthCacheExpiry)
-        {
-            return;
-        }
-
-        _logger.LogInformation("Checking CDN health...");
-        _cdnHealthCache.Clear();
-
-        // List of CDNs to check
-        var cdnsToCheck = new[]
-        {
-            "cdn2.steamgriddb.com",
-            "cdn.steamgriddb.com",
-            "images.igdb.com"
-        };
-
-        foreach (var cdn in cdnsToCheck)
-        {
-            try
-            {
-                // Try a quick HEAD request to check if CDN is reachable
-                var testUrl = $"https://{cdn}/favicon.ico";
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                var request = new HttpRequestMessage(HttpMethod.Head, testUrl);
-                var response = await _imageHttpClient.SendAsync(request, cts.Token);
-
-                _cdnHealthCache[cdn] = response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound;
-
-                if (_cdnHealthCache[cdn])
-                {
-                    _logger.LogInformation("CDN {Cdn} is reachable", cdn);
-                }
-                else
-                {
-                    _logger.LogWarning("CDN {Cdn} returned error: {StatusCode}", cdn, response.StatusCode);
-                }
-            }
-            catch (Exception ex)
-            {
-                _cdnHealthCache[cdn] = false;
-                _logger.LogWarning(ex, "CDN {Cdn} is unreachable or timed out", cdn);
-            }
-        }
-
-        _cdnHealthCacheExpiry = DateTime.UtcNow.Add(_cdnHealthCacheDuration);
-
-        var healthyCdns = _cdnHealthCache.Count(x => x.Value);
-        var totalCdns = _cdnHealthCache.Count;
-        _logger.LogInformation("CDN health check complete: {Healthy}/{Total} CDNs available", healthyCdns, totalCdns);
-    }
-
-    private bool IsCdnHealthy(string url)
-    {
-        try
-        {
-            var uri = new Uri(url);
-            var host = uri.Host;
-
-            // If we have health info for this CDN, use it
-            if (_cdnHealthCache.TryGetValue(host, out bool isHealthy))
-            {
-                return isHealthy;
-            }
-
-            // If no health info, assume it's healthy (will fail on first attempt and get cached)
-            return true;
-        }
-        catch
-        {
-            return true; // Assume healthy if we can't parse URL
-        }
-    }
-
     /// <summary>
     /// If the URL points to our own /game-images/ proxy endpoint, resolve the image
     /// path from the UNC network path directly so we never HTTP-loop back into ourselves.
     /// </summary>
-    private async Task<byte[]?> TryReadFromNetworkPathAsync(string url)
+    private async Task<byte[]?> TryReadFromNetworkPathAsync(string url, int userId)
     {
         const string marker = "/game-images/";
         var idx = url.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -1156,7 +1088,7 @@ public class NetworkSyncService : INetworkSyncService
         var fullPath = Path.GetFullPath(Path.Combine(_syncOptions.NetworkPath, relativePath));
 
         // Security: ensure the resolved path is still inside the network path root
-        var rootFull = Path.GetFullPath(_syncOptions.NetworkPath);
+        var rootFull = Path.GetFullPath(Path.Combine(_syncOptions.NetworkPath, userId.ToString(CultureInfo.InvariantCulture)));
         if (!fullPath.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             return null;
 
@@ -1167,129 +1099,23 @@ public class NetworkSyncService : INetworkSyncService
         }
 
         _logger.LogDebug("Reading image directly from network path instead of HTTP: {Path}", fullPath);
-        return await File.ReadAllBytesAsync(fullPath);
+        if (new FileInfo(fullPath).Length > ExportMediaDownloader.MaximumImageBytes) return null;
+        var bytes = await File.ReadAllBytesAsync(fullPath);
+        return VerifiedImageContent.TryReadRaster(bytes, out var image) ? image!.Bytes : null;
     }
 
-    private async Task<byte[]?> SafeDownloadAsync(string url, int attempt = 1, int maxAttempts = 3)
+    private async Task<byte[]?> SafeDownloadAsync(string url, int userId, int attempt = 1, int maxAttempts = 3)
     {
         // If the URL points to our own /game-images/ proxy, read directly from the UNC
         // network path instead of making an HTTP round-trip that would loop back into us.
-        var localBytes = await TryReadFromNetworkPathAsync(url);
+        var localBytes = await TryReadFromNetworkPathAsync(url, userId);
         if (localBytes != null)
             return localBytes;
 
-        // Check if CDN is healthy before attempting download
-        if (!IsCdnHealthy(url))
-        {
-            _logger.LogWarning("Skipping download from unhealthy CDN: {Url}", url);
-            return null;
-        }
-
-        int maxRetries = maxAttempts;
-
-        for (int currentAttempt = attempt; currentAttempt <= maxRetries; currentAttempt++)
-        {
-            try
-            {
-                _logger.LogDebug("Downloading image from {Url} (attempt {Attempt}/{MaxRetries})", url, currentAttempt, maxRetries);
-
-                var response = await _imageHttpClient.GetAsync(url);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning(
-                        "Failed to download image from {Url} - HTTP {StatusCode} {Reason}",
-                        url,
-                        (int)response.StatusCode,
-                        response.ReasonPhrase
-                    );
-
-                    // Don't retry on 404 or 403
-                    if (response.StatusCode == System.Net.HttpStatusCode.NotFound ||
-                        response.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                    {
-                        return null;
-                    }
-
-                    // Retry on server errors or timeouts
-                    if (currentAttempt < maxRetries)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
-                        continue;
-                    }
-
-                    return null;
-                }
-
-                var bytes = await response.Content.ReadAsByteArrayAsync();
-                _logger.LogDebug("Successfully downloaded {Size} bytes from {Url}", bytes.Length, url);
-                return bytes;
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "HTTP request failed for {Url} (attempt {Attempt}/{MaxRetries}): {Message}",
-                    url,
-                    currentAttempt,
-                    maxRetries,
-                    ex.Message
-                );
-
-                if (currentAttempt < maxRetries)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
-                    continue;
-                }
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Request timeout for {Url} (attempt {Attempt}/{MaxRetries})",
-                    url,
-                    currentAttempt,
-                    maxRetries
-                );
-
-                // Mark CDN as unhealthy after timeout
-                if (currentAttempt >= maxRetries)
-                {
-                    try
-                    {
-                        var uri = new Uri(url);
-                        _cdnHealthCache[uri.Host] = false;
-                        _logger.LogWarning("Marking CDN {Host} as unhealthy due to repeated timeouts", uri.Host);
-                    }
-                    catch { }
-                }
-
-                if (currentAttempt < maxRetries)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
-                    continue;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Unexpected error downloading from {Url} (attempt {Attempt}/{MaxRetries}): {Message}",
-                    url,
-                    currentAttempt,
-                    maxRetries,
-                    ex.Message
-                );
-
-                if (currentAttempt < maxRetries)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(currentAttempt * 2));
-                    continue;
-                }
-            }
-        }
-
-        return null;
+        // The same verified, credential-free egress policy used by ZIP exports
+        // now protects every account's explicit network backup as well.
+        var verified = await _mediaDownloader.DownloadAsync(url, CancellationToken.None);
+        return verified?.Bytes;
     }
 
     private static void DeleteOldImageFiles(string gamePath, string prefix)

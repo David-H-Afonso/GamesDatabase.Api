@@ -36,15 +36,16 @@ public class DataExportController : BaseApiController
     [Authorize]
     public async Task<ActionResult<UpdateImageUrlsResult>> UpdateImageUrls([FromQuery] string? imageBaseUrl = null)
     {
-        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (role != "Admin")
-            return StatusCode(403, new { message = "Image URL update requires admin privileges" });
+        if (CurrentUserId is not > 0) return Unauthorized();
+        if (!string.IsNullOrWhiteSpace(imageBaseUrl) && (!Uri.TryCreate(imageBaseUrl, UriKind.Absolute, out var imageOrigin)
+            || imageOrigin.Scheme is not ("http" or "https") || imageOrigin.UserInfo.Length != 0 || imageOrigin.Query.Length != 0 || imageOrigin.Fragment.Length != 0 || imageBaseUrl.Length > 1500))
+            return BadRequest(new { message = "Image base URL must be an absolute HTTP(S) URL without credentials, query or fragment." });
 
         var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
         if (string.IsNullOrWhiteSpace(networkSyncPath))
             return BadRequest("NetworkSync:NetworkPath not configured");
 
-        var userId = GetCurrentUserIdOrDefault(1);
+        var userId = CurrentUserId.Value;
         var result = await _importExportService.UpdateImageUrlsAsync(
             userId,
             imageBaseUrl,
@@ -60,13 +61,11 @@ public class DataExportController : BaseApiController
     [Authorize]
     public async Task<ActionResult<FolderAnalysisResult>> AnalyzeFolders()
     {
-        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (role != "Admin")
-            return StatusCode(403, new { message = "Folder analysis requires admin privileges" });
+        if (CurrentUserId is not > 0) return Unauthorized();
 
         try
         {
-            var userId = GetCurrentUserIdOrDefault(1);
+            var userId = CurrentUserId.Value;
             var result = await _networkSyncService.AnalyzeFoldersAsync(userId);
             return Ok(result);
         }
@@ -98,18 +97,17 @@ public class DataExportController : BaseApiController
     [Authorize]
     public IActionResult DeleteOrphanFolder([FromBody] DeleteOrphanFolderRequest request)
     {
-        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (role != "Admin")
-            return StatusCode(403, new { message = "Orphan folder deletion requires admin privileges" });
+        if (CurrentUserId is not > 0) return Unauthorized();
 
         if (request == null || string.IsNullOrWhiteSpace(request.FolderName))
             return BadRequest(new { message = "Folder name is required" });
+        if (request.FolderName.IndexOfAny(['/', '\\']) >= 0 || request.FolderName is "." or "..") return BadRequest(new { message = "Invalid folder name" });
 
         var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
         if (string.IsNullOrWhiteSpace(networkSyncPath))
             return StatusCode(500, new { message = "NetworkSync:NetworkPath is not configured" });
 
-        var userId = GetCurrentUserIdOrDefault(1);
+        var userId = CurrentUserId.Value;
         var entityRootName = string.Equals(request.EntityType, "Playlist", StringComparison.OrdinalIgnoreCase) ? "Playlists" : "Games";
         var gamesRoot = Path.GetFullPath(Path.Combine(networkSyncPath, userId.ToString(), entityRootName));
         var folderPath = Path.GetFullPath(Path.Combine(gamesRoot, request.FolderName));
@@ -119,6 +117,7 @@ public class DataExportController : BaseApiController
 
         if (!Directory.Exists(folderPath))
             return NotFound(new { message = "Folder does not exist" });
+        if ((System.IO.File.GetAttributes(folderPath) & FileAttributes.ReparsePoint) != 0) return BadRequest(new { message = "Invalid folder path" });
 
         try
         {
@@ -162,7 +161,7 @@ public class DataExportController : BaseApiController
 
     private static void DeleteDirectoryRobust(string folderPath)
     {
-        foreach (var file in Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories))
+        foreach (var file in Directory.EnumerateFiles(folderPath, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
         {
             TryWithRetries(() =>
             {
@@ -171,7 +170,7 @@ public class DataExportController : BaseApiController
             });
         }
 
-        var directories = Directory.EnumerateDirectories(folderPath, "*", SearchOption.AllDirectories)
+        var directories = Directory.EnumerateDirectories(folderPath, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint })
             .OrderByDescending(path => path.Length)
             .ToList();
 
@@ -303,20 +302,20 @@ public class DataExportController : BaseApiController
     [Authorize]
     public IActionResult ClearImageCache()
     {
-        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (role != "Admin")
-            return StatusCode(403, new { message = "Image cache clear requires admin privileges" });
+        if (CurrentUserId is not > 0) return Unauthorized();
 
         var networkSyncPath = _configuration["NetworkSync:NetworkPath"];
         if (string.IsNullOrWhiteSpace(networkSyncPath))
             return StatusCode(500, new { message = "NetworkSync:NetworkPath is not configured" });
 
-        var cacheDir = Path.Combine(Path.GetFullPath(networkSyncPath), "_proxy_cache");
+        var cacheRoot = Path.Combine(Path.GetFullPath(networkSyncPath), "_proxy_cache");
+        var cacheDir = User.IsInRole("Admin") ? cacheRoot : Path.Combine(cacheRoot, CurrentUserId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (!Directory.Exists(cacheDir))
             return Ok(new { deletedFiles = 0, message = "Cache directory does not exist, nothing to clear." });
 
         var deleted = 0;
-        foreach (var file in Directory.EnumerateFiles(cacheDir, "*.webp", SearchOption.AllDirectories))
+        if ((System.IO.File.GetAttributes(cacheDir) & FileAttributes.ReparsePoint) != 0) return BadRequest(new { message = "Invalid image cache path." });
+        foreach (var file in Directory.EnumerateFiles(cacheDir, "*.webp", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
         {
             try { System.IO.File.Delete(file); deleted++; }
             catch { /* ignore locked files */ }

@@ -23,24 +23,21 @@ public class GameImportExportService : IGameImportExportService
     private readonly ILogger<GameImportExportService> _logger;
     private readonly INetworkSyncService _networkSyncService;
 
-    private static readonly HttpClient _imageProbeClient = new(
-        new HttpClientHandler { AllowAutoRedirect = false, ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator })
-    {
-        Timeout = TimeSpan.FromSeconds(5),
-    };
+    private readonly HttpClient? _imageProbeClient;
 
-    private static async Task<string?> DetectImageUrlViaHttpAsync(
+    private async Task<string?> DetectImageUrlViaHttpAsync(
         string imageBaseUrl, string imagePath, string[] extensions)
     {
-        if (string.IsNullOrWhiteSpace(imageBaseUrl)) return null;
+        if (string.IsNullOrWhiteSpace(imageBaseUrl) || _imageProbeClient is null) return null;
 
         var tasks = extensions.Select(async ext =>
         {
-            var url = $"{imageBaseUrl}/{imagePath}{ext}";
+            var url = $"{imageBaseUrl}/{string.Join('/', imagePath.Split('/').Select(Uri.EscapeDataString))}{ext}";
             try
             {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 using var resp = await _imageProbeClient.SendAsync(
-                    new HttpRequestMessage(HttpMethod.Head, url));
+                    new HttpRequestMessage(HttpMethod.Head, url), HttpCompletionOption.ResponseHeadersRead, deadline.Token);
                 return resp.IsSuccessStatusCode ? url : null;
             }
             catch { return null; }
@@ -54,12 +51,14 @@ public class GameImportExportService : IGameImportExportService
         GamesDbContext context,
         IOptions<ExportSettings> exportSettings,
         ILogger<GameImportExportService> logger,
-        INetworkSyncService networkSyncService)
+        INetworkSyncService networkSyncService,
+        IHttpClientFactory? httpClientFactory = null)
     {
         _context = context;
         _exportSettings = exportSettings.Value;
         _logger = logger;
         _networkSyncService = networkSyncService;
+        _imageProbeClient = httpClientFactory?.CreateClient(ExportMediaHttpClient.Name);
     }
 
     public async Task<UpdateImageUrlsResult> UpdateImageUrlsAsync(int userId, string? imageBaseUrl, string? networkSyncPath, string? configImageBaseUrl, string? networkUsername, string? networkPassword)
@@ -85,7 +84,7 @@ public class GameImportExportService : IGameImportExportService
         {
             var warning = $"NAS UNC path not accessible ({networkSyncPath}). Extension detection will use HTTP HEAD requests against the selected image URL.";
             if (authError != null) warning += $" Auth error: {authError}";
-            result.NasWarning = warning;
+            result.NasWarning = "Backup image storage is unavailable. Only images found through the configured image service can be relinked; existing URLs are otherwise preserved.";
             _logger.LogWarning("{Warning}", warning);
         }
 
@@ -143,9 +142,7 @@ public class GameImportExportService : IGameImportExportService
                         $"game-images/{userId}/Games/{folderName}/logo",
                         extensions);
                 }
-                logoUrl ??= $"{effectiveImageBaseUrl}/game-images/{userId}/Games/{folderName}/logo.png";
-
-                if (game.Logo != logoUrl)
+                if (logoUrl != null && game.Logo != logoUrl)
                 {
                     game.Logo = logoUrl;
                     updated = true;

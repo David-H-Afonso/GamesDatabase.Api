@@ -54,10 +54,11 @@ public sealed class ExportErrorContractsTests
     }
 
     [Fact]
-    public async Task Standard_user_still_cannot_trigger_network_sync()
+    public async Task Standard_user_network_failure_is_safe_without_a_blanket_admin_restriction()
     {
         var result = Assert.IsType<ObjectResult>(await Controller(false).SyncToNetwork(new(false)));
-        Assert.Equal(403, result.StatusCode);
+        Assert.Equal(500, result.StatusCode);
+        Assert.DoesNotContain("SYNTHETIC_INTERNAL_DETAIL", JsonSerializer.Serialize(result.Value));
     }
 
     private sealed class FailingZip : IZipExportService

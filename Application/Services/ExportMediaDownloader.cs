@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace GamesDatabase.Api.Application.Services;
 
-/// <summary>Credential-free, bounded, verified raster downloads for ZIP exports only.</summary>
+/// <summary>Credential-free, bounded, verified raster downloads for ZIP and account network exports.</summary>
 public sealed class ExportMediaDownloader(IHttpClientFactory factory, IOptions<ExportMediaOptions> options, ILogger<ExportMediaDownloader> logger)
 {
     public const int MaximumImageBytes = 16 * 1024 * 1024;

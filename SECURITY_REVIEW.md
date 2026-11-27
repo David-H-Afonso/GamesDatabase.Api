@@ -1,5 +1,37 @@
 # Security Review
 
+## Account-owned backup hotfix — 27 November 2026
+
+Scope: restore the visible backup tools to authenticated Standard accounts, without
+granting server administration or access to another library. CSV import/export and
+database duplicate inspection retain their existing owner filters. Image URL repair,
+folder inspection, explicit orphan deletion and network sync use the authenticated
+owner, not a supplied user ID. Standard cache clearing targets only that owner's
+`_proxy_cache/{userId}`; global cache clearing and scheduled-backup administration
+remain administrator operations. No migration or existing-data repair is included.
+
+Before exposing network sync, its legacy unbounded artwork HTTP path was replaced
+with the existing credential-free `ExportMediaDownloader`: checked DNS/socket egress,
+TLS validation, image decoding and byte/time budgets apply to user backups too.
+Local image reads are owner-rooted and raster-verified. Image URL HEAD probes use
+the same protected media transport and a five-second deadline, not TLS bypass.
+Missing files no longer replace a valid logo with an invented `logo.png` URL.
+Per-account sync exclusion prevents two concurrent backups from overwriting files.
+Folder deletion rejects traversal/linked roots; account cache enumeration skips links.
+Errors no longer return the NAS authentication/path warning to ordinary clients.
+
+`OwnedBackupAccessTests` covers real JWT/routes/CSV/SQLite and synthetic owned
+filesystem sync, full and incremental exports, own image repair, foreign-account
+preservation, cache/orphan scope, anonymous denial, URL validation and a real
+loopback listener that receives no forbidden probe. External raster responses in
+the successful sync test are explicit fixtures, not a live-NAS claim. Existing media
+egress tests retain DNS/rebinding/redirect/credential checks. Test run results are
+recorded separately; this block is not a full application security certification.
+
+No secrets/environment files, production library, NAS service/configuration or
+server runtime were read or modified for this repair. Publication does not deploy
+the server. Earlier evidence below remains historical.
+
 ## Later 27 November — explicit cross-platform Deku search
 
 This focused source repair supersedes the earlier485-test count below, not its

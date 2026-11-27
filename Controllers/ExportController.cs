@@ -84,18 +84,11 @@ public class ExportController : BaseApiController
     [HttpPost("sync-to-network")]
     public async Task<IActionResult> SyncToNetwork([FromBody] SyncToNetworkRequest request)
     {
-        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        var isAdmin = role == "Admin";
-
-        if (!isAdmin)
-        {
-            _logger.LogWarning("Network sync attempted by non-admin user");
-            return StatusCode(403, new { message = "Network sync requires admin privileges" });
-        }
+        if (CurrentUserId is not > 0) return Unauthorized();
 
         try
         {
-            var userId = GetCurrentUserIdOrDefault(1);
+            var userId = CurrentUserId.Value;
             _logger.LogInformation("Starting network sync for user {UserId} (full: {Full})", userId, request.FullExport);
 
             // Get the Authorization header from the current request
@@ -106,10 +99,12 @@ public class ExportController : BaseApiController
             if (!result.Success)
             {
                 _logger.LogWarning("Network sync failed: {Error}", result.ErrorMessage);
+                if (result.ErrorMessage == "syncAlreadyRunning") return Conflict(new { message = "A backup for this account is already running.", code = "syncAlreadyRunning" });
                 return StatusCode(500, new
                 {
                     message = "Network sync failed",
-                    error = result.ErrorMessage,
+                    error = "The account backup could not complete. Check the server backup configuration.",
+                    code = "networkSyncFailed",
                     stats = new
                     {
                         elapsedSeconds = result.ElapsedTime.TotalSeconds,
