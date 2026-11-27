@@ -884,6 +884,10 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("name");
 
+                    b.Property<int?>("PinnedSlot")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("pinned_slot");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("INTEGER");
 
@@ -902,6 +906,9 @@ namespace GamesDatabase.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("UserId", "Name")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "PinnedSlot")
                         .IsUnique();
 
                     b.ToTable("game_view", (string)null);

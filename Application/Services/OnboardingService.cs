@@ -12,7 +12,8 @@ namespace GamesDatabase.Api.Application.Services;
 public sealed class OnboardingService(GamesDbContext context, TimeProvider clock) : IOnboardingService
 {
     public const string CurrentVersion = "3.0.0";
-    public static readonly string[] Steps = ["welcome", "library", "organize", "progress", "home", "discover", "finish"];
+    public const string TutorialViewCreator = "Games Database tutorial";
+    public static readonly string[] Steps = ["welcome", "library", "views", "organize", "progress", "home", "discover", "finish"];
 
     private IQueryable<Game> SampleGames(int userId, string? batch) => context.Games.AsNoTracking().AsSplitQuery()
         .Where(game => batch != null && game.UserId == userId && game.SampleBatchId == batch)
@@ -25,13 +26,14 @@ public sealed class OnboardingService(GamesDbContext context, TimeProvider clock
         var stored = await context.OnboardingStates.AsNoTracking().SingleOrDefaultAsync(state => state.UserId == userId, cancellationToken);
         var games = await SampleGames(userId, stored?.SampleBatchId).OrderBy(game => game.Id).ToListAsync(cancellationToken);
         var sampleLists = stored?.SampleBatchId is { } batchId ? await context.Playlists.AsNoTracking().Where(list => list.UserId == userId && list.SampleBatchId == batchId).Select(list => new TutorialSamplePlaylistDto { Id = list.Id, Name = list.Name, CreatedAt = list.CreatedAt, UpdatedAt = list.UpdatedAt }).ToListAsync(cancellationToken) : [];
+        var exampleViews = await context.GameViews.AsNoTracking().Where(view => view.UserId == userId && view.CreatedBy == TutorialViewCreator).OrderBy(view => view.SortOrder).ThenBy(view => view.Id).Take(64).ToListAsync(cancellationToken);
         return new()
         {
             Version = CurrentVersion, Revision = stored?.Revision ?? 0, Enabled = user?.TutorialEnabled ?? false, RequiresPassword = user?.RequiresPassword ?? false,
             Step = stored is not null && Steps.Contains(stored.Step) ? stored.Step : "welcome", CompletedVersion = stored?.CompletedVersion,
             HasSamples = stored?.SampleBatchId != null,
             SampleGames = games.Select(game => game.ToDto()).ToList(),
-            SamplePlaylists = sampleLists.Count, SampleLists = sampleLists
+            SamplePlaylists = sampleLists.Count, SampleLists = sampleLists, ExampleViews = exampleViews.Select(view => view.ToSummaryDto()).ToList()
         };
     }
 
@@ -81,7 +83,7 @@ public sealed class OnboardingService(GamesDbContext context, TimeProvider clock
 
     public async Task<CatalogServiceResult<OnboardingStateDto>> CreateSamplesAsync(int userId, CreateTutorialSamplesRequest request, CancellationToken cancellationToken = default)
     {
-        if (!request.Confirm || request.Revision < 0) return CatalogServiceResult<OnboardingStateDto>.BadRequest("Confirm sample creation explicitly.");
+        if (!request.Confirm || request.Revision < 0 || request.Locale is not ("en" or "es")) return CatalogServiceResult<OnboardingStateDto>.BadRequest("Confirm sample creation explicitly.");
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         if (!await context.Users.AnyAsync(user => user.Id == userId, cancellationToken)) return CatalogServiceResult<OnboardingStateDto>.NotFoundResult("User unavailable.");
         var state = await context.OnboardingStates.SingleOrDefaultAsync(state => state.UserId == userId, cancellationToken);
@@ -111,6 +113,7 @@ public sealed class OnboardingService(GamesDbContext context, TimeProvider clock
             Cover = $"/sample-artwork/{(index % 3 == 0 ? "amber" : index % 3 == 1 ? "orbit" : "harbor")}-cover.svg",
             Logo = $"/sample-artwork/{(index % 3 == 0 ? "amber" : index % 3 == 1 ? "orbit" : "harbor")}-logo.svg",
             Favorite = index == 2, ManualPlaytimeMinutes = index == 1 ? 0 : null,
+            Story = new[] { 4, 12, 8, 2, 18, 6 }[index],
             Comment = "Tutorial example. This fictional game is safe to edit or remove."
         }).ToList();
         context.Games.AddRange(games);
@@ -120,11 +123,51 @@ public sealed class OnboardingService(GamesDbContext context, TimeProvider clock
         var playlist = new Playlist { UserId = userId, Name = listName, SampleBatchId = batch, SortOrder = order + 1, Description = "Tutorial examples" };
         playlist.Items = games.Select((game, index) => new PlaylistItem { Game = game, Position = index }).ToList();
         context.Playlists.Add(playlist);
+        await AddExampleViewsAsync(userId, request.Locale, cancellationToken);
         state.SampleBatchId = batch;
         state.Step = "library";
         Advance(state);
         try { await context.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); }
         catch (DbUpdateException) { return CatalogServiceResult<OnboardingStateDto>.ConflictResult("Sample creation could not be completed. Reload before retrying."); }
+        return CatalogServiceResult<OnboardingStateDto>.Ok(await GetAsync(userId, cancellationToken));
+    }
+
+    // These are normal saved views, deliberately retained when temporary sample
+    // games/playlists are removed. The creator marker is informational/idempotent,
+    // never an authorization or deletion criterion.
+    private async Task AddExampleViewsAsync(int userId, string locale, CancellationToken cancellationToken)
+    {
+        var existing = await context.GameViews.AsNoTracking().Where(view => view.UserId == userId).ToListAsync(cancellationToken);
+        if (existing.Any(view => view.CreatedBy == TutorialViewCreator)) return;
+        var names = existing.Select(view => view.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var spanish = locale == "es";
+        var labels = spanish ? new[] { "Ejemplo · Favoritos", "Ejemplo · Sin valorar", "Ejemplo · Juegos cortos" } : new[] { "Example · Favorites", "Example · Not rated", "Example · Short games" };
+        var descriptions = spanish ? new[] { "Reúne tus juegos favoritos sin moverlos de la biblioteca.", "Encuentra juegos sin nota personal para completarla cuando quieras.", "Muestra juegos con una estimación de historia de diez horas o menos." } : new[] { "Collects your favorite games without moving them out of the library.", "Finds games without a personal grade so you can rate them later.", "Shows games with an estimated main story of ten hours or less." };
+        var filters = new[] { new ViewFilter { Field = FilterField.Favorite, Operator = FilterOperator.Equals, Value = true }, new ViewFilter { Field = FilterField.Grade, Operator = FilterOperator.IsNull }, new ViewFilter { Field = FilterField.Story, Operator = FilterOperator.LessThanOrEqual, Value = 10 } };
+        var order = existing.Select(view => view.SortOrder).DefaultIfEmpty(0).Max();
+        for (var index = 0; index < labels.Length; index++)
+        {
+            var name = labels[index];
+            while (!names.Add(name)) name = labels[index] + " " + Guid.NewGuid().ToString("N")[..8];
+            var view = new GameViewCreateDto { Name = name, Description = descriptions[index], CreatedBy = TutorialViewCreator, IsPublic = true, Configuration = new() { FilterGroups = [new() { Filters = [filters[index]] }], Sorting = [new() { Field = SortField.Name, Direction = SortDirection.Ascending, Order = 0 }] } }.ToEntity();
+            view.UserId = userId; view.SortOrder = ++order;
+            context.GameViews.Add(view);
+        }
+    }
+
+    public async Task<CatalogServiceResult<OnboardingStateDto>> CreateViewsAsync(int userId, CreateTutorialSamplesRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!request.Confirm || request.Revision < 0 || request.Locale is not ("en" or "es")) return CatalogServiceResult<OnboardingStateDto>.BadRequest("Confirm view creation explicitly.");
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        if (!await context.Users.AnyAsync(user => user.Id == userId, cancellationToken)) return CatalogServiceResult<OnboardingStateDto>.NotFoundResult("User unavailable.");
+        var state = await context.OnboardingStates.SingleOrDefaultAsync(state => state.UserId == userId, cancellationToken);
+        if ((state?.Revision ?? 0) != request.Revision) return CatalogServiceResult<OnboardingStateDto>.ConflictResult("Guide changed. Reload before creating views.");
+        if (await context.GameViews.AnyAsync(view => view.UserId == userId && view.CreatedBy == TutorialViewCreator, cancellationToken)) return CatalogServiceResult<OnboardingStateDto>.Ok(await GetAsync(userId, cancellationToken));
+        state ??= AddState(userId);
+        await AddExampleViewsAsync(userId, request.Locale, cancellationToken);
+        Advance(state);
+        try { await context.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); }
+        catch (DbUpdateException) { return CatalogServiceResult<OnboardingStateDto>.ConflictResult("View creation changed. Reload before retrying."); }
         return CatalogServiceResult<OnboardingStateDto>.Ok(await GetAsync(userId, cancellationToken));
     }
 

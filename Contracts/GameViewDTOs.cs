@@ -1,4 +1,5 @@
 using GamesDatabase.Api.Domain.Entities;
+using System.Text.Json.Serialization;
 
 namespace GamesDatabase.Api.Contracts;
 
@@ -17,6 +18,8 @@ public class GameViewDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? LastUsedAt { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? PinnedSlot { get; set; }
 }
 
 /// <summary>
@@ -58,6 +61,14 @@ public class GameViewSummaryDto
     public DateTime? LastUsedAt { get; set; }
     public int FilterCount { get; set; }
     public int SortCount { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? PinnedSlot { get; set; }
+}
+
+public sealed class GameViewPinRequest
+{
+    public bool? Pinned { get; set; }
+    public int? Slot { get; set; }
 }
 
 /// <summary>

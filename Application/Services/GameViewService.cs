@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Application.Mapping;
 using GamesDatabase.Api.Contracts;
@@ -59,6 +60,41 @@ public class GameViewService : IGameViewService
             .FirstOrDefaultAsync(v => v.Name == name && v.UserId == userId);
 
         return view?.ToDto();
+    }
+
+    public async Task<CatalogServiceResult<List<GameViewSummaryDto>>> SetPinnedAsync(int id, int userId, bool pinned, int? preferredSlot = null, CancellationToken cancellationToken = default)
+    {
+        if (preferredSlot is not (null or 1 or 2)) return CatalogServiceResult<List<GameViewSummaryDto>>.BadRequest("invalidViewPin");
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        var owned = await _context.GameViews.AsNoTracking().Where(view => view.UserId == userId).OrderBy(view => view.SortOrder).ThenBy(view => view.Name).ThenBy(view => view.Id).ToListAsync(cancellationToken);
+        var view = owned.SingleOrDefault(view => view.Id == id);
+        if (view is null) return CatalogServiceResult<List<GameViewSummaryDto>>.NotFoundResult("viewUnavailable");
+        if (pinned && !view.IsPublic) return CatalogServiceResult<List<GameViewSummaryDto>>.BadRequest("viewNotPublic");
+        int? slot = null;
+        if (pinned)
+        {
+            slot = view.PinnedSlot is 1 or 2 ? view.PinnedSlot
+                : preferredSlot.HasValue && !owned.Any(other => other.Id != id && other.PinnedSlot == preferredSlot) ? preferredSlot
+                : Enumerable.Range(1, 2).Where(candidate => !owned.Any(other => other.Id != id && other.PinnedSlot == candidate)).Select(candidate => (int?)candidate).FirstOrDefault();
+            if (!slot.HasValue) return CatalogServiceResult<List<GameViewSummaryDto>>.ConflictResult("pinLimit");
+        }
+        if (slot != view.PinnedSlot)
+        {
+            try
+            {
+                // Pinning is preference metadata, not a filter edit or a use.
+                // Mark transfer data dirty without changing timestamps or criteria.
+                await _context.GameViews.Where(candidate => candidate.Id == id && candidate.UserId == userId).ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.PinnedSlot, slot).SetProperty(candidate => candidate.ModifiedSinceExport, true), cancellationToken);
+                view.PinnedSlot = slot;
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch (SqliteException error) when (error.SqliteExtendedErrorCode == 2067)
+            {
+                _logger.LogWarning(error, "Concurrent quick-view pin for user {UserId}", userId);
+                return CatalogServiceResult<List<GameViewSummaryDto>>.ConflictResult("pinLimit");
+            }
+        }
+        return CatalogServiceResult<List<GameViewSummaryDto>>.Ok(owned.Select(item => item.ToSummaryDto()).ToList());
     }
 
     public async Task<CatalogServiceResult<GameViewDto>> CreateViewAsync(GameViewCreateDto createDto, int userId)

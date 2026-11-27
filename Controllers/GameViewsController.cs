@@ -51,6 +51,15 @@ public class GameViewsController : BaseApiController
         return Ok(result);
     }
 
+    [Authorize, HttpPost("{id:int}/pin")]
+    public async Task<IActionResult> SetPinned(int id, GameViewPinRequest request, CancellationToken cancellationToken)
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        if (request.Pinned is not { } pinned || request.Slot is not (null or 1 or 2)) return BadRequest(new { code = "invalidViewPin" });
+        var result = await _gameViewService.SetPinnedAsync(id, CurrentUserId.Value, pinned, request.Slot, cancellationToken);
+        return result.Success ? Ok(result.Data) : result.NotFound ? NotFound(new { code = "viewUnavailable" }) : result.Conflict ? Conflict(new { code = result.Error }) : BadRequest(new { code = "invalidViewPin" });
+    }
+
     [HttpPost]
     public async Task<ActionResult<GameViewDto>> CreateGameView(GameViewCreateDto createDto)
     {

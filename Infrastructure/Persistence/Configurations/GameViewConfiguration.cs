@@ -22,6 +22,7 @@ public class GameViewConfiguration : IEntityTypeConfiguration<GameView>
         entity.Property(e => e.CreatedAt).HasColumnName("created_at");
         entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
         entity.Property(e => e.LastUsedAt).HasColumnName("last_used_at");
+        entity.Property(e => e.PinnedSlot).HasColumnName("pinned_slot");
         entity.Property(e => e.ModifiedSinceExport).HasColumnName("modified_since_export").HasDefaultValue(true);
 
         entity.HasOne(e => e.User)
@@ -29,5 +30,6 @@ public class GameViewConfiguration : IEntityTypeConfiguration<GameView>
             .HasForeignKey(e => e.UserId)
             .OnDelete(DeleteBehavior.Cascade);
         entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
+        entity.HasIndex(e => new { e.UserId, e.PinnedSlot }).IsUnique();
     }
 }

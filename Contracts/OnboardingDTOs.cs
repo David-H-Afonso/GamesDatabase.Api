@@ -12,6 +12,7 @@ public sealed class OnboardingStateDto
     public List<GameDto> SampleGames { get; set; } = [];
     public int SamplePlaylists { get; set; }
     public List<TutorialSamplePlaylistDto> SampleLists { get; set; } = [];
+    public List<GameViewSummaryDto> ExampleViews { get; set; } = [];
 }
 
 public sealed class TutorialSamplePlaylistDto
@@ -40,6 +41,7 @@ public sealed class CreateTutorialSamplesRequest
 {
     public int Revision { get; set; }
     public bool Confirm { get; set; }
+    public string Locale { get; set; } = "en";
 }
 
 public sealed class ExpectedSampleGameDto

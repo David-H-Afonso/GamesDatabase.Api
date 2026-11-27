@@ -75,7 +75,8 @@ public static class GameViewMappingExtensions
             CreatedBy = view.CreatedBy,
             CreatedAt = view.CreatedAt,
             UpdatedAt = view.UpdatedAt,
-            LastUsedAt = view.LastUsedAt.HasValue ? DateTime.SpecifyKind(view.LastUsedAt.Value, DateTimeKind.Utc) : null
+            LastUsedAt = view.LastUsedAt.HasValue ? DateTime.SpecifyKind(view.LastUsedAt.Value, DateTimeKind.Utc) : null,
+            PinnedSlot = view.PinnedSlot
         };
     }
 
@@ -121,6 +122,7 @@ public static class GameViewMappingExtensions
                 }
             }
 
+            sortCount = configuration.Sorting.Count;
             if (!string.IsNullOrEmpty(view.SortingJson))
             {
                 var sorting = JsonSerializer.Deserialize<List<ViewSort>>(view.SortingJson);
@@ -147,7 +149,8 @@ public static class GameViewMappingExtensions
             UpdatedAt = view.UpdatedAt,
             LastUsedAt = view.LastUsedAt.HasValue ? DateTime.SpecifyKind(view.LastUsedAt.Value, DateTimeKind.Utc) : null,
             FilterCount = totalFilterCount,
-            SortCount = sortCount
+            SortCount = sortCount,
+            PinnedSlot = view.PinnedSlot
         };
     }
 
@@ -183,6 +186,9 @@ public static class GameViewMappingExtensions
         }
 
         if (dto.IsPublic.HasValue)
+        {
             view.IsPublic = dto.IsPublic.Value;
+            if (!view.IsPublic) view.PinnedSlot = null;
+        }
     }
 }

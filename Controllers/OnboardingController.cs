@@ -43,6 +43,14 @@ public sealed class OnboardingController(IOnboardingService guide) : BaseApiCont
     [HttpPost("samples/keep")]
     public Task<IActionResult> Keep(ChangeTutorialSamplesRequest request, CancellationToken cancellationToken) => Change(request, false, cancellationToken);
 
+    [HttpPost("views")]
+    public async Task<IActionResult> CreateViews(CreateTutorialSamplesRequest request, CancellationToken cancellationToken)
+    {
+        if (!CurrentUserId.HasValue) return Unauthorized();
+        var result = await guide.CreateViewsAsync(CurrentUserId.Value, request, cancellationToken);
+        return result.Success ? Ok(result.Data) : result.Conflict ? Conflict(new { code = "onboardingConflict" }) : result.NotFound ? NotFound() : BadRequest(new { code = "invalidOnboarding" });
+    }
+
     [HttpDelete("samples")]
     public Task<IActionResult> Remove(ChangeTutorialSamplesRequest request, CancellationToken cancellationToken) => Change(request, true, cancellationToken);
 

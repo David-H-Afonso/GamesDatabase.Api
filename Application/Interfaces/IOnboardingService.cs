@@ -9,5 +9,6 @@ public interface IOnboardingService
     Task<CatalogServiceResult<OnboardingStateDto>> StartAsync(int userId, OnboardingStartRequest request, CancellationToken cancellationToken = default);
     Task<CatalogServiceResult<OnboardingStateDto>> SaveAsync(int userId, OnboardingProgressRequest request, CancellationToken cancellationToken = default);
     Task<CatalogServiceResult<OnboardingStateDto>> CreateSamplesAsync(int userId, CreateTutorialSamplesRequest request, CancellationToken cancellationToken = default);
+    Task<CatalogServiceResult<OnboardingStateDto>> CreateViewsAsync(int userId, CreateTutorialSamplesRequest request, CancellationToken cancellationToken = default);
     Task<CatalogServiceResult<TutorialSampleChangeDto>> ChangeSamplesAsync(int userId, ChangeTutorialSamplesRequest request, bool remove, CancellationToken cancellationToken = default);
 }
