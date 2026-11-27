@@ -166,8 +166,7 @@ public sealed class SteamAchievementSyncService(GamesDbContext context, ISteamAp
         return new() { Success = true, Updated = updated, Outcome = snapshot.NoAchievements ? "noAchievements" : "updated" };
     }
 
-    private static DateTime? UnixDate(long? value) => value is > 0 and <= 253402300799
-        ? DateTimeOffset.FromUnixTimeSeconds(value.Value).UtcDateTime : null;
+    private static DateTime? UnixDate(long? value) => GamesDatabase.Api.Common.SteamDateEvidence.FromUnix(value);
 
     private static string? IconUrl(int appId, string? value)
     {

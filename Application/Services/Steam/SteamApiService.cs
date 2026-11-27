@@ -2,6 +2,7 @@ using GamesDatabase.Api.Application.Interfaces;
 using System.Text.Json;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Contracts.Steam;
+using GamesDatabase.Api.Common;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -45,9 +46,7 @@ public class SteamApiService : ISteamApiService
                 Name = g.Name ?? $"App {g.AppId}",
                 PlaytimeForever = g.PlaytimeForever,
                 Playtime2Weeks = g.Playtime2Weeks,
-                LastPlayedAt = g.LastPlayedUnixTime.HasValue && g.LastPlayedUnixTime.Value > 0
-                    ? DateTimeOffset.FromUnixTimeSeconds(g.LastPlayedUnixTime.Value).UtcDateTime
-                    : null,
+                LastPlayedAt = SteamDateEvidence.FromUnix(g.LastPlayedUnixTime),
                 IconUrl = !string.IsNullOrEmpty(g.ImgIconUrl)
                     ? $"https://media.steampowered.com/steamcommunity/public/images/apps/{g.AppId}/{g.ImgIconUrl}.jpg"
                     : null

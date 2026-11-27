@@ -118,7 +118,6 @@ public class SteamSyncService : ISteamSyncService
                 {
                     game.SteamPlaytimeForever = steamGame.PlaytimeForever;
                     game.SteamPlaytime2Weeks = steamGame.Playtime2Weeks;
-                    SyncSteamManagedFinishedDate(game, steamGame);
                 }
                 await FillMissingSteamImagesAsync(game, steamGame);
                 NormalizeStoredSteamReleaseDate(game);
@@ -517,7 +516,6 @@ public class SteamSyncService : ISteamSyncService
         {
             game.SteamPlaytimeForever = ownedGame.PlaytimeForever;
             game.SteamPlaytime2Weeks = ownedGame.Playtime2Weeks;
-            SyncSteamManagedFinishedDate(game, ownedGame);
         }
 
         await FillMissingSteamImagesAsync(game, ownedGame);
@@ -551,22 +549,6 @@ public class SteamSyncService : ISteamSyncService
         return result.Updated;
     }
 
-    private static void SyncSteamManagedFinishedDate(Game game, SteamOwnedGameDto ownedGame)
-    {
-        if (game.SteamFinishedSource != "steam" || !ownedGame.LastPlayedAt.HasValue)
-            return;
-
-        var steamFinished = ownedGame.LastPlayedAt.Value.ToString("yyyy-MM-dd");
-        if (game.Finished == steamFinished && game.SteamFinishedLastValue == steamFinished)
-            return;
-
-        game.Finished = steamFinished;
-        game.SteamFinishedLastValue = steamFinished;
-        game.SteamFinishedSyncedAt = DateTime.UtcNow;
-        if (game.SteamFinishedRejectedValue == steamFinished)
-            game.SteamFinishedRejectedValue = null;
-    }
-
     private async Task UpdateSteamCriticScoreAsync(Game game, int appId, SteamAppDetailsDto? appDetails = null)
     {
         var (criticScore, criticProvider) = await ResolveSteamCriticScoreAsync(appId, appDetails);
@@ -578,18 +560,14 @@ public class SteamSyncService : ISteamSyncService
     {
         var resolvedAppDetails = appDetails ?? await _steamStore.GetOrCacheAppDetailsAsync(appId);
 
-        // Always prioritize Metacritic when available.
-        if (resolvedAppDetails?.MetacriticScore is int metacriticScore)
+        // Only the edition's actual critic score belongs in Critic. Steam user
+        // review percentages are neither Metacritic nor a fetched SteamDB score.
+        if (resolvedAppDetails?.MetacriticScore is int metacriticScore && metacriticScore is >= 0 and <= 100)
         {
             return (metacriticScore, "Metacritic");
         }
-
-        var reviews = await _steamStore.GetReviewSummaryAsync(appId);
-        if (reviews != null && reviews.TotalReviews >= 10)
-        {
-            return (reviews.ScorePercent, "SteamDB");
-        }
-
+        // Leave the field empty for explicit attributed metadata lookup. Existing
+        // saved ratings are preserved by the callers; no legacy data is relabelled.
         return (null, null);
     }
 

@@ -466,6 +466,8 @@ public class SteamStoreSearchItemRaw
 
 public class SteamDateSuggestionDto
 {
+    public int ReviewVersion { get; set; } = 2;
+    public string ReviewTimeZone { get; set; } = "UTC";
     public int GameId { get; set; }
     public string GameName { get; set; } = string.Empty;
     public int SteamAppId { get; set; }
@@ -476,6 +478,10 @@ public class SteamDateSuggestionDto
     public string? CurrentFinished { get; set; }
     public string? ProposedStarted { get; set; }
     public string? ProposedFinished { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public string? ObservedLastPlayed { get; set; }
+    public string? FirstAchievementDate { get; set; }
+    public string? LastAchievementDate { get; set; }
     public string StartedSource { get; set; } = string.Empty;
     public string FinishedSource { get; set; } = string.Empty;
     public bool IsFinishedConflict { get; set; }
@@ -485,6 +491,7 @@ public class SteamDateSuggestionDto
 
 public class SteamApplyDateSuggestionsRequest
 {
+    public string TimeZone { get; set; } = "UTC";
     public List<SteamApplyDateSuggestionItem> Suggestions { get; set; } = new();
 }
 
@@ -493,10 +500,12 @@ public class SteamApplyDateSuggestionItem
     public int GameId { get; set; }
     public string? Started { get; set; }
     public string? Finished { get; set; }
+    public DateTime? ExpectedUpdatedAt { get; set; }
 }
 
 public class SteamDismissDateSuggestionsRequest
 {
+    public string TimeZone { get; set; } = "UTC";
     public List<SteamDismissDateSuggestionItem> Suggestions { get; set; } = new();
 }
 
@@ -505,13 +514,19 @@ public class SteamDismissDateSuggestionItem
     public int GameId { get; set; }
     public string? Started { get; set; }
     public string? Finished { get; set; }
+    public DateTime? ExpectedUpdatedAt { get; set; }
 }
 
 public class SteamApplyDateSuggestionsResponse
 {
     public int Updated { get; set; }
     public List<string> Errors { get; set; } = new();
+    public List<SteamAppliedDateDto> Applied { get; set; } = new();
+    public List<SteamSkippedDateDto> Skipped { get; set; } = new();
 }
+
+public sealed record SteamAppliedDateDto(int GameId, string? Started, string? Finished, DateTime UpdatedAt);
+public sealed record SteamSkippedDateDto(int GameId, string Reason);
 
 public class SteamStoreSearchPriceRaw
 {

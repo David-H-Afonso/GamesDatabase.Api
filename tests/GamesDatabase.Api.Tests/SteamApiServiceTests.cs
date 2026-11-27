@@ -13,6 +13,18 @@ namespace GamesDatabase.Api.Tests;
 public sealed class SteamApiServiceTests
 {
     [Fact]
+    public async Task One_bad_last_played_timestamp_does_not_discard_the_library_or_turn_missing_dates_into_1970()
+    {
+        using var api = new ApiHarness(_ => Json(new { games = new[] {
+            new { appid = 1, name = "Valid date", playtime_forever = 60, rtime_last_played = 1700000000L },
+            new { appid = 2, name = "Missing date", playtime_forever = 30, rtime_last_played = 0L },
+            new { appid = 3, name = "Sentinel date", playtime_forever = 30, rtime_last_played = 1L },
+            new { appid = 4, name = "Out of range", playtime_forever = 30, rtime_last_played = long.MaxValue }
+        } }));
+        var games = await api.Service.GetOwnedGamesAsync("76561198000000000"); Assert.Equal(4, games.Count); Assert.NotNull(games[0].LastPlayedAt); Assert.All(games.Skip(1), game => Assert.Null(game.LastPlayedAt));
+    }
+
+    [Fact]
     public async Task Reads_public_sets_sparse_unlocks_zero_internal_key_and_large_schema_hash()
     {
         var snapshot = SteamAchievementFixtures.Snapshot([2, 1], [1, 0], 0);

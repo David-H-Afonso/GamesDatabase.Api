@@ -14,7 +14,7 @@ public interface ISteamProfileService
     Task<List<SteamMatchSuggestionDto>> GetMatchSuggestionsAsync(int userId);
     Task<List<SteamMatchSuggestionDto>> GetStoreMatchSuggestionsAsync(int userId);
     Task<(int Dismissed, string? Error)> DismissMatchSuggestionsAsync(int userId, SteamDismissMatchSuggestionsRequest request);
-    Task<List<SteamDateSuggestionDto>?> GetDateSuggestionsAsync(int userId, int? gameId, bool includeStarted);
+    Task<List<SteamDateSuggestionDto>?> GetDateSuggestionsAsync(int userId, int? gameId, bool includeStarted, bool includeActivityReferences = false, string timeZone = "UTC");
     Task<SteamApplyDateSuggestionsResponse?> ApplyDateSuggestionsAsync(int userId, SteamApplyDateSuggestionsRequest request);
     Task<(int Dismissed, string? Error)> DismissDateSuggestionsAsync(int userId, SteamDismissDateSuggestionsRequest request);
     Task<(bool Created, string? SteamId, string? SteamNickname, string? SteamAvatarUrl)> LinkSteamAccountAsync(int userId, string steamId);

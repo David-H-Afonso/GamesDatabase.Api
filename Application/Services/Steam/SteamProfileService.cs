@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using GamesDatabase.Api.Application.Mapping;
+using GamesDatabase.Api.Common;
 
 namespace GamesDatabase.Api.Application.Services.Steam;
 
@@ -175,7 +176,7 @@ public class SteamProfileService : ISteamProfileService
         {
             GameId = gameId,
             Source = game.SteamAchievementsSource ?? (rows.Count > 0 ? "legacy" : "none"),
-            LastSynced = game.SteamAchievementsSyncedAt,
+            LastSynced = game.SteamAchievementsSyncedAt.HasValue ? SteamDateEvidence.Utc(game.SteamAchievementsSyncedAt.Value) : null,
             LastError = SteamSyncClassification.IsNotice(game.SteamAchievementsLastError) ? null : game.SteamAchievementsLastError,
             Notice = SteamSyncClassification.IsNotice(game.SteamAchievementsLastError) ? game.SteamAchievementsLastError : null,
             IsCompleted = dto.IsCompleted,
@@ -190,7 +191,8 @@ public class SteamProfileService : ISteamProfileService
                 .Select(set => new SteamAchievementSetDto
                 {
                     GroupId = set.GroupId, DisplayName = set.DisplayName, DlcAppId = set.DlcAppId,
-                    Archived = set.Archived, IsAchievable = set.IsAchievable, IsCompleted = set.IsCompleted, CompletedAt = set.CompletedAt,
+                    Archived = set.Archived, IsAchievable = set.IsAchievable, IsCompleted = set.IsCompleted,
+                    CompletedAt = set.CompletedAt.HasValue && SteamDateEvidence.IsPlausible(set.CompletedAt.Value) ? SteamDateEvidence.Utc(set.CompletedAt.Value) : null,
                     TotalAchievements = set.Archived ? rows.Count(achievement => achievement.GroupId == set.GroupId) : required.Count(achievement => achievement.GroupId == set.GroupId),
                     UnlockedAchievements = (set.Archived ? rows : required).Count(achievement => achievement.GroupId == set.GroupId && achievement.Achieved)
                 }).ToList(),
@@ -198,7 +200,8 @@ public class SteamProfileService : ISteamProfileService
             {
                 Id = achievement.Id, SteamAppId = achievement.SteamAppId, ApiName = achievement.ApiName,
                 DisplayName = achievement.DisplayName, Description = achievement.Description,
-                Achieved = achievement.Achieved, UnlockTime = achievement.UnlockTime,
+                Achieved = achievement.Achieved,
+                UnlockTime = achievement.UnlockTime.HasValue && SteamDateEvidence.IsPlausible(achievement.UnlockTime.Value) ? SteamDateEvidence.Utc(achievement.UnlockTime.Value) : null,
                 IconUrl = achievement.IconUrl, IconGrayUrl = achievement.IconGrayUrl, Hidden = achievement.Hidden,
                 GroupId = achievement.GroupId, Archived = achievement.Archived || (setMap.TryGetValue(achievement.GroupId, out var set) && set.Archived),
                 GlobalPercent = achievement.GlobalPercent, ProgressCurrent = achievement.ProgressCurrent,
@@ -327,8 +330,9 @@ public class SteamProfileService : ISteamProfileService
         return (created, null);
     }
 
-    public async Task<List<SteamDateSuggestionDto>?> GetDateSuggestionsAsync(int userId, int? gameId, bool includeStarted)
+    public async Task<List<SteamDateSuggestionDto>?> GetDateSuggestionsAsync(int userId, int? gameId, bool includeStarted, bool includeActivityReferences = false, string timeZone = "UTC")
     {
+        var zone = ReleaseDateMatching.FindTimeZone(timeZone) ?? throw new ArgumentException("Invalid date-review time zone.");
         var user = await _context.Users.FindAsync(userId);
         if (user?.SteamId == null) return null;
 
@@ -342,9 +346,10 @@ public class SteamProfileService : ISteamProfileService
         var games = await gamesQuery
             .OrderBy(g => EF.Functions.Collate(g.Name, "NOCASE"))
             .ToListAsync();
+        if (games.Count == 0) return [];
 
         var ownedGames = (await GetCachedOwnedGamesAsync(user.SteamId))
-            .ToDictionary(g => g.AppId, g => g);
+            .GroupBy(game => game.AppId).ToDictionary(group => group.Key, group => group.First());
 
         var appIds = games.Select(g => g.SteamAppId!.Value).Distinct().ToList();
         var cachedAppDetails = await _context.SteamAppCaches
@@ -352,17 +357,18 @@ public class SteamProfileService : ISteamProfileService
             .Where(a => appIds.Contains(a.AppId))
             .ToDictionaryAsync(a => a.AppId, a => a);
 
-        var firstAchievementUnlocks = includeStarted
-            ? await _context.SteamAchievements
+        var unlocks = await _context.SteamAchievements
                 .AsNoTracking()
                 .Where(a => a.UserId == userId
                     && appIds.Contains(a.SteamAppId)
                     && a.Achieved
                     && a.UnlockTime.HasValue)
-                .GroupBy(a => a.SteamAppId)
-                .Select(g => new { AppId = g.Key, UnlockTime = g.Min(a => a.UnlockTime) })
-                .ToDictionaryAsync(a => a.AppId, a => a.UnlockTime)
-            : [];
+                .Select(a => new { AppId = a.SteamAppId, UnlockTime = a.UnlockTime!.Value })
+                .ToListAsync();
+        // Old cache rows can contain Unix sentinels. Filter before taking Min/Max
+        // so a single1970 row does not hide a genuine later first achievement.
+        var achievementDates = unlocks.Where(value => SteamDateEvidence.IsPlausible(value.UnlockTime)).GroupBy(value => value.AppId)
+            .ToDictionary(group => group.Key, group => (First: SteamDateEvidence.Day(group.Min(value => value.UnlockTime), zone), Last: SteamDateEvidence.Day(group.Max(value => value.UnlockTime), zone)));
 
         var suggestions = new List<SteamDateSuggestionDto>();
 
@@ -373,25 +379,27 @@ public class SteamProfileService : ISteamProfileService
             cachedAppDetails.TryGetValue(appId, out var appDetails);
 
             var notes = new List<string>();
-            var proposedFinished = ownedGame?.LastPlayedAt?.ToString("yyyy-MM-dd");
-            var finishedSource = proposedFinished != null ? "lastPlayed" : "none";
-            if (proposedFinished == null) notes.Add("noLastPlayed");
+            achievementDates.TryGetValue(appId, out var dates);
+            var lastPlayed = SteamDateEvidence.Day(ownedGame?.LastPlayedAt, zone);
+            // Only a client that understands activity references may offer the
+            // last-achievement fallback. Legacy UI calls it a Steam finish date.
+            var fallback = includeActivityReferences ? dates.Last : null;
+            var useFallback = fallback != null && (lastPlayed == null || string.CompareOrdinal(fallback, lastPlayed) > 0);
+            var proposedFinished = useFallback ? fallback : lastPlayed;
+            var finishedSource = useFallback ? "lastAchievement" : lastPlayed != null ? "lastPlayed" : "none";
+            if (lastPlayed == null) notes.Add("noLastPlayed");
+            if (useFallback) notes.Add("lastAchievementFallback");
 
             var hasFinished = !string.IsNullOrWhiteSpace(game.Finished);
-            var isSteamManagedFinished = game.SteamFinishedSource == "steam";
             var isRejectedFinished = proposedFinished != null && game.SteamFinishedRejectedValue == proposedFinished;
-            var shouldSuggestFinished = proposedFinished != null
-                && !isRejectedFinished
-                && (!hasFinished || (!isSteamManagedFinished && game.Finished != proposedFinished));
-            var isFinishedConflict = shouldSuggestFinished && hasFinished && !isSteamManagedFinished && game.Finished != proposedFinished;
+            var shouldSuggestFinished = proposedFinished != null && !isRejectedFinished && !hasFinished;
 
             string? proposedStarted = null;
             var startedSource = "none";
             if (includeStarted && string.IsNullOrWhiteSpace(game.Started))
             {
-                if (firstAchievementUnlocks.TryGetValue(appId, out var firstUnlock) && firstUnlock.HasValue)
+                if (dates.First is { } firstUnlockValue)
                 {
-                    var firstUnlockValue = firstUnlock.Value.ToString("yyyy-MM-dd");
                     if (game.SteamStartedRejectedValue != firstUnlockValue)
                     {
                         proposedStarted = firstUnlockValue;
@@ -408,6 +416,13 @@ public class SteamProfileService : ISteamProfileService
                 notes.Add("keptStarted");
             }
 
+            // A reference from an earlier playthrough must not contradict a
+            // date the owner has already recorded for this playthrough.
+            if (proposedStarted != null && DateOnly.TryParseExact(game.Finished, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var savedFinish)
+                && DateOnly.ParseExact(proposedStarted, "yyyy-MM-dd", CultureInfo.InvariantCulture) > savedFinish) { proposedStarted = null; startedSource = "none"; }
+            if (shouldSuggestFinished && DateOnly.TryParseExact(game.Started, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var savedStart)
+                && DateOnly.ParseExact(proposedFinished!, "yyyy-MM-dd", CultureInfo.InvariantCulture) < savedStart) shouldSuggestFinished = false;
+
             if (proposedStarted == null && !shouldSuggestFinished) continue;
 
             suggestions.Add(new SteamDateSuggestionDto
@@ -422,10 +437,15 @@ public class SteamProfileService : ISteamProfileService
                 CurrentFinished = game.Finished,
                 ProposedStarted = proposedStarted,
                 ProposedFinished = shouldSuggestFinished ? proposedFinished : null,
+                UpdatedAt = SteamDateEvidence.Utc(game.UpdatedAt),
+                ReviewTimeZone = timeZone,
+                ObservedLastPlayed = lastPlayed,
+                FirstAchievementDate = dates.First,
+                LastAchievementDate = dates.Last,
                 StartedSource = startedSource,
                 FinishedSource = finishedSource,
-                IsFinishedConflict = isFinishedConflict,
-                IsFinishedSteamManaged = isSteamManagedFinished,
+                IsFinishedConflict = false,
+                IsFinishedSteamManaged = false,
                 Notes = notes
             });
         }
@@ -435,6 +455,10 @@ public class SteamProfileService : ISteamProfileService
 
     public async Task<SteamApplyDateSuggestionsResponse?> ApplyDateSuggestionsAsync(int userId, SteamApplyDateSuggestionsRequest request)
     {
+        if (request?.Suggestions is not { Count: > 0 and <= 1000 } || request.Suggestions.Any(item => item == null || item.GameId <= 0)
+            || request.Suggestions.Select(item => item.GameId).Distinct().Count() != request.Suggestions.Count) return null;
+        var zone = ReleaseDateMatching.FindTimeZone(request.TimeZone);
+        if (zone == null) return null;
         var response = new SteamApplyDateSuggestionsResponse();
         var requested = request.Suggestions
             .Where(s => s.GameId > 0 && (!string.IsNullOrWhiteSpace(s.Started) || !string.IsNullOrWhiteSpace(s.Finished)))
@@ -444,71 +468,78 @@ public class SteamProfileService : ISteamProfileService
 
         if (requested.Count == 0) return null;
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
         var gameIds = requested.Select(s => s.GameId).ToList();
         var games = await _context.Games
             .Where(g => g.UserId == userId && gameIds.Contains(g.Id) && g.SteamAppId.HasValue)
             .ToDictionaryAsync(g => g.Id, g => g);
 
+        var applied = new List<(Game Game, string? Started, string? Finished)>();
+        void Skip(int id, string reason) { response.Skipped.Add(new(id, reason)); response.Errors.Add($"{reason}:{id}"); }
+
         foreach (var suggestion in requested)
         {
             if (!games.TryGetValue(suggestion.GameId, out var game))
             {
-                response.Errors.Add($"gameNotFound:{suggestion.GameId}");
+                Skip(suggestion.GameId, "unavailable");
                 continue;
             }
-
-            var updated = false;
-            // Only set Started if not already provided by the user
-            if (string.IsNullOrWhiteSpace(game.Started) && IsValidDateValue(suggestion.Started))
+            if (suggestion.ExpectedUpdatedAt.HasValue && SteamDateEvidence.Utc(suggestion.ExpectedUpdatedAt.Value) != SteamDateEvidence.Utc(game.UpdatedAt))
             {
-                game.Started = suggestion.Started;
-                if (game.SteamStartedRejectedValue == suggestion.Started)
-                    game.SteamStartedRejectedValue = null;
-                updated = true;
+                Skip(game.Id, "changed");
+                continue;
             }
-
-            if (string.IsNullOrWhiteSpace(game.Finished) && IsValidDateValue(suggestion.Finished))
+            var wantsStarted = !string.IsNullOrWhiteSpace(suggestion.Started);
+            var wantsFinished = !string.IsNullOrWhiteSpace(suggestion.Finished);
+            if (wantsStarted && !SteamDateEvidence.TryDay(suggestion.Started, out _, zone) || wantsFinished && !SteamDateEvidence.TryDay(suggestion.Finished, out _, zone))
             {
-                // Finished is empty — safe to fill from Steam
-                game.Finished = suggestion.Finished;
-                game.SteamFinishedSource = "steam";
-                game.SteamFinishedLastValue = suggestion.Finished;
+                Skip(game.Id, "invalidDate");
+                continue;
+            }
+            var started = wantsStarted && string.IsNullOrWhiteSpace(game.Started) ? suggestion.Started : null;
+            var finished = wantsFinished && string.IsNullOrWhiteSpace(game.Finished) ? suggestion.Finished : null;
+            if (started == null && finished == null) { Skip(game.Id, "hasDate"); continue; }
+            if (DateOnly.TryParseExact(started ?? game.Started, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var startDay)
+                && DateOnly.TryParseExact(finished ?? game.Finished, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var finishDay) && startDay > finishDay)
+            {
+                Skip(game.Id, "invalidDate");
+                continue;
+            }
+            if (started != null)
+            {
+                game.Started = started;
+                if (game.SteamStartedRejectedValue == started) game.SteamStartedRejectedValue = null;
+                _context.GameHistoryEntries.Add(new() { UserId = userId, GameId = game.Id, GameName = game.Name, Field = "Started", NewValue = started, ActionType = "Updated", Description = $"Steam activity date explicitly reviewed ({request.TimeZone})", ChangedAt = DateTime.UtcNow });
+            }
+            if (finished != null)
+            {
+                game.Finished = finished;
+                // Reviewed reference, never a promise to follow every later play.
+                game.SteamFinishedSource = "steam-reviewed";
+                game.SteamFinishedLastValue = finished;
                 game.SteamFinishedSyncedAt = DateTime.UtcNow;
-                if (game.SteamFinishedRejectedValue == suggestion.Finished)
-                    game.SteamFinishedRejectedValue = null;
-                updated = true;
+                if (game.SteamFinishedRejectedValue == finished) game.SteamFinishedRejectedValue = null;
+                _context.GameHistoryEntries.Add(new() { UserId = userId, GameId = game.Id, GameName = game.Name, Field = "Finished", NewValue = finished, ActionType = "Updated", Description = $"Steam activity date explicitly reviewed ({request.TimeZone})", ChangedAt = DateTime.UtcNow });
             }
-            else if (IsValidDateValue(suggestion.Finished)
-                     && game.Finished != suggestion.Finished
-                     && game.SteamFinishedSource == "steam")
-            {
-                // Finished was previously set by Steam — update it (still steam-managed)
-                game.Finished = suggestion.Finished;
-                game.SteamFinishedLastValue = suggestion.Finished;
-                game.SteamFinishedSyncedAt = DateTime.UtcNow;
-                if (game.SteamFinishedRejectedValue == suggestion.Finished)
-                    game.SteamFinishedRejectedValue = null;
-                updated = true;
-            }
-            // else: game.Finished was set manually by the user — do not overwrite
-
-            if (updated)
-            {
-                game.CalculateScore();
-                response.Updated++;
-            }
+            applied.Add((game, started, finished));
         }
 
-        if (response.Updated > 0)
+        if (applied.Count > 0)
             await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
+        response.Updated = applied.Count;
+        response.Applied = applied.Select(item => new SteamAppliedDateDto(item.Game.Id, item.Started, item.Finished, SteamDateEvidence.Utc(item.Game.UpdatedAt))).ToList();
 
         return response;
     }
 
     public async Task<(int Dismissed, string? Error)> DismissDateSuggestionsAsync(int userId, SteamDismissDateSuggestionsRequest request)
     {
+        if (request?.Suggestions is not { Count: > 0 and <= 1000 } || request.Suggestions.Any(item => item == null)) return (0, "Invalid date review.");
+        var zone = ReleaseDateMatching.FindTimeZone(request.TimeZone);
+        if (zone == null) return (0, "Invalid date-review time zone.");
         var requested = request.Suggestions
-            .Where(s => s.GameId > 0 && (IsValidDateValue(s.Started) || IsValidDateValue(s.Finished)))
+            .Where(s => s.GameId > 0 && (IsValidDateValue(s.Started, zone) || IsValidDateValue(s.Finished, zone)))
             .GroupBy(s => s.GameId)
             .Select(g => g.First())
             .ToList();
@@ -517,6 +548,7 @@ public class SteamProfileService : ISteamProfileService
             return (0, "No date suggestions provided");
 
         var gameIds = requested.Select(s => s.GameId).ToList();
+        await using var transaction = await _context.Database.BeginTransactionAsync();
         var games = await _context.Games
             .Where(g => g.UserId == userId && gameIds.Contains(g.Id) && g.SteamAppId.HasValue)
             .ToDictionaryAsync(g => g.Id, g => g);
@@ -525,14 +557,15 @@ public class SteamProfileService : ISteamProfileService
         foreach (var suggestion in requested)
         {
             if (!games.TryGetValue(suggestion.GameId, out var game)) continue;
+            if (suggestion.ExpectedUpdatedAt.HasValue && SteamDateEvidence.Utc(suggestion.ExpectedUpdatedAt.Value) != SteamDateEvidence.Utc(game.UpdatedAt)) continue;
 
             var changed = false;
-            if (IsValidDateValue(suggestion.Started) && game.SteamStartedRejectedValue != suggestion.Started)
+            if (IsValidDateValue(suggestion.Started, zone) && game.SteamStartedRejectedValue != suggestion.Started)
             {
                 game.SteamStartedRejectedValue = suggestion.Started;
                 changed = true;
             }
-            if (IsValidDateValue(suggestion.Finished) && game.SteamFinishedRejectedValue != suggestion.Finished)
+            if (IsValidDateValue(suggestion.Finished, zone) && game.SteamFinishedRejectedValue != suggestion.Finished)
             {
                 game.SteamFinishedRejectedValue = suggestion.Finished;
                 changed = true;
@@ -542,6 +575,7 @@ public class SteamProfileService : ISteamProfileService
 
         if (dismissed > 0)
             await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return (dismissed, null);
     }
@@ -666,9 +700,8 @@ public class SteamProfileService : ISteamProfileService
         })!;
     }
 
-    private static bool IsValidDateValue(string? value)
+    private static bool IsValidDateValue(string? value, TimeZoneInfo? zone = null)
     {
-        if (string.IsNullOrWhiteSpace(value)) return false;
-        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
+        return SteamDateEvidence.TryDay(value, out _, zone);
     }
 }

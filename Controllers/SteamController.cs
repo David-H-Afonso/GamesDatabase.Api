@@ -238,14 +238,15 @@ public class SteamController : BaseApiController
         return Ok(new { dismissed });
     }
 
-    /// <summary>Suggests start/finish dates from Steam activity for linked GDB games missing dates or with manual conflicts.</summary>
+    /// <summary>Offers explicitly reviewed activity references for missing dates; never claims a confirmed story-finish date.</summary>
     [HttpGet("date-suggestions")]
-    public async Task<IActionResult> GetDateSuggestions([FromQuery] int? gameId = null, [FromQuery] bool includeStarted = true)
+    public async Task<IActionResult> GetDateSuggestions([FromQuery] int? gameId = null, [FromQuery] bool includeStarted = true, [FromQuery] int reviewVersion = 1, [FromQuery] string timeZone = "UTC")
     {
         var userId = CurrentUserId;
         if (!userId.HasValue) return Unauthorized();
+        if (reviewVersion is not (1 or 2) || GamesDatabase.Api.Common.ReleaseDateMatching.FindTimeZone(timeZone) is null) return BadRequest(new { code = "invalidDateReview" });
 
-        var result = await _profile.GetDateSuggestionsAsync(userId.Value, gameId, includeStarted);
+        var result = await _profile.GetDateSuggestionsAsync(userId.Value, gameId, includeStarted, reviewVersion == 2, timeZone);
         if (result == null) return BadRequest(new { message = "No Steam account linked" });
         return Ok(result);
     }
