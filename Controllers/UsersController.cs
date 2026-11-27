@@ -192,7 +192,7 @@ public class UsersController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Health check failed");
-            return StatusCode(503, new { status = "unhealthy", error = ex.Message });
+            return StatusCode(503, new { status = "unhealthy", code = "healthCheckFailed" });
         }
     }
 }

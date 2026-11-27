@@ -288,7 +288,9 @@ public class NetworkSyncService : INetworkSyncService
                 SortingJson = r.SortingJson ?? "",
                 IsPublic = ParseBool(r.IsPublic),
                 CreatedBy = r.CreatedBy ?? "",
-                SortOrder = ParseInt(r.SortOrder) ?? 999
+                SortOrder = ParseInt(r.SortOrder) ?? 999,
+                PinnedSlot = ParseInt(r.ViewPinnedSlot),
+                LastUsedAt = r.ViewLastUsedAt ?? ""
             })
             .ToList();
         if (await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "Views.json"), views))

@@ -138,7 +138,7 @@ public class BackupScheduleService : BackgroundService
 
             var views = await db.GameViews.Where(v => v.UserId == userId).OrderBy(v => v.Name).ToListAsync(ct);
             foreach (var v in views)
-                allRecords.Add(new FullExportModel { Type = "View", Name = v.Name, Description = v.Description ?? "", FiltersJson = v.FiltersJson, SortingJson = v.SortingJson ?? "", IsPublic = v.IsPublic.ToString(), CreatedBy = v.CreatedBy ?? "" });
+                allRecords.Add(GameViewArchive.Export(v));
 
             var playlists = await db.Playlists
                 .Where(playlist => playlist.UserId == userId)

@@ -41,6 +41,10 @@ public class ErrorHandlingMiddleware
                 response = HandleSqliteException(sqliteEx);
                 break;
 
+            case SqliteException sqliteEx:
+                response = HandleSqliteException(sqliteEx);
+                break;
+
             case DbUpdateException dbEx:
                 response = new ErrorResponse
                 {
@@ -88,6 +92,7 @@ public class ErrorHandlingMiddleware
         }
 
         context.Response.StatusCode = response.StatusCode;
+        if (response.Code == "databaseBusy") context.Response.Headers.RetryAfter = "1";
 
         var jsonResponse = JsonSerializer.Serialize(response, new JsonSerializerOptions
         {
@@ -101,6 +106,13 @@ public class ErrorHandlingMiddleware
     {
         return sqliteEx.SqliteErrorCode switch
         {
+            5 or 6 => new ErrorResponse
+            {
+                StatusCode = (int)HttpStatusCode.ServiceUnavailable,
+                Code = "databaseBusy",
+                Message = "Database is busy",
+                Details = "Another operation is writing data. Your request was not completed; try again shortly."
+            },
             19 when sqliteEx.Message.Contains("UNIQUE constraint failed") => HandleUniqueConstraintError(sqliteEx.Message),
             19 when sqliteEx.Message.Contains("FOREIGN KEY constraint failed") => new ErrorResponse
             {
@@ -168,6 +180,7 @@ public class ErrorHandlingMiddleware
 public class ErrorResponse
 {
     public int StatusCode { get; set; }
+    public string? Code { get; set; }
     public string Message { get; set; } = string.Empty;
     public string Details { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;

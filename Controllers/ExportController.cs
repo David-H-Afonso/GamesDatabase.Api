@@ -38,10 +38,9 @@ public class ExportController : BaseApiController
             var effectiveFullExport = fullExport ?? full;
             _logger.LogInformation("Starting ZIP export generation (full: {Full})", effectiveFullExport);
 
-            // Get the Authorization header from the current request
-            var authHeader = Request.Headers["Authorization"].ToString();
-
-            var result = await _zipExportService.BuildZipAsync(authHeader, effectiveFullExport);
+            // The ZIP service uses the authenticated owner context and generates
+            // CSV directly. No request credential is needed by its media transport.
+            var result = await _zipExportService.BuildZipAsync(null, effectiveFullExport);
             var fileName = $"games_database_export_{DateTime.UtcNow:yyyy-MM-dd}.zip";
 
             _logger.LogInformation(
@@ -73,7 +72,7 @@ public class ExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to generate ZIP export");
-            return StatusCode(500, new { message = "Failed to generate ZIP export", error = ex.Message });
+            return StatusCode(500, new { message = "Failed to generate ZIP export", code = "zipExportFailed" });
         }
     }
 
@@ -171,17 +170,9 @@ public class ExportController : BaseApiController
         {
             _logger.LogError(ex, "Network sync failed with exception: {Message}", ex.Message);
 
-            // Return detailed error for debugging
-            var errorDetails = new
-            {
-                message = "Network sync failed",
-                error = ex.Message,
-                type = ex.GetType().Name,
-                stackTrace = ex.StackTrace?.Split('\n').Take(5).ToArray(), // First 5 lines
-                innerError = ex.InnerException?.Message
-            };
-
-            return StatusCode(500, errorDetails);
+            // Details remain in server logs, not in an authenticated browser's
+            // response, copied diagnostics, or reverse-proxy error documents.
+            return StatusCode(500, new { message = "Network sync failed", code = "networkSyncFailed" });
         }
     }
 
@@ -292,7 +283,7 @@ public class ExportController : BaseApiController
         catch (Exception ex)
         {
             _logger.LogError(ex, "Automated sync failed with exception");
-            return StatusCode(500, new { success = false, message = "Sync failed", error = ex.Message });
+            return StatusCode(500, new { success = false, message = "Sync failed", code = "networkSyncFailed" });
         }
     }
 }

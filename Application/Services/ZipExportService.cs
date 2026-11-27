@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CsvHelper;
+using CsvHelper.Configuration;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Infrastructure.Persistence;
 using GamesDatabase.Api.Domain.Entities;
@@ -16,21 +17,24 @@ namespace GamesDatabase.Api.Application.Services;
 
 public class ZipExportService : IZipExportService
 {
-    private readonly HttpClient _httpClient;
-    private readonly DataExportOptions _options;
+    private readonly IGameImportExportService _importExportService;
+    private readonly ExportMediaDownloader _mediaDownloader;
+    private readonly ExportSettings _exportSettings;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly GamesDbContext _context;
     private readonly ILogger<ZipExportService> _logger;
 
     public ZipExportService(
-        IHttpClientFactory httpClientFactory,
-        IOptions<DataExportOptions> options,
+        IGameImportExportService importExportService,
+        ExportMediaDownloader mediaDownloader,
+        IOptions<ExportSettings> exportSettings,
         IHttpContextAccessor httpContextAccessor,
         GamesDbContext context,
         ILogger<ZipExportService> logger)
     {
-        _httpClient = httpClientFactory.CreateClient("TrustAllCerts");
-        _options = options.Value;
+        _importExportService = importExportService;
+        _mediaDownloader = mediaDownloader;
+        _exportSettings = exportSettings.Value;
         _httpContextAccessor = httpContextAccessor;
         _context = context;
         _logger = logger;
@@ -45,18 +49,9 @@ public class ZipExportService : IZipExportService
 
         _logger.LogInformation("Starting ZIP export (fullExport: {FullExport})", fullExport);
 
-        // 1. Download CSV
-        var fullExportUrl = GetFullExportUrl();
-        _logger.LogInformation("Downloading full export CSV from {Url}", fullExportUrl);
-
-        // Add authorization header if provided
-        if (!string.IsNullOrWhiteSpace(authorizationHeader))
-        {
-            _httpClient.DefaultRequestHeaders.Remove("Authorization");
-            _httpClient.DefaultRequestHeaders.Add("Authorization", authorizationHeader);
-        }
-
-        var csvBytes = await _httpClient.GetByteArrayAsync(fullExportUrl);
+        // Generate the owner-scoped CSV directly. Neither the incoming credential
+        // nor request Host/forwarded headers is ever used for an outbound request.
+        var csvBytes = await _importExportService.ExportFullDatabaseAsync(userId.Value);
         var csvContent = Encoding.UTF8.GetString(csvBytes);
 
         // 2. Parse CSV
@@ -99,23 +94,6 @@ public class ZipExportService : IZipExportService
         return stats;
     }
 
-    private string GetFullExportUrl()
-    {
-        var request = _httpContextAccessor.HttpContext?.Request;
-        if (request == null)
-            return _options.FullExportUrl;
-
-        var scheme = request.Headers.TryGetValue("X-Forwarded-Proto", out var proto) && !string.IsNullOrWhiteSpace(proto)
-            ? proto.ToString().Split(',')[0].Trim()
-            : request.Scheme;
-
-        var host = request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHost) && !string.IsNullOrWhiteSpace(forwardedHost)
-            ? forwardedHost.ToString().Split(',')[0].Trim()
-            : request.Host.ToString();
-
-        return $"{scheme}://{host}{request.PathBase}/api/DataExport/full";
-    }
-
     private List<ExportRecord> ParseCsv(string csvContent)
     {
         // Remove BOM if present
@@ -125,7 +103,7 @@ public class ZipExportService : IZipExportService
         }
 
         using var reader = new StringReader(csvContent);
-        using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
+        using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture) { Delimiter = _exportSettings.CsvDelimiter });
 
         return csv.GetRecords<ExportRecord>().ToList();
     }
@@ -210,7 +188,9 @@ public class ZipExportService : IZipExportService
                 SortingJson = r.SortingJson ?? "",
                 IsPublic = ParseBool(r.IsPublic),
                 CreatedBy = r.CreatedBy ?? "",
-                SortOrder = ParseInt(r.SortOrder) ?? 999
+                SortOrder = ParseInt(r.SortOrder) ?? 999,
+                PinnedSlot = ParseInt(r.ViewPinnedSlot),
+                LastUsedAt = r.ViewLastUsedAt ?? ""
             })
             .ToList();
         await AddJsonToZip(archive, "Games Database/Settings/Views.json", views);
@@ -272,11 +252,11 @@ public class ZipExportService : IZipExportService
             foreach (var (imageType, url) in imageSources)
             {
                 if (string.IsNullOrWhiteSpace(url)) continue;
-                var bytes = await SafeDownloadAsync(url);
-                if (bytes is null) continue;
-                var entry = archive.CreateEntry($"{basePath}/{imageType}{GetExtensionFromUrl(url)}");
+                var image = await SafeDownloadAsync(url);
+                if (image is null) continue;
+                var entry = archive.CreateEntry($"{basePath}/{imageType}{image.Extension}");
                 using var stream = entry.Open();
-                await stream.WriteAsync(bytes);
+                await stream.WriteAsync(image.Bytes);
             }
         }
     }
@@ -404,10 +384,9 @@ public class ZipExportService : IZipExportService
                 var logoBytes = await SafeDownloadAsync(game.Logo);
                 if (logoBytes != null)
                 {
-                    var extension = GetExtensionFromUrl(game.Logo);
-                    var entry = archive.CreateEntry($"{basePath}/logo{extension}");
+                    var entry = archive.CreateEntry($"{basePath}/logo{logoBytes.Extension}");
                     using var entryStream = entry.Open();
-                    await entryStream.WriteAsync(logoBytes);
+                    await entryStream.WriteAsync(logoBytes.Bytes);
                     logoDownloaded = true;
                     stats.ImagesDownloaded++;
                 }
@@ -433,10 +412,9 @@ public class ZipExportService : IZipExportService
                 var heroBytes = await SafeDownloadAsync(game.Hero);
                 if (heroBytes != null)
                 {
-                    var extension = GetExtensionFromUrl(game.Hero);
-                    var entry = archive.CreateEntry($"{basePath}/hero{extension}");
+                    var entry = archive.CreateEntry($"{basePath}/hero{heroBytes.Extension}");
                     using var entryStream = entry.Open();
-                    await entryStream.WriteAsync(heroBytes);
+                    await entryStream.WriteAsync(heroBytes.Bytes);
                     heroDownloaded = true;
                     stats.ImagesDownloaded++;
                 }
@@ -462,10 +440,9 @@ public class ZipExportService : IZipExportService
                 var coverBytes = await SafeDownloadAsync(game.Cover);
                 if (coverBytes != null)
                 {
-                    var extension = GetExtensionFromUrl(game.Cover);
-                    var entry = archive.CreateEntry($"{basePath}/cover{extension}");
+                    var entry = archive.CreateEntry($"{basePath}/cover{coverBytes.Extension}");
                     using var entryStream = entry.Open();
-                    await entryStream.WriteAsync(coverBytes);
+                    await entryStream.WriteAsync(coverBytes.Bytes);
                     coverDownloaded = true;
                     stats.ImagesDownloaded++;
                 }
@@ -509,19 +486,8 @@ public class ZipExportService : IZipExportService
         await writer.WriteAsync(json);
     }
 
-    private async Task<byte[]?> SafeDownloadAsync(string url)
-    {
-        try
-        {
-            _logger.LogDebug("Downloading image from {Url}", url);
-            return await _httpClient.GetByteArrayAsync(url);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to download image from {Url}", url);
-            return null;
-        }
-    }
+    private Task<VerifiedImageContent?> SafeDownloadAsync(string url) =>
+        _mediaDownloader.DownloadAsync(url, _httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None);
 
     private static string MakeSafeFolderName(string name)
     {
@@ -540,25 +506,6 @@ public class ZipExportService : IZipExportService
 
         // Trim underscores from start and end
         return safeName.Trim('_');
-    }
-
-    private static string GetExtensionFromUrl(string url)
-    {
-        try
-        {
-            var uri = new Uri(url);
-            var path = uri.AbsolutePath;
-            var extension = Path.GetExtension(path);
-
-            if (!string.IsNullOrWhiteSpace(extension))
-                return extension;
-        }
-        catch
-        {
-            // Ignore parsing errors
-        }
-
-        return ".png"; // Default extension
     }
 
     private static bool ParseBool(string? value)

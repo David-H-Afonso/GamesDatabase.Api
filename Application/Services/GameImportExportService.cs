@@ -295,16 +295,7 @@ public class GameImportExportService : IGameImportExportService
         var views = await _context.GameViews.Where(v => v.UserId == userId).OrderBy(v => EF.Functions.Collate(v.Name, "NOCASE")).ToListAsync();
         foreach (var v in views)
         {
-            allRecords.Add(new FullExportModel
-            {
-                Type = "View",
-                Name = v.Name,
-                Description = v.Description ?? "",
-                FiltersJson = v.FiltersJson,
-                SortingJson = v.SortingJson ?? "",
-                IsPublic = v.IsPublic.ToString(),
-                CreatedBy = v.CreatedBy ?? ""
-            });
+            allRecords.Add(GameViewArchive.Export(v));
         }
 
         var playlists = await _context.Playlists
@@ -466,9 +457,15 @@ public class GameImportExportService : IGameImportExportService
         foreach (var record in platforms)
         {
             if (string.IsNullOrWhiteSpace(record.Name)) continue;
+            var logoError = PlatformLogoContent.Validate(record.Logo);
+            if (logoError is not null)
+            {
+                results.errors.Add($"Logo de plataforma inválido: {record.Name}");
+                continue; // Do not replace an existing legitimate logo with an unsafe import.
+            }
             var existing = await _context.GamePlatforms.FirstOrDefaultAsync(p => p.Name.ToLower() == record.Name.ToLower() && p.UserId == userId);
-            if (existing != null) { existing.Color = record.Color; existing.Logo = string.IsNullOrWhiteSpace(record.Logo) ? null : record.Logo; existing.IsActive = bool.Parse(record.IsActive ?? "true"); existing.SortOrder = int.Parse(record.SortOrder ?? "0"); results = results with { platformsUpdated = results.platformsUpdated + 1 }; }
-            else { _context.GamePlatforms.Add(new GamePlatform { UserId = userId, Name = record.Name, Color = record.Color, Logo = string.IsNullOrWhiteSpace(record.Logo) ? null : record.Logo, IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { platformsImported = results.platformsImported + 1 }; }
+            if (existing != null) { existing.Color = record.Color; existing.Logo = PlatformLogoContent.Normalize(record.Logo); existing.IsActive = bool.Parse(record.IsActive ?? "true"); existing.SortOrder = int.Parse(record.SortOrder ?? "0"); results = results with { platformsUpdated = results.platformsUpdated + 1 }; }
+            else { _context.GamePlatforms.Add(new GamePlatform { UserId = userId, Name = record.Name, Color = record.Color, Logo = PlatformLogoContent.Normalize(record.Logo), IsActive = bool.Parse(record.IsActive ?? "true"), SortOrder = int.Parse(record.SortOrder ?? "0") }); results = results with { platformsImported = results.platformsImported + 1 }; }
         }
         await _context.SaveChangesAsync();
         foreach (var record in statuses)
@@ -537,39 +534,36 @@ public class GameImportExportService : IGameImportExportService
         }
         await _context.SaveChangesAsync();
 
-        foreach (var record in views)
+        await using (var viewTransaction = await _context.Database.BeginTransactionAsync())
         {
-            if (string.IsNullOrWhiteSpace(record.Name)) continue;
-            var existing = await _context.GameViews.FirstOrDefaultAsync(v => v.Name.ToLower() == record.Name.ToLower() && v.UserId == userId);
-            if (existing != null)
+            var ownedViews = await _context.GameViews.Where(view => view.UserId == userId).ToListAsync();
+            var occupiedSlots = ownedViews.Where(view => view.PinnedSlot.HasValue).Select(view => view.PinnedSlot!.Value).ToHashSet();
+            foreach (var record in views)
             {
-                existing.Description = record.Description;
-                existing.FiltersJson = record.FiltersJson ?? "{}";
-                existing.SortingJson = record.SortingJson;
-                existing.IsPublic = bool.Parse(record.IsPublic ?? "true");
-                existing.CreatedBy = record.CreatedBy;
-                existing.UpdatedAt = DateTime.UtcNow;
-                results = results with { viewsUpdated = results.viewsUpdated + 1 };
-            }
-            else
-            {
-                var newView = new GameView
+                if (string.IsNullOrWhiteSpace(record.Name)) continue;
+                var existing = ownedViews.FirstOrDefault(view => string.Equals(view.Name, record.Name, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
                 {
-                    UserId = userId,
-                    Name = record.Name,
-                    Description = record.Description,
-                    FiltersJson = record.FiltersJson ?? "{}",
-                    SortingJson = record.SortingJson,
-                    IsPublic = bool.Parse(record.IsPublic ?? "true"),
-                    CreatedBy = record.CreatedBy,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-                _context.GameViews.Add(newView);
-                results = results with { viewsImported = results.viewsImported + 1 };
+                    existing.Description = record.Description;
+                    existing.FiltersJson = record.FiltersJson ?? "{}";
+                    existing.SortingJson = record.SortingJson;
+                    existing.IsPublic = bool.Parse(record.IsPublic ?? "true");
+                    existing.CreatedBy = record.CreatedBy;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                    results = results with { viewsUpdated = results.viewsUpdated + 1 };
+                }
+                else
+                {
+                    existing = new GameView { UserId = userId, Name = record.Name, Description = record.Description, FiltersJson = record.FiltersJson ?? "{}", SortingJson = record.SortingJson, IsPublic = bool.Parse(record.IsPublic ?? "true"), CreatedBy = record.CreatedBy };
+                    _context.GameViews.Add(existing);
+                    ownedViews.Add(existing);
+                    results = results with { viewsImported = results.viewsImported + 1 };
+                }
+                GameViewArchive.MergePreferences(existing, record, occupiedSlots, results.errors);
             }
+            await _context.SaveChangesAsync();
+            await viewTransaction.CommitAsync();
         }
-        await _context.SaveChangesAsync();
 
         foreach (var record in games)
         {

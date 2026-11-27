@@ -356,8 +356,6 @@ public class CatalogService : ICatalogService
     // PLATFORMS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private const int MaxLogoLength = 500_000;
-
     public async Task<PagedResult<GamePlatformDto>> GetPlatformsAsync(QueryParameters parameters, int userId)
     {
         var query = _context.GamePlatforms.Where(p => p.UserId == userId).AsQueryable();
@@ -433,7 +431,7 @@ public class CatalogService : ICatalogService
             return CatalogServiceResult<GamePlatformDto>.ConflictResult("Ya existe una plataforma con este nombre");
         }
 
-        var logoValidation = ValidatePlatformLogo(createDto.Logo);
+        var logoValidation = PlatformLogoContent.Validate(createDto.Logo);
         if (logoValidation != null)
         {
             return CatalogServiceResult<GamePlatformDto>.BadRequest(logoValidation);
@@ -450,7 +448,7 @@ public class CatalogService : ICatalogService
             SortOrder = maxSort + 1,
             IsActive = createDto.IsActive,
             Color = createDto.Color,
-            Logo = NormalizeLogo(createDto.Logo)
+            Logo = PlatformLogoContent.Normalize(createDto.Logo)
         };
 
         _context.GamePlatforms.Add(gamePlatform);
@@ -472,7 +470,7 @@ public class CatalogService : ICatalogService
             return CatalogServiceResult.ConflictResult("Ya existe una plataforma con este nombre");
         }
 
-        var logoValidation = ValidatePlatformLogo(updateDto.Logo);
+        var logoValidation = PlatformLogoContent.Validate(updateDto.Logo);
         if (logoValidation != null)
         {
             return CatalogServiceResult.BadRequest(logoValidation);
@@ -481,7 +479,7 @@ public class CatalogService : ICatalogService
         gamePlatform.Name = updateDto.Name;
         gamePlatform.IsActive = updateDto.IsActive;
         gamePlatform.Color = updateDto.Color;
-        gamePlatform.Logo = NormalizeLogo(updateDto.Logo);
+        gamePlatform.Logo = PlatformLogoContent.Normalize(updateDto.Logo);
 
         try
         {
@@ -558,57 +556,6 @@ public class CatalogService : ICatalogService
 
         return CatalogServiceResult.Ok();
     }
-
-    private static string? NormalizeLogo(string? logo)
-    {
-        return string.IsNullOrWhiteSpace(logo) ? null : logo.Trim();
-    }
-
-    private static string? ValidatePlatformLogo(string? logo)
-    {
-        var normalized = NormalizeLogo(logo);
-        if (normalized == null)
-        {
-            return null;
-        }
-
-        if (normalized.Length > MaxLogoLength)
-        {
-            return "El logo es demasiado grande";
-        }
-
-        if (IsValidImageUrl(normalized) || IsValidInternalPlatformLogo(normalized) || IsValidImageDataUrl(normalized))
-        {
-            return null;
-        }
-
-        return "El logo debe ser una URL http(s) o una imagen PNG, JPG, WebP o SVG en data URL";
-    }
-
-    private static bool IsValidImageUrl(string logo)
-    {
-        return Uri.TryCreate(logo, UriKind.Absolute, out var uri)
-            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
-    }
-
-    private static bool IsValidImageDataUrl(string logo)
-    {
-        var allowedPrefixes = new[]
-        {
-            "data:image/png;base64,",
-            "data:image/jpeg;base64,",
-            "data:image/jpg;base64,",
-            "data:image/webp;base64,",
-            "data:image/avif;base64,",
-            "data:image/svg+xml,"
-        };
-
-        return allowedPrefixes.Any(prefix => logo.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool IsValidInternalPlatformLogo(string logo) =>
-        logo.StartsWith("/platform-icons/", StringComparison.OrdinalIgnoreCase)
-        && !logo.Contains("..", StringComparison.Ordinal);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PLAYWITH

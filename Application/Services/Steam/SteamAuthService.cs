@@ -1,14 +1,13 @@
 using GamesDatabase.Api.Application.Interfaces;
 using System.Collections.Concurrent;
 using System.Text;
-using System.Web;
 
 namespace GamesDatabase.Api.Application.Services.Steam;
 
 public class SteamAuthService : ISteamAuthService
 {
     // ── Nonces (OpenID state tokens) ──────────────────────────────────────────
-    private static readonly ConcurrentDictionary<Guid, (int? UserId, string Mode, DateTime Expiry)>
+    private static readonly ConcurrentDictionary<Guid, (SteamAuthNonce State, DateTime Expiry)>
         _nonces = new();
 
     // ── One-time login codes (replace JWT-in-URL anti-pattern) ───────────────
@@ -27,20 +26,22 @@ public class SteamAuthService : ISteamAuthService
 
     // ── Nonce helpers ─────────────────────────────────────────────────────────
 
-    public Guid StoreNonce(int? userId, string mode)
+    public Guid StoreNonce(int? userId, string mode, string frontendBaseUrl, string callbackUrl)
     {
         CleanExpiredNonces();
         var nonce = Guid.NewGuid();
-        _nonces[nonce] = (userId, mode, DateTime.UtcNow.AddMinutes(15));
+        var sep = callbackUrl.Contains('?') ? '&' : '?';
+        var returnTo = $"{callbackUrl}{sep}nonce={nonce}";
+        _nonces[nonce] = (new(userId, mode, frontendBaseUrl, returnTo), DateTime.UtcNow.AddMinutes(15));
         return nonce;
     }
 
-    public (int? UserId, string Mode)? ConsumeNonce(Guid nonce)
+    public SteamAuthNonce? ConsumeNonce(Guid nonce)
     {
         if (_nonces.TryRemove(nonce, out var entry))
         {
             if (entry.Expiry > DateTime.UtcNow)
-                return (entry.UserId, entry.Mode);
+                return entry.State;
         }
         return null;
     }
@@ -67,11 +68,12 @@ public class SteamAuthService : ISteamAuthService
 
     // ── OpenID helpers ────────────────────────────────────────────────────────
 
-    public string BuildLoginUrl(Guid nonce, string callbackUrl)
+    public string BuildLoginUrl(Guid nonce)
     {
-        var sep = callbackUrl.Contains('?') ? '&' : '?';
-        var returnTo = $"{callbackUrl}{sep}nonce={nonce}";
-        var realm = ExtractRealm(callbackUrl);
+        if (!_nonces.TryGetValue(nonce, out var entry) || entry.Expiry <= DateTime.UtcNow)
+            throw new InvalidOperationException("Steam login state is unavailable.");
+        var returnTo = entry.State.ReturnTo;
+        var realm = ExtractRealm(returnTo);
 
         var sb = new StringBuilder(SteamOpenIdEndpoint);
         sb.Append("?openid.ns=").Append(Uri.EscapeDataString("http://specs.openid.net/auth/2.0"));
@@ -84,50 +86,66 @@ public class SteamAuthService : ISteamAuthService
         return sb.ToString();
     }
 
-    public async Task<string?> ValidateCallbackAsync(IQueryCollection queryParams)
+    public async Task<string?> ValidateCallbackAsync(IQueryCollection queryParams, string expectedReturnTo, CancellationToken cancellationToken = default)
     {
+        // The provider validates its signature, not our intended destination. Bind
+        // that signed destination to the exact URL saved before leaving this API.
+        var claimedId = SingleValue(queryParams, "openid.claimed_id");
+        const string prefix = "https://steamcommunity.com/openid/id/";
+        if (SingleValue(queryParams, "openid.ns") != "http://specs.openid.net/auth/2.0"
+            || SingleValue(queryParams, "openid.mode") != "id_res"
+            || SingleValue(queryParams, "openid.op_endpoint") != SteamOpenIdEndpoint
+            || SingleValue(queryParams, "openid.return_to") != expectedReturnTo
+            || claimedId is null || !claimedId.StartsWith(prefix, StringComparison.Ordinal)
+            || claimedId.Length != prefix.Length + 17 || !claimedId[prefix.Length..].All(char.IsAsciiDigit)
+            || SingleValue(queryParams, "openid.identity") != claimedId
+            || SingleValue(queryParams, "openid.response_nonce") is null
+            || SingleValue(queryParams, "openid.assoc_handle") is null
+            || SingleValue(queryParams, "openid.sig") is null)
+            return null;
+
+        var signed = SingleValue(queryParams, "openid.signed")?.Split(',').ToHashSet(StringComparer.Ordinal);
+        if (signed is null || new[] { "op_endpoint", "claimed_id", "identity", "return_to", "response_nonce", "assoc_handle" }.Any(field => !signed.Contains(field)))
+            return null;
+
         var postParams = new Dictionary<string, string>();
         foreach (var key in queryParams.Keys)
         {
-            if (key.StartsWith("openid."))
-                postParams[key] = queryParams[key].ToString();
+            if (!key.StartsWith("openid.", StringComparison.Ordinal)) continue;
+            var value = SingleValue(queryParams, key);
+            if (value is null) return null;
+            postParams[key] = value;
         }
-
-        if (!postParams.ContainsKey("openid.mode"))
-            return null;
 
         postParams["openid.mode"] = "check_authentication";
 
-        var content = new FormUrlEncodedContent(postParams);
+        using var content = new FormUrlEncodedContent(postParams);
         try
         {
-            var response = await _httpClient.PostAsync(SteamOpenIdEndpoint, content);
-            var body = await response.Content.ReadAsStringAsync();
+            using var response = await _httpClient.PostAsync(SteamOpenIdEndpoint, content, cancellationToken);
+            if (!response.IsSuccessStatusCode) return null;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            if (!body.Contains("is_valid:true"))
+            if (!body.Split('\n').Any(line => line.TrimEnd('\r') == "is_valid:true"))
             {
-                _logger.LogWarning("Steam OpenID validation returned invalid. Body: {Body}", body);
+                _logger.LogWarning("Steam OpenID validation returned invalid.");
                 return null;
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating Steam OpenID callback");
             return null;
         }
 
-        if (queryParams.TryGetValue("openid.claimed_id", out var claimedId))
-        {
-            var claimedIdStr = claimedId.ToString();
-            const string prefix = "https://steamcommunity.com/openid/id/";
-            if (claimedIdStr.StartsWith(prefix))
-                return claimedIdStr[prefix.Length..];
-        }
-
-        return null;
+        return claimedId[prefix.Length..];
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
+
+    private static string? SingleValue(IQueryCollection query, string key) =>
+        query.TryGetValue(key, out var values) && values.Count == 1 && !string.IsNullOrWhiteSpace(values[0]) ? values[0] : null;
 
     private static string ExtractRealm(string callbackUrl)
     {

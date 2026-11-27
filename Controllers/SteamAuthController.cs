@@ -61,12 +61,13 @@ public class SteamAuthController : ControllerBase
             userId = parsedId;
         }
 
-        var nonce = _steamAuth.StoreNonce(userId, mode);
-        var frontendBase = ResolveRequestedFrontendUrl(frontend_url) ?? GetFrontendBaseUrl();
-        var callbackBase = !string.IsNullOrEmpty(frontendBase) ? frontendBase : GetCallbackBaseUrl();
-        var callbackUrl = $"{callbackBase}/api/auth/steam/callback" +
+        var frontendBase = string.IsNullOrWhiteSpace(frontend_url) ? GetFrontendBaseUrl() : ResolveRequestedFrontendUrl(frontend_url);
+        if (frontendBase is null)
+            return BadRequest(new { message = "A configured or allowlisted frontend URL is required." });
+        var callbackUrl = $"{frontendBase}/api/auth/steam/callback" +
             $"?frontend_url={Uri.EscapeDataString(frontendBase)}";
-        var loginUrl = _steamAuth.BuildLoginUrl(nonce, callbackUrl);
+        var nonce = _steamAuth.StoreNonce(userId, mode, frontendBase, callbackUrl);
+        var loginUrl = _steamAuth.BuildLoginUrl(nonce);
 
         return Redirect(loginUrl);
     }
@@ -82,12 +83,13 @@ public class SteamAuthController : ControllerBase
         if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out var userId))
             return Unauthorized(new { message = "Invalid user" });
 
-        var nonce = _steamAuth.StoreNonce(userId, "link");
-        var frontendBase = ResolveRequestedFrontendUrl(frontend_url) ?? GetFrontendBaseUrl();
-        var callbackBase = !string.IsNullOrEmpty(frontendBase) ? frontendBase : GetCallbackBaseUrl();
-        var callbackUrl = $"{callbackBase}/api/auth/steam/callback" +
+        var frontendBase = string.IsNullOrWhiteSpace(frontend_url) ? GetFrontendBaseUrl() : ResolveRequestedFrontendUrl(frontend_url);
+        if (frontendBase is null)
+            return BadRequest(new { message = "A configured or allowlisted frontend URL is required." });
+        var callbackUrl = $"{frontendBase}/api/auth/steam/callback" +
             $"?frontend_url={Uri.EscapeDataString(frontendBase)}";
-        var loginUrl = _steamAuth.BuildLoginUrl(nonce, callbackUrl);
+        var nonce = _steamAuth.StoreNonce(userId, "link", frontendBase, callbackUrl);
+        var loginUrl = _steamAuth.BuildLoginUrl(nonce);
 
         return Ok(new { url = loginUrl });
     }
@@ -101,23 +103,23 @@ public class SteamAuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> Callback()
     {
-        var frontendBase = Request.Query["frontend_url"].ToString();
-        if (string.IsNullOrWhiteSpace(frontendBase))
-            frontendBase = GetFrontendBaseUrl();
-
-        if (!Guid.TryParse(Request.Query["nonce"].ToString(), out var nonce))
-            return Redirect(BuildFrontendErrorUrl(frontendBase, "invalid_nonce"));
+        if (Request.Query["nonce"].Count != 1 || !Guid.TryParse(Request.Query["nonce"][0], out var nonce))
+            return BadRequest(new { message = "Invalid Steam login state. Start the login again." });
 
         var nonceData = _steamAuth.ConsumeNonce(nonce);
         if (nonceData == null)
-            return Redirect(BuildFrontendErrorUrl(frontendBase, "nonce_expired"));
+            return BadRequest(new { message = "Steam login state is unavailable or expired. Start the login again." });
 
-        var steamId = await _steamAuth.ValidateCallbackAsync(Request.Query);
+        var frontendBase = nonceData.FrontendBaseUrl;
+        if (Request.Query["frontend_url"].Count != 1 || Request.Query["frontend_url"][0] != frontendBase)
+            return Redirect(BuildFrontendErrorUrl(frontendBase, "validation_failed"));
+
+        var steamId = await _steamAuth.ValidateCallbackAsync(Request.Query, nonceData.ReturnTo, HttpContext.RequestAborted);
         if (steamId == null)
             return Redirect(BuildFrontendErrorUrl(frontendBase, "validation_failed"));
 
-        if (nonceData.Value.Mode == "link")
-            return await HandleLinkAsync(nonceData.Value.UserId!.Value, steamId, frontendBase);
+        if (nonceData.Mode == "link")
+            return await HandleLinkAsync(nonceData.UserId!.Value, steamId, frontendBase);
         else
             return await HandleLoginAsync(steamId, frontendBase);
     }
@@ -206,33 +208,16 @@ public class SteamAuthController : ControllerBase
 
     // ── URL helpers ───────────────────────────────────────────────────────────
 
-    private string GetCallbackBaseUrl()
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.CallbackBaseUrl))
-            return _settings.CallbackBaseUrl.TrimEnd('/');
-
-        var scheme = Request.Headers.TryGetValue("X-Forwarded-Proto", out var proto) && !string.IsNullOrEmpty(proto)
-            ? proto.ToString().Split(',')[0].Trim()
-            : Request.Scheme;
-
-        var host = Request.Headers.TryGetValue("X-Forwarded-Host", out var fwdHost) && !string.IsNullOrEmpty(fwdHost)
-            ? fwdHost.ToString().Split(',')[0].Trim()
-            : Request.Host.ToString();
-
-        return $"{scheme}://{host}";
-    }
-
-    private string GetFrontendBaseUrl()
+    private string? GetFrontendBaseUrl()
     {
         if (!string.IsNullOrWhiteSpace(_settings.FrontendBaseUrl))
-            return _settings.FrontendBaseUrl.TrimEnd('/');
+            return Uri.TryCreate(_settings.FrontendBaseUrl, UriKind.Absolute, out var configured)
+                && configured.Scheme is "http" or "https" && string.IsNullOrEmpty(configured.UserInfo)
+                && string.IsNullOrEmpty(configured.Query) && string.IsNullOrEmpty(configured.Fragment)
+                ? configured.GetLeftPart(UriPartial.Path).TrimEnd('/') : null;
 
-        var referer = Request.Headers.Referer.ToString();
-        if (!string.IsNullOrWhiteSpace(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var refUri))
-            return $"{refUri.Scheme}://{refUri.Authority}";
-
-        _logger.LogWarning("Cannot determine frontend base URL: no FrontendBaseUrl config and no Referer header.");
-        return string.Empty;
+        // A Referer is caller-controlled too; it may select only an existing allowed origin.
+        return ResolveRequestedFrontendUrl(Request.Headers.Referer.ToString());
     }
 
     private static string BuildFrontendErrorUrl(string frontendBase, string error)
@@ -243,7 +228,8 @@ public class SteamAuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(requestedUrl))
             return null;
 
-        if (!Uri.TryCreate(requestedUrl, UriKind.Absolute, out var uri))
+        if (!Uri.TryCreate(requestedUrl, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(uri.UserInfo))
             return null;
 
         var origin = $"{uri.Scheme}://{uri.Authority}";
@@ -255,7 +241,7 @@ public class SteamAuthController : ControllerBase
             string.Equals(origin, _settings.FrontendBaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
             return origin;
 
-        _logger.LogWarning("Rejected untrusted frontend_url: {Url}", requestedUrl);
+        _logger.LogWarning("Rejected untrusted Steam frontend URL.");
         return null;
     }
 }

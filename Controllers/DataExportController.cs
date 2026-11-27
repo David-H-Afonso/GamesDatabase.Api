@@ -384,6 +384,10 @@ public class FullExportModel
     public string? SortingJson { get; set; }
     public string? IsPublic { get; set; }
     public string? CreatedBy { get; set; }
+    [Optional]
+    public string? ViewPinnedSlot { get; set; }
+    [Optional]
+    public string? ViewLastUsedAt { get; set; }
     public string? HistoryField { get; set; }
     public string? HistoryOldValue { get; set; }
     public string? HistoryNewValue { get; set; }

@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Text.Json;
 using CsvHelper;
+using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Application.Services;
 using GamesDatabase.Api.Common;
 using GamesDatabase.Api.Configuration;
@@ -48,10 +49,11 @@ public sealed class PlaytimeTransferCacheTests(GamesDatabaseApiFactory factory) 
         }
     }
     private sealed class Clients(HttpClient client) : IHttpClientFactory { public HttpClient CreateClient(string name) => client; }
-    private static ZipExportService Zip(Game game, GamesDbContext db, HttpClient http)
+    private static ZipExportService Zip(Game game, GamesDbContext db, HttpClient http, IServiceProvider services)
     {
         var context = new DefaultHttpContext(); context.Items["UserId"] = game.UserId; context.Request.Scheme = "https"; context.Request.Host = new HostString("transfer-fixture.invalid");
-        return new ZipExportService(new Clients(http), Options.Create(new DataExportOptions()), new HttpContextAccessor { HttpContext = context }, db, NullLogger<ZipExportService>.Instance);
+        var media = new ExportMediaDownloader(new Clients(http), Options.Create(new ExportMediaOptions()), NullLogger<ExportMediaDownloader>.Instance);
+        return new ZipExportService(services.GetRequiredService<IGameImportExportService>(), media, Options.Create(new ExportSettings()), new HttpContextAccessor { HttpContext = context }, db, NullLogger<ZipExportService>.Instance);
     }
     private static void AssertSources(JsonElement info, bool additive)
     {
@@ -65,7 +67,7 @@ public sealed class PlaytimeTransferCacheTests(GamesDatabaseApiFactory factory) 
     public async Task Incremental_ZIP_refreshes_old_metadata_without_a_fake_game_edit_then_skips_current_cache(bool additive)
     {
         await using var scope = factory.Services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<GamesDbContext>(); var game = await Seed(db, additive); var updatedAt = game.UpdatedAt;
-        using var http = new HttpClient(new Handler(Csv(game))); var service = Zip(game, db, http);
+        using var http = new HttpClient(new Handler(Csv(game))); var service = Zip(game, db, http, scope.ServiceProvider);
         var result = await service.BuildZipAsync(null, false); Assert.Equal(1, result.GamesExported);
         using var archive = new ZipArchive(new MemoryStream(result.ZipBytes), ZipArchiveMode.Read);
         var entry = Assert.Single(archive.Entries, entry => entry.FullName.StartsWith("Games Database/Games/", StringComparison.Ordinal) && entry.FullName.EndsWith("/info.json", StringComparison.Ordinal));
@@ -85,7 +87,7 @@ public sealed class PlaytimeTransferCacheTests(GamesDatabaseApiFactory factory) 
             var folder = Path.Combine(root, game.UserId.ToString(CultureInfo.InvariantCulture), "Games", FolderNameHelper.MakeSafeFolderName(game.Name)); Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, "info.json"); await File.WriteAllTextAsync(path, "{\"name\":\"legacy metadata\",\"manualPlaytimeMinutes\":\"90\",\"steamPlaytimeForever\":\"600\"}");
             var handler = new Handler(Csv(game)); using var http = new HttpClient(handler);
-            if (zipFirst) Assert.Equal(1, (await Zip(game, db, http).BuildZipAsync(null, false)).GamesExported);
+            if (zipFirst) Assert.Equal(1, (await Zip(game, db, http, scope.ServiceProvider).BuildZipAsync(null, false)).GamesExported);
             var service = new NetworkSyncService(new Clients(http), Options.Create(new DataExportOptions { FullExportUrl = "https://transfer-fixture.invalid/api/DataExport/full" }), Options.Create(new NetworkSyncOptions { Enabled = true, NetworkPath = root }), db, NullLogger<NetworkSyncService>.Instance);
             var result = await service.SyncToNetworkAsync(game.UserId, null, false); Assert.True(result.Success, result.ErrorMessage); Assert.Equal(1, result.GamesSynced);
             using var info = JsonDocument.Parse(await File.ReadAllTextAsync(path)); AssertSources(info.RootElement, true);
@@ -94,7 +96,7 @@ public sealed class PlaytimeTransferCacheTests(GamesDatabaseApiFactory factory) 
 
             // This must also work on later edits, not just a one-time version bump.
             game.ManualPlaytimeMinutes = 180; game.ManualPlaytimeIsAdditive = false; await db.SaveChangesAsync(); var editTime = game.UpdatedAt; handler.CsvData = Csv(game);
-            Assert.Equal(1, (await Zip(game, db, http).BuildZipAsync(null, false)).GamesExported); Assert.False(game.ModifiedSinceExport);
+            Assert.Equal(1, (await Zip(game, db, http, scope.ServiceProvider).BuildZipAsync(null, false)).GamesExported); Assert.False(game.ModifiedSinceExport);
             var changed = await service.SyncToNetworkAsync(game.UserId, null, false); Assert.True(changed.Success, changed.ErrorMessage); Assert.Equal(1, changed.GamesSynced);
             using var revised = JsonDocument.Parse(await File.ReadAllTextAsync(path)); Assert.Equal("180", revised.RootElement.GetProperty("manualPlaytimeMinutes").GetString()); Assert.Equal("600", revised.RootElement.GetProperty("steamPlaytimeForever").GetString()); Assert.Equal("False", revised.RootElement.GetProperty("manualPlaytimeIsAdditive").GetString()); Assert.Equal(editTime, game.UpdatedAt);
             File.Delete(path); var missing = await service.SyncToNetworkAsync(game.UserId, null, false); Assert.True(missing.Success, missing.ErrorMessage); Assert.Equal(1, missing.GamesSynced); Assert.True(File.Exists(path));

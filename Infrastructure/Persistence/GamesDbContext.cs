@@ -84,9 +84,10 @@ public class GamesDbContext : DbContext
                 }
                 else if (entry.Entity is GameView view)
                 {
+                    if (entry.Property(nameof(GameView.PinnedSlot)).IsModified) view.ModifiedSinceExport = true;
                     // Export bookkeeping and recent usage are not configuration edits.
                     var modifiedProperties = entry.Properties
-                        .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt" && p.Metadata.Name != "LastUsedAt")
+                        .Where(p => p.IsModified && p.Metadata.Name != "ModifiedSinceExport" && p.Metadata.Name != "UpdatedAt" && p.Metadata.Name != "LastUsedAt" && p.Metadata.Name != "PinnedSlot")
                         .ToList();
 
                     if (modifiedProperties.Any())

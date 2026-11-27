@@ -106,7 +106,8 @@ public sealed class LibraryReviewContractsTests(GamesDatabaseApiFactory factory)
         var a = new Game { UserId = first.Id, StatusId = first.Status, Name = name }; var b = new Game { UserId = second.Id, StatusId = second.Status, Name = name }; db.Games.AddRange(a, b); await db.SaveChangesAsync();
         using var text = new StringWriter(); using (var writer = new CsvWriter(text, CultureInfo.InvariantCulture)) writer.WriteRecords(new[] { new ExportRecord { Type = "Game", Name = name, ManualPlaytimeMinutes = "90", ManualPlaytimeIsAdditive = "True" } });
         using var http = new HttpClient(new Handler(text.ToString())); var context = new DefaultHttpContext(); context.Items["UserId"] = second.Id; context.Request.Scheme = "https"; context.Request.Host = new HostString("fixture.test");
-        var service = new ZipExportService(new Clients(http), Options.Create(new DataExportOptions()), new HttpContextAccessor { HttpContext = context }, db, NullLogger<ZipExportService>.Instance);
+        var media = new ExportMediaDownloader(new Clients(http), Options.Create(new ExportMediaOptions()), NullLogger<ExportMediaDownloader>.Instance);
+        var service = new ZipExportService(scope.ServiceProvider.GetRequiredService<IGameImportExportService>(), media, Options.Create(new ExportSettings()), new HttpContextAccessor { HttpContext = context }, db, NullLogger<ZipExportService>.Instance);
         var result = await service.BuildZipAsync(null, true); Assert.Equal(1, result.GamesExported); Assert.Equal(b.Id, Assert.Single(await db.GameExportCaches.ToListAsync()).GameId);
         Assert.True(a.ModifiedSinceExport); Assert.False(b.ModifiedSinceExport); Assert.Equal(GameExportCache.CurrentMetadataVersion, (await db.GameExportCaches.SingleAsync()).MetadataVersion);
     }

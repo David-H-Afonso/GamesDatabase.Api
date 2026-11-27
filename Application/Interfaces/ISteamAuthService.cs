@@ -11,12 +11,15 @@ public record SteamLoginResult(
     string? SteamNickname,
     string? SteamAvatarUrl);
 
+/// <summary>Server-owned OpenID state. Callback parameters must never choose the redirect destination.</summary>
+public record SteamAuthNonce(int? UserId, string Mode, string FrontendBaseUrl, string ReturnTo);
+
 public interface ISteamAuthService
 {
-    string BuildLoginUrl(Guid nonce, string callbackUrl);
-    Task<string?> ValidateCallbackAsync(IQueryCollection queryParams);
-    Guid StoreNonce(int? userId, string mode);
-    (int? UserId, string Mode)? ConsumeNonce(Guid nonce);
+    string BuildLoginUrl(Guid nonce);
+    Task<string?> ValidateCallbackAsync(IQueryCollection queryParams, string expectedReturnTo, CancellationToken cancellationToken = default);
+    Guid StoreNonce(int? userId, string mode, string frontendBaseUrl, string callbackUrl);
+    SteamAuthNonce? ConsumeNonce(Guid nonce);
 
     /// <summary>
     /// Stores a short-lived (5 min) one-time code that maps to the full login

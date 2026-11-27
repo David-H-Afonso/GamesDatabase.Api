@@ -365,6 +365,43 @@ public class GameService : IGameService
         if (game == null)
             return GameServiceResult.NotFoundResult();
 
+        // Validate every incoming catalog reference before touching the tracked
+        // game, its mappings, timestamps or history. An ID-only FK is not ownership.
+        if (gameDto.ValueKind != JsonValueKind.Object)
+            return GameServiceResult.BadRequest("Game updates must be a JSON object.");
+        foreach (var (field, label) in new[] { ("statusId", "StatusId"), ("platformId", "PlatformId"), ("playedStatusId", "PlayedStatusId") })
+        {
+            if (!gameDto.TryGetProperty(field, out var value) || value.ValueKind == JsonValueKind.Null) continue;
+            if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var referenceId) || referenceId <= 0)
+                return GameServiceResult.BadRequest($"Invalid {label} for current user");
+            var owned = field switch
+            {
+                "statusId" => await _context.GameStatuses.AnyAsync(status => status.Id == referenceId && status.UserId == userId),
+                "platformId" => await _context.GamePlatforms.AnyAsync(platform => platform.Id == referenceId && platform.UserId == userId),
+                _ => await _context.GamePlayedStatuses.AnyAsync(playedStatus => playedStatus.Id == referenceId && playedStatus.UserId == userId)
+            };
+            if (!owned) return GameServiceResult.BadRequest($"Invalid {label} for current user");
+        }
+        List<int>? validatedPlayWithIds = null;
+        if (gameDto.TryGetProperty("playWithIds", out var requestedPlayWithIds))
+        {
+            validatedPlayWithIds = [];
+            if (requestedPlayWithIds.ValueKind is not (JsonValueKind.Array or JsonValueKind.Null))
+                return GameServiceResult.BadRequest("PlayWithIds must be an array or null.");
+            if (requestedPlayWithIds.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var value in requestedPlayWithIds.EnumerateArray())
+                {
+                    if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var referenceId) || referenceId <= 0)
+                        return GameServiceResult.BadRequest("Invalid PlayWithIds for current user");
+                    validatedPlayWithIds.Add(referenceId);
+                }
+                validatedPlayWithIds = validatedPlayWithIds.Distinct().ToList();
+                if (await _context.GamePlayWiths.CountAsync(value => value.UserId == userId && validatedPlayWithIds.Contains(value.Id)) != validatedPlayWithIds.Count)
+                    return GameServiceResult.BadRequest("Invalid PlayWithIds for current user");
+            }
+        }
+
         // Capturar nombres legibles ANTES de aplicar cambios (para historial)
         var oldStatusName = game.Status?.Name;
         var oldPlatformName = game.Platform?.Name;
@@ -509,27 +546,20 @@ public class GameService : IGameService
             game.Comment = commentElement.ValueKind == JsonValueKind.Null ? null : commentElement.GetString();
         }
 
-        if (gameDto.TryGetProperty("playWithIds", out var playWithIdsElement))
+        if (validatedPlayWithIds is not null)
         {
             var existingMappings = await _context.GamePlayWithMappings
                 .Where(gpw => gpw.GameId == id)
                 .ToListAsync();
             _context.GamePlayWithMappings.RemoveRange(existingMappings);
 
-            if (playWithIdsElement.ValueKind == JsonValueKind.Array)
+            foreach (var playWithId in validatedPlayWithIds)
             {
-                var playWithIds = playWithIdsElement.EnumerateArray()
-                    .Select(e => e.GetInt32())
-                    .ToList();
-
-                foreach (var playWithId in playWithIds)
+                _context.GamePlayWithMappings.Add(new GamePlayWithMapping
                 {
-                    _context.GamePlayWithMappings.Add(new GamePlayWithMapping
-                    {
-                        GameId = id,
-                        PlayWithId = playWithId
-                    });
-                }
+                    GameId = id,
+                    PlayWithId = playWithId
+                });
             }
 
             _context.Entry(game).State = EntityState.Modified;
@@ -689,6 +719,21 @@ public class GameService : IGameService
             return GameServiceResult<BulkUpdateResult>.BadRequest("No game IDs provided");
         }
 
+        // SQLite's immediate transaction reserves the short write before reading
+        // settings. A competing Steam-cache writer must finish first, rather than
+        // making a read-then-write upgrade fail halfway through a successful import.
+        // Never hold this transaction across Steam/HTTP calls or retry the import.
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        if (bulkUpdate.StatusId is { } statusId && !await _context.GameStatuses.AnyAsync(value => value.Id == statusId && value.UserId == userId))
+            return GameServiceResult<BulkUpdateResult>.BadRequest("Invalid StatusId for current user");
+        if (bulkUpdate.PlatformId is { } platformId && !await _context.GamePlatforms.AnyAsync(value => value.Id == platformId && value.UserId == userId))
+            return GameServiceResult<BulkUpdateResult>.BadRequest("Invalid PlatformId for current user");
+        if (bulkUpdate.PlayedStatusId is { } playedStatusId && !await _context.GamePlayedStatuses.AnyAsync(value => value.Id == playedStatusId && value.UserId == userId))
+            return GameServiceResult<BulkUpdateResult>.BadRequest("Invalid PlayedStatusId for current user");
+        var playWithIds = bulkUpdate.PlayWithIds?.Distinct().ToArray();
+        if (playWithIds is not null && await _context.GamePlayWiths.CountAsync(value => value.UserId == userId && playWithIds.Contains(value.Id)) != playWithIds.Length)
+            return GameServiceResult<BulkUpdateResult>.BadRequest("Invalid PlayWithIds for current user");
+
         var games = await _context.Games
             .Where(g => bulkUpdate.GameIds.Contains(g.Id) && g.UserId == userId)
             .ToListAsync();
@@ -698,72 +743,60 @@ public class GameService : IGameService
             return GameServiceResult<BulkUpdateResult>.NotFoundResult("No games found with provided IDs");
         }
 
-        int updatedCount = 0;
-
         foreach (var game in games)
         {
-            bool updated = false;
-
             if (bulkUpdate.StatusId.HasValue)
             {
                 game.StatusId = bulkUpdate.StatusId.Value;
-                updated = true;
             }
 
             if (bulkUpdate.PlatformId.HasValue)
             {
                 game.PlatformId = bulkUpdate.PlatformId.Value;
-                updated = true;
             }
 
             if (bulkUpdate.PlayedStatusId.HasValue)
             {
                 game.PlayedStatusId = bulkUpdate.PlayedStatusId.Value;
-                updated = true;
             }
 
             if (bulkUpdate.IsCheaperByKey.HasValue)
             {
                 game.IsCheaperByKey = bulkUpdate.IsCheaperByKey.Value;
-                updated = true;
             }
 
             if (bulkUpdate.Favorite.HasValue)
             {
                 game.Favorite = bulkUpdate.Favorite.Value;
-                updated = true;
             }
 
-            if (bulkUpdate.PlayWithIds != null)
+            if (playWithIds != null)
             {
                 var existingMappings = await _context.GamePlayWithMappings
                     .Where(gpw => gpw.GameId == game.Id)
                     .ToListAsync();
-                _context.GamePlayWithMappings.RemoveRange(existingMappings);
-
-                foreach (var playWithId in bulkUpdate.PlayWithIds)
+                if (!existingMappings.Select(mapping => mapping.PlayWithId).ToHashSet().SetEquals(playWithIds))
                 {
-                    _context.GamePlayWithMappings.Add(new GamePlayWithMapping
+                    _context.GamePlayWithMappings.RemoveRange(existingMappings);
+                    foreach (var playWithId in playWithIds)
                     {
-                        GameId = game.Id,
-                        PlayWithId = playWithId
-                    });
+                        _context.GamePlayWithMappings.Add(new GamePlayWithMapping { GameId = game.Id, PlayWithId = playWithId });
+                    }
+                    // Relationship-only changes are still real game edits.
+                    game.UpdatedAt = DateTime.UtcNow;
+                    game.ModifiedSinceExport = true;
                 }
-                updated = true;
-            }
-
-            if (updated)
-            {
-                game.UpdatedAt = DateTime.UtcNow;
-                updatedCount++;
             }
         }
 
-        await _context.SaveChangesAsync();
+        if (_context.ChangeTracker.HasChanges()) await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return GameServiceResult<BulkUpdateResult>.Ok(new BulkUpdateResult
         {
-            UpdatedCount = updatedCount,
+            // A no-op settings replay is still acknowledged for its row receipt,
+            // but must not emit a fake edit timestamp or another database write.
+            UpdatedCount = bulkUpdate.StatusId.HasValue || bulkUpdate.PlatformId.HasValue || bulkUpdate.PlayedStatusId.HasValue || bulkUpdate.IsCheaperByKey.HasValue || bulkUpdate.Favorite.HasValue || playWithIds != null ? games.Count : 0,
             TotalRequested = bulkUpdate.GameIds.Length
         });
     }

@@ -127,6 +127,12 @@ public class ExportRecord
     [Name("CreatedBy")]
     public string? CreatedBy { get; set; }
 
+    [Optional, Name("ViewPinnedSlot")]
+    public string? ViewPinnedSlot { get; set; }
+
+    [Optional, Name("ViewLastUsedAt")]
+    public string? ViewLastUsedAt { get; set; }
+
     [Name("PlaylistId")]
     public string? PlaylistId { get; set; }
 
