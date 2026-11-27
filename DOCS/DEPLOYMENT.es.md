@@ -49,7 +49,13 @@ el modelo actual y registra el baseline. Los valores Docker por defecto (8080, `
 montajes. Persiste claves DataProtection en privado; Testing usa protección efímera.
 Ninguna credencial debe formar parte de una URL del frontend.
 
-La crítica v2 y las reparaciones acotadas auth/media no añaden migración. v2 usa otro
+La crítica v2 y las reparaciones acotadas auth/media no añaden migración. La cola
+persistente posterior **sí añade `AddMetadataAutofillJobs`**, tabla SQLite propia
+con ámbito congelado, idempotencia, recibos y leases. Inclúyela en copias consistentes.
+El nuevo proceso solo retoma trabajo pendiente pedido expresamente; un lease vivo
+anterior puede tardar hasta dos minutos en caducar. El binario antiguo ignora/pausa
+esa cola: conserva la tabla aditiva al volver atrás; Down borraría trabajo/historial.
+CSV/ZIP no encola ni reanuda trabajos operativos en otro destino. v2 usa otro
 propósito DataProtection para que una API antigua no aplique OpenCritic como
 Metacritic al volver atrás. Revisa [el contrato](METADATA_REVIEW.es.md); una revisión
 antigua/caducada puede requerir simplemente consultar de nuevo.

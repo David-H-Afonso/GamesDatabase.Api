@@ -73,7 +73,8 @@ public sealed class GameMetadataService(GamesDbContext context, IGameService gam
                 var matches = await sources.SearchSteamAsync(game.Name, token);
                 result.Matches.AddRange(matches);
                 var exact = matches.Where(match => SameName(game.Name, match.Name)).ToList();
-                if (exact.Count == 1) appId = exact[0].SteamAppId;
+                if (request.BestMatch) appId = MetadataNameMatching.Best(matches, game.Name, match => match.Name)?.SteamAppId;
+                else if (exact.Count == 1) appId = exact[0].SteamAppId;
             }
             catch (Exception error) when (error is HttpRequestException or JsonException or OperationCanceledException && !cancellationToken.IsCancellationRequested) { result.Notices.Add("steamUnavailable"); }
         }
@@ -92,6 +93,7 @@ public sealed class GameMetadataService(GamesDbContext context, IGameService gam
                 var wiki = await sources.WikidataAsync(game.Name, appId, token);
                 result.Matches.AddRange(wiki.Select(item => item.Identity));
                 var chosen = request.WikidataId is not null ? wiki.SingleOrDefault(item => item.Identity.WikidataId == request.WikidataId)
+                    : request.BestMatch && !appId.HasValue ? MetadataNameMatching.Best(wiki, game.Name, item => item.Identity.Name)
                     : wiki.Count == 1 && (appId.HasValue || SameName(game.Name, wiki[0].Identity.Name)) ? wiki[0] : null;
                 if (chosen is not null) { facts.Add(chosen); durationName ??= chosen.Identity.Name; }
             }
@@ -103,13 +105,14 @@ public sealed class GameMetadataService(GamesDbContext context, IGameService gam
         {
             // A reviewed edition must not silently revert to the custom library
             // title when that explicit identity cannot be resolved.
-            if (durationName is null && (request.SteamAppId.HasValue || request.WikidataId is not null)) result.Notices.Add("chooseIdentity");
+            if (durationName is null && (request.SteamAppId.HasValue || request.WikidataId is not null || request.BestMatch && game.SteamAppId.HasValue)) result.Notices.Add("chooseIdentity");
             else try
             {
                 var duration = await durations.LookupAsync(durationName ?? game.Name, request.DekuDealsSlug, token, forceRefresh: request.ReviewVersion == 2 && request.Overwrite);
                 result.Matches.AddRange(duration.Matches);
+                result.RetryAfterSeconds = duration.RetryAfterSeconds;
                 if (duration.Metadata is not null) facts.Add(duration.Metadata);
-                if (duration.Metadata is null) result.Notices.Add(duration.Unavailable ? needsDurations ? "durationSourceUnavailable" : "criticSourceUnavailable" : duration.Matches.Count > 0 ? "chooseDurationIdentity" : needsDurations ? "durationUnavailable" : "criticUnavailable");
+                if (duration.Metadata is null) result.Notices.Add(duration.Unavailable ? needsDurations ? "durationSourceUnavailable" : "criticSourceUnavailable" : !duration.IdentityConfirmed && duration.Matches.Count > 0 ? "chooseDurationIdentity" : needsDurations ? "durationUnavailable" : "criticUnavailable");
                 else
                 {
                     if (needsDurations && !duration.Metadata.SourceHours.Keys.Any(field => field is "story" or "completion")) result.Notices.Add("durationUnavailable");
@@ -162,7 +165,9 @@ public sealed class GameMetadataService(GamesDbContext context, IGameService gam
         catch (Exception error) when (error is CryptographicException or JsonException or FormatException) { return CatalogServiceResult<GameMetadataApplyDto>.BadRequest("Metadata review is invalid or expired."); }
         if (plan is null || plan.ReviewVersion != reviewVersion || plan.GameId != gameId || plan.ExpiresAt <= clock.GetUtcNow()) return CatalogServiceResult<GameMetadataApplyDto>.BadRequest("Metadata review is invalid or expired.");
         if (plan.UserId != userId) return new() { StatusCode = 403, Error = "Metadata review belongs to another account." };
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        // A persistent job owns the outer transaction so its exact receipt and
+        // this mutation commit atomically. Direct API callers still own theirs.
+        await using var transaction = context.Database.CurrentTransaction is null ? await context.Database.BeginTransactionAsync(cancellationToken) : null;
         var game = await context.Games.SingleOrDefaultAsync(game => game.Id == gameId && game.UserId == userId, cancellationToken);
         if (game is null) return CatalogServiceResult<GameMetadataApplyDto>.NotFoundResult("Game unavailable.");
         if (game.UpdatedAt != plan.UpdatedAt) return CatalogServiceResult<GameMetadataApplyDto>.ConflictResult("Game changed. Look up and review the latest values again.");
@@ -185,7 +190,7 @@ public sealed class GameMetadataService(GamesDbContext context, IGameService gam
             var saved = await games.UpdateGameAsync(gameId, JsonSerializer.SerializeToElement(patch, Json), userId);
             if (!saved.Success) return CatalogServiceResult<GameMetadataApplyDto>.BadRequest(saved.Error ?? "Metadata could not be saved.");
         }
-        await transaction.CommitAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         var updated = await games.GetGameByIdAsync(gameId, userId);
         return updated is null ? CatalogServiceResult<GameMetadataApplyDto>.NotFoundResult("Game unavailable.") : CatalogServiceResult<GameMetadataApplyDto>.Ok(new() { Game = updated, AppliedFields = request.Fields, UnchangedFields = unchangedFields });
     }

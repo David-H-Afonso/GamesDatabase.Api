@@ -151,18 +151,19 @@ public sealed partial class DekuDealsDurationProvider(IHttpClientFactory clients
             if (forceRefresh || !cache.TryGetValue(searchKey, out matches) || matches is null)
             {
                 var read = await ReadAsync("/search?q=" + Uri.EscapeDataString(name) + "&platforms=" + Uri.EscapeDataString(Platforms), token);
-                if (read.Html is null) return new() { Unavailable = read.Failed };
+                if (read.Html is null) return new() { Unavailable = read.Failed, RetryAfterSeconds = CooldownSeconds() };
                 matches = SearchResults(read.Html);
                 cache.Set(searchKey, matches, TimeSpan.FromHours(matches.Count == 0 ? 1 : 24));
             }
             var result = new GameDurationLookup { Matches = matches };
-            var exact = matches.Where(match => SameName(match.Name, name)).ToList();
-            var selected = selectedSlug is null ? exact.Count == 1 ? exact[0] : null : matches.SingleOrDefault(match => match.DekuDealsSlug == selectedSlug);
+            var selected = selectedSlug is null ? MetadataNameMatching.Best(matches, name, match => match.Name) : matches.SingleOrDefault(match => match.DekuDealsSlug == selectedSlug);
             if (selected is null) return result;
+            result.IdentityConfirmed = true;
             var gameKey = "deku-metadata-v3-all-platforms-game:" + selected.DekuDealsSlug;
             if (!forceRefresh && cache.TryGetValue<PublicGameMetadata>(gameKey, out var cached) && cached is not null) { result.Metadata = cached; return result; }
             var game = await ReadAsync("/items/" + selected.DekuDealsSlug, token);
             result.Unavailable = game.Failed;
+            result.RetryAfterSeconds = CooldownSeconds();
             if (game.Html is null) return result;
             result.Metadata = ParseGame(game.Html, selected);
             if (result.Metadata is not null) cache.Set(gameKey, result.Metadata, TimeSpan.FromHours(24));
@@ -170,4 +171,7 @@ public sealed partial class DekuDealsDurationProvider(IHttpClientFactory clients
         }
         finally { lookupGate.Release(); }
     }
+
+    private int? CooldownSeconds() => cache.TryGetValue<DateTimeOffset>(Cooldown, out var until) && until > clock.GetUtcNow()
+        ? Math.Clamp((int)Math.Ceiling((until - clock.GetUtcNow()).TotalSeconds), 1, 3600) : null;
 }

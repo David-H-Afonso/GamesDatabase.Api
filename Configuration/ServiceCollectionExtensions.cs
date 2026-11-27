@@ -294,6 +294,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGameDiscoveryService, GameDiscoveryService>();
         services.AddScoped<IOnboardingService, OnboardingService>();
         services.AddScoped<IGameMetadataService, GameMetadataService>();
+        services.AddSingleton<MetadataAutofillSignal>();
+        services.AddScoped<IMetadataAutofillJobService, MetadataAutofillJobService>();
+        if (!environment.IsEnvironment("Testing")) services.AddHostedService<MetadataAutofillWorker>();
         services.AddScoped<IPublicGameMetadataProvider, PublicGameMetadataProvider>();
         services.AddHttpClient("game-metadata", client =>
         {

@@ -90,9 +90,12 @@ La crítica conserva el proveedor real: Metacritic de la edición Steam y despu�
 Metacritic/OpenCritic atribuidos en Deku, explicando su ámbito de plataforma.
 Reemplazar consulta grupos rellenados; confirmar coincidencias no inventa fechas ni
 historial. Importar/sincronizar ya no etiqueta un porcentaje calculado de usuarios
-como "SteamDB" y no reescribe notas existentes. Los lotes explícitos del Front usan
-estas mismas rutas firmadas en secuencia, reintentando solo información y sin cambiar
-vínculos ni sincronizar jugadores. [Revisión v2 y compatibilidad](DOCS/METADATA_REVIEW.es.md).
+como "SteamDB" y no reescribe notas existentes. Los trabajos explícitos de selección/
+posimportación se guardan en SQLite y usan el servicio firmado en secuencia. Guardado
+y recibo se confirman juntos: cerrar la web o reiniciar la API no pierde pendientes.
+Esta ampliación posterior requiere `AddMetadataAutofillJobs` y no está en el artefacto
+3.2.2 anterior. Idempotencia por cuenta, cancelación/historial, pausas y revisiones
+múltiples no cambian vínculos ni sincronizan jugadores. [Revisión v2 y contratos de trabajos](DOCS/METADATA_REVIEW.es.md).
 
 ![Revisión real de Hades con fuentes y aceptación campo por campo](DOCS/images/demo-metadata-es.webp)
 

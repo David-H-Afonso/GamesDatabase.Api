@@ -21,10 +21,12 @@ public sealed class GameMetadataTests(GamesDatabaseApiFactory factory) : IClassF
     private sealed class PublicSources : IPublicGameMetadataProvider
     {
         public string? WikidataName { get; set; }
+        public bool NoSteam { get; set; }
+        public bool NoWiki { get; set; }
         public Dictionary<string, object> SteamFields { get; } = new() { ["name"] = "Verified title", ["developer"] = "Verified studio", ["released"] = "2024-02-29", ["critic"] = 90, ["grade"] = 100, ["story"] = 999, ["manualPlaytimeMinutes"] = 9999 };
         public Task<List<GameMetadataIdentityDto>> SearchSteamAsync(string name, CancellationToken token) => Task.FromResult(new List<GameMetadataIdentityDto> { new() { Source = "steam", Name = name, SteamAppId = 100, Url = "https://store.steampowered.com/app/100/" } });
-        public Task<PublicGameMetadata?> SteamAsync(int appId, bool artwork, CancellationToken token) => Task.FromResult<PublicGameMetadata?>(new() { Identity = new() { Source = "steam", Name = "Verified title", SteamAppId = appId, Url = $"https://store.steampowered.com/app/{appId}/" }, Fields = SteamFields });
-        public Task<List<PublicGameMetadata>> WikidataAsync(string name, int? appId, CancellationToken token) => Task.FromResult(new List<PublicGameMetadata> { new() { Identity = new() { Source = "wikidata", WikidataId = "Q7889", Name = WikidataName ?? name, Url = "https://www.wikidata.org/wiki/Q7889" }, Fields = new() { ["name"] = "Lower-priority title", ["developer"] = "Lower-priority studio", ["released"] = "2020-01-01" } } });
+        public Task<PublicGameMetadata?> SteamAsync(int appId, bool artwork, CancellationToken token) => Task.FromResult<PublicGameMetadata?>(NoSteam ? null : new() { Identity = new() { Source = "steam", Name = "Verified title", SteamAppId = appId, Url = $"https://store.steampowered.com/app/{appId}/" }, Fields = SteamFields });
+        public Task<List<PublicGameMetadata>> WikidataAsync(string name, int? appId, CancellationToken token) => Task.FromResult(NoWiki ? [] : new List<PublicGameMetadata> { new() { Identity = new() { Source = "wikidata", WikidataId = "Q7889", Name = WikidataName ?? name, Url = "https://www.wikidata.org/wiki/Q7889" }, Fields = new() { ["name"] = "Lower-priority title", ["developer"] = "Lower-priority studio", ["released"] = "2020-01-01" } } });
     }
     private sealed class Clock : TimeProvider { public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow; public override DateTimeOffset GetUtcNow() => Now; }
     private sealed class DurationSource : IGameDurationProvider
@@ -156,6 +158,22 @@ public sealed class GameMetadataTests(GamesDatabaseApiFactory factory) : IClassF
         var durations = new DurationSource(); using var host = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services => { services.RemoveAll<IPublicGameMetadataProvider>(); services.AddSingleton<IPublicGameMetadataProvider>(new PublicSources { WikidataName = "Different identity fixture" }); services.RemoveAll<IGameDurationProvider>(); services.AddSingleton<IGameDurationProvider>(durations); }));
         var owner = await Owner(host.Services, host.CreateClient()); var response = await owner.Client.PostAsJsonAsync($"/api/games/{owner.GameId}/metadata/preview", new GameMetadataLookupRequest { WikidataId = "Q99999", IncludeArtwork = false }); response.EnsureSuccessStatusCode(); var preview = (await response.Content.ReadFromJsonAsync<GameMetadataPreviewDto>())!;
         Assert.Equal(0, durations.Reads); Assert.DoesNotContain(preview.Fields, field => field.Field is "story" or "completion"); Assert.Null(preview.Token);
+    }
+
+    [Fact]
+    public async Task Background_best_match_does_not_use_a_custom_title_when_the_existing_Steam_identity_cannot_be_confirmed()
+    {
+        var durations = new DurationSource();
+        using var host = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IPublicGameMetadataProvider>(); services.AddSingleton<IPublicGameMetadataProvider>(new PublicSources { NoSteam = true, NoWiki = true });
+            services.RemoveAll<IGameDurationProvider>(); services.AddSingleton<IGameDurationProvider>(durations);
+        }));
+        var owner = await Owner(host.Services, host.CreateClient());
+        (await owner.Client.PutAsJsonAsync($"/api/games/{owner.GameId}", new { steamAppId = 100 })).EnsureSuccessStatusCode();
+        var response = await owner.Client.PostAsJsonAsync($"/api/games/{owner.GameId}/metadata/preview", new GameMetadataLookupRequest { ReviewVersion = 2, Overwrite = true, BestMatch = true }); response.EnsureSuccessStatusCode();
+        var preview = (await response.Content.ReadFromJsonAsync<GameMetadataPreviewDto>())!;
+        Assert.Contains("chooseIdentity", preview.Notices); Assert.Equal(0, durations.Reads); Assert.Empty(preview.Fields);
     }
 
     [Theory]

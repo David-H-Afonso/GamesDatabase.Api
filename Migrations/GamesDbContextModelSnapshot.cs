@@ -1168,6 +1168,113 @@ namespace GamesDatabase.Api.Migrations
                     b.ToTable("household_refresh_token", (string)null);
                 });
 
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.MetadataAutofillJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("AcceptListedPlatformCritic")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("accept_listed_platform_critic");
+
+                    b.Property<int?>("ActiveUserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("active_user_id");
+
+                    b.Property<bool>("CancelRequested")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("cancel_requested");
+
+                    b.Property<Guid>("ClientRequestId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("client_request_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("CurrentGameId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("current_game_id");
+
+                    b.Property<string>("CurrentPhase")
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("current_phase");
+
+                    b.Property<bool>("Dismissed")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("dismissed");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("finished_at");
+
+                    b.Property<string>("ItemsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("items_json");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("lease_until");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<bool>("Overwrite")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("overwrite");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("request_hash");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("state");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActiveUserId")
+                        .IsUnique();
+
+                    b.HasIndex("ActiveUserId", "NextAttemptAt");
+
+                    b.HasIndex("UserId", "ClientRequestId")
+                        .IsUnique();
+
+                    b.ToTable("metadata_autofill_job", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_metadata_job_active_owner", "active_user_id IS NULL OR active_user_id = user_id");
+                        });
+                });
+
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.OnboardingState", b =>
                 {
                     b.Property<int>("UserId")
@@ -2064,6 +2171,17 @@ namespace GamesDatabase.Api.Migrations
                     b.Navigation("Connection");
 
                     b.Navigation("ReplacedByToken");
+                });
+
+            modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.MetadataAutofillJob", b =>
+                {
+                    b.HasOne("GamesDatabase.Api.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("GamesDatabase.Api.Domain.Entities.OnboardingState", b =>

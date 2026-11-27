@@ -25,6 +25,7 @@ visible in their service.
 | `GameDiscoveryService` | Owned uniform random choice and UTC-day rotation |
 | `OnboardingService` | Explicit guide progress, sample provenance and reviewed cleanup |
 | `GameMetadataService` | Signed expiring previews and sparse, timestamp-checked Apply |
+| `MetadataAutofillJobService`, `MetadataAutofillWorker` | Explicit owned SQLite jobs, leases, atomic item receipts and recovery |
 | `PublicGameMetadataProvider` | Steam-first/Wikidata-second bounded public reads |
 | `DekuDealsDurationProvider` | Attributed HLTB and Metacritic/OpenCritic from bounded public Deku HTML, exact hours and cache/cooldown |
 | `Steam/*` | Authentication, store data, achievement policy and explicit sync jobs |
@@ -68,7 +69,13 @@ the integer-hour storage proposal is disclosed before Apply, without a migration
 Critic priority is Steam-edition Metacritic, then attributed Deku Metacritic/OpenCritic.
 Fresh replacement does not bypass source blocks. A calculated Steam user percentage
 is not newly stored as a SteamDB critic score; existing curated ratings remain intact.
-Explicit browser batches reuse normal signed endpoints, not a server scheduler.
+Explicit durable jobs reuse the signed preview/Apply service on the server. They
+freeze owner/IDs/revisions, accept one disclosed batch critic policy and store
+each game mutation with its receipt in the same transaction. The new
+`metadata_autofill_job` table retains idempotency, results, source pauses and leases;
+no transaction spans public network reads. Browser close stops observation, not
+accepted work; a new API process recovers pending items after an old lease expires.
+No periodic discovery or unsolicited library synchronization is scheduled.
 See [Metadata review v2](METADATA_REVIEW.md).
 Steam date references are a separate explicit workflow: valid UTC event timestamps
 become review-zone calendar references, never reconstructed sessions or verified story

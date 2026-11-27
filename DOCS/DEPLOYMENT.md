@@ -53,6 +53,13 @@ Persist DataProtection keys privately for signed metadata reviews; Testing uses
 ephemeral protection and does not create deployed keys.
 
 Critic review v2 and the scoped auth/media repairs need no additional migration.
+The later durable metadata queue **does** add `AddMetadataAutofillJobs`. This
+owned SQLite table persists frozen scope, idempotency, item receipts and leases;
+include it in consistent DB backups. A new process resumes only explicitly
+requested pending work (an old live lease can take up to two minutes to expire).
+An older compatible binary ignores/pauses this work; keep the additive table on
+rollback, never run Down to discard newer job history. Library CSV/ZIP transfers
+do not enqueue/resume operational jobs on another destination.
 v2 uses a different DataProtection purpose: an old API cannot accept an OpenCritic
 plan as Metacritic on rollback. Review [the contract](METADATA_REVIEW.md) before
 adopting a newer Front; expired/old reviews may simply need another lookup.

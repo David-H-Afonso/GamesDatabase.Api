@@ -153,6 +153,7 @@ public class GamesDbContext : DbContext
     public DbSet<HouseholdRefreshToken> HouseholdRefreshTokens { get; set; }
     public DbSet<CollectionPreferences> CollectionPreferences { get; set; }
     public DbSet<OnboardingState> OnboardingStates { get; set; }
+    public DbSet<MetadataAutofillJob> MetadataAutofillJobs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

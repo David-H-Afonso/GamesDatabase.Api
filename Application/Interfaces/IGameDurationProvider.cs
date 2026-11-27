@@ -7,6 +7,8 @@ public sealed class GameDurationLookup
     public List<GameMetadataIdentityDto> Matches { get; set; } = [];
     public PublicGameMetadata? Metadata { get; set; }
     public bool Unavailable { get; set; }
+    public bool IdentityConfirmed { get; set; }
+    public int? RetryAfterSeconds { get; set; }
 }
 
 public interface IGameDurationProvider

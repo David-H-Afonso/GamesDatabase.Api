@@ -13,6 +13,7 @@ public sealed class GameMetadataLookupRequest
     public int? SteamAppId { get; set; }
     public string? WikidataId { get; set; }
     public string? DekuDealsSlug { get; set; }
+    public bool BestMatch { get; set; }
 }
 public sealed class GameMetadataIdentityDto
 {
@@ -45,6 +46,7 @@ public sealed class GameMetadataPreviewDto
     public List<GameMetadataIdentityDto> Matches { get; set; } = [];
     public List<GameMetadataFieldDto> Fields { get; set; } = [];
     public List<string> Notices { get; set; } = [];
+    public int? RetryAfterSeconds { get; set; }
 }
 public sealed class GameMetadataApplyRequest
 {

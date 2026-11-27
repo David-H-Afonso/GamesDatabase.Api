@@ -24,6 +24,7 @@ propiedad, transacciones y consultas quedan visibles en cada servicio.
 | `GameDiscoveryService` | Aleatorio propio y rotación diaria UTC |
 | `OnboardingService` | Guía explícita, procedencia y borrado de ejemplos |
 | `GameMetadataService` | Planes firmados/caducables y Apply parcial con timestamp |
+| `MetadataAutofillJobService`, `MetadataAutofillWorker` | Trabajos SQLite propios explícitos, leases, recibos atómicos y recuperación |
 | `PublicGameMetadataProvider` | Lecturas públicas limitadas Steam/Wikidata |
 | `DekuDealsDurationProvider` | HLTB y Metacritic/OpenCritic atribuidos desde HTML público acotado de Deku, horas originales y caché/cooldown |
 | `Steam/*` | Auth, tienda, logros y sincronización explícita |
@@ -66,8 +67,13 @@ Las estimaciones opcionales de Deku Deals conservan las fracciones originales en
 el plan firmado; se explica el redondeo a horas enteras antes de aplicar, sin migración.
 La crítica prioriza Metacritic de la edición Steam y después Metacritic/OpenCritic
 atribuidos en Deku. Reemplazar no elude bloqueos. No se guarda un porcentaje calculado
-de usuarios como SteamDB; las notas anteriores se conservan. Los lotes explícitos del
-navegador reutilizan rutas firmadas normales, sin programador de servidor.
+de usuarios como SteamDB; las notas anteriores se conservan. Los trabajos explícitos
+persistentes reutilizan el servicio de consulta/Apply firmado en el servidor. Fijan
+cuenta/IDs/revisiones y una política de crítica explicada por lote. Mutación y recibo
+se guardan en la misma transacción; ninguna transacción abarca la red pública. La
+tabla nueva `metadata_autofill_job` conserva idempotencia, resultados, pausas y
+leases. Cerrar la web solo detiene la observación; la API nueva recupera pendientes
+al caducar un lease anterior. No programa descubrimiento ni sincronización periódica.
 Consulta [Revisión v2](METADATA_REVIEW.es.md).
 Las fechas Steam se revisan aparte: eventos UTC válidos generan referencias de calendario
 en la zona indicada, no sesiones reconstruidas ni finales de historia confirmados. Los

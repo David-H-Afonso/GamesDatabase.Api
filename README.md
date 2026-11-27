@@ -89,9 +89,13 @@ Critic proposals preserve the actual provider: Steam-edition Metacritic, then
 Metacritic/OpenCritic attributed by Deku, with listed-platform scope disclosed.
 Replace refreshes populated groups; equal-value receipts do not invent timestamps
 or history. New import/sync no longer names a calculated Steam user percentage
-"SteamDB"; existing saved ratings are not rewritten. Explicit Front selection and
-post-import batches use the same signed endpoints sequentially, with metadata-only
-retry and no player sync or Steam-link changes. [Review v2 and compatibility](DOCS/METADATA_REVIEW.md).
+"SteamDB"; existing saved ratings are not rewritten. Explicit selection/post-import
+jobs now persist in SQLite and reuse the signed service sequentially. A save and
+its job receipt commit atomically; browser close and API restart do not lose pending
+work. The additive `AddMetadataAutofillJobs` migration is required for this newer
+source extension, not included in the earlier3.2.2 artifact. Per-account idempotency,
+cancel/history, source cooldowns and multiple retained reviews do not sync players
+or change Steam links. [Review v2 and job contracts](DOCS/METADATA_REVIEW.md).
 
 ![Real Hades metadata review with source attribution and field-level acceptance](DOCS/images/demo-metadata-en.webp)
 
