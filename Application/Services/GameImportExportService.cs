@@ -98,6 +98,8 @@ public class GameImportExportService : IGameImportExportService
         var playlists = await _context.Playlists
             .Where(playlist => playlist.UserId == userId)
             .ToListAsync();
+        var gameFolders = FolderNameHelper.BuildExportFolderNames(games.Select(game => (game.Id, game.Name)), "Unknown_Game");
+        var playlistFolders = FolderNameHelper.BuildExportFolderNames(playlists.Select(playlist => (playlist.Id, playlist.Name)), "Unknown_Playlist");
 
         result.TotalGames = games.Count;
 
@@ -105,9 +107,7 @@ public class GameImportExportService : IGameImportExportService
         {
             try
             {
-                var folderName = FolderNameHelper.MakeSafeFolderName(game.Name);
-                if (string.IsNullOrWhiteSpace(folderName))
-                    folderName = "Unknown_Game";
+                var folderName = gameFolders[game.Id];
 
                 var gamePath = Path.Combine(gamesPath, folderName);
 
@@ -229,8 +229,7 @@ public class GameImportExportService : IGameImportExportService
         var playlistImagesUpdated = false;
         foreach (var playlist in playlists)
         {
-            var folderName = FolderNameHelper.MakeSafeFolderName(playlist.Name);
-            if (string.IsNullOrWhiteSpace(folderName)) folderName = "Unknown_Playlist";
+            var folderName = playlistFolders[playlist.Id];
             var playlistPath = Path.Combine(playlistsPath, folderName);
             if (!Directory.Exists(playlistPath)) continue;
 

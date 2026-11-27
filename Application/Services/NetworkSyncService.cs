@@ -316,8 +316,7 @@ public class NetworkSyncService : INetworkSyncService
             LogoUrl = playlist.PlaylistLogoUrl ?? "",
             SortOrder = ParseInt(playlist.SortOrder) ?? 0,
             Games = playlistItems
-                .Where(item => string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
-                    || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal))
+                .Where(item => BelongsToPlaylist(item, playlist))
                 .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
                 .Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 })
                 .ToList()
@@ -346,34 +345,35 @@ public class NetworkSyncService : INetworkSyncService
         var userPath = Path.Combine(_syncOptions.NetworkPath, userId.ToString());
         var playlistsPath = Path.Combine(userPath, "Playlists");
         Directory.CreateDirectory(playlistsPath);
-        var games = records.Where(record => record.Type == "Game").ToDictionary(record => record.Name, StringComparer.Ordinal);
+        var gameRows = records.Where(record => record.Type == "Game").ToList();
+        var gamesById = gameRows.Where(record => ParseInt(record.GameId) is > 0).ToDictionary(record => ParseInt(record.GameId)!.Value);
+        var uniqueGamesByName = gameRows.GroupBy(record => record.Name, StringComparer.Ordinal).Where(group => group.Count() == 1).ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
         var dbPlaylists = await _context.Playlists
             .Where(playlist => playlist.UserId == userId)
-            .Include(playlist => playlist.Items)
-                .ThenInclude(item => item.Game)
-            .ToDictionaryAsync(playlist => playlist.Name, StringComparer.Ordinal);
+            .ToDictionaryAsync(playlist => playlist.Id);
+        var folderNames = FolderNameHelper.BuildExportFolderNames(dbPlaylists.Values.Select(playlist => (playlist.Id, playlist.Name)), "Unknown_Playlist");
         var imageBase = _syncOptions.ImageBaseUrl?.TrimEnd('/') ?? string.Empty;
 
         foreach (var playlist in playlistRows.OrderBy(record => ParseInt(record.SortOrder) ?? int.MaxValue))
         {
-            var folderName = FolderNameHelper.MakeSafeFolderName(playlist.Name);
-            if (string.IsNullOrWhiteSpace(folderName)) folderName = "Unknown_Playlist";
+            var dbPlaylist = FindOwnedPlaylist(playlist, dbPlaylists)
+                ?? throw new InvalidDataException("The exported playlist no longer has an unambiguous owner identity.");
+            var folderName = folderNames[dbPlaylist.Id];
             var playlistPath = Path.Combine(playlistsPath, folderName);
             Directory.CreateDirectory(playlistPath);
 
-            dbPlaylists.TryGetValue(playlist.Name, out var dbPlaylist);
-
             var items = itemRows
-                .Where(item => string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
-                    || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal))
+                .Where(item => BelongsToPlaylist(item, playlist))
                 .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
                 .ToList();
-            var firstGame = items.Select(item => games.GetValueOrDefault(item.Name)).FirstOrDefault(game => game is not null);
+            var firstGame = items.Select(item => string.IsNullOrWhiteSpace(item.GameId)
+                ? uniqueGamesByName.GetValueOrDefault(item.Name)
+                : gamesById.GetValueOrDefault(ParseInt(item.GameId) ?? 0)).FirstOrDefault(game => game is not null);
             var imageOverrides = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             {
-                ["hero"] = ResolvePlaylistOverride(dbPlaylist?.HeroUrl, playlist.PlaylistHeroUrl),
-                ["cover"] = ResolvePlaylistOverride(dbPlaylist?.CoverUrl, playlist.PlaylistCoverUrl),
-                ["logo"] = ResolvePlaylistOverride(dbPlaylist?.LogoUrl, playlist.PlaylistLogoUrl)
+                ["hero"] = ResolvePlaylistOverride(dbPlaylist.HeroUrl, playlist.PlaylistHeroUrl),
+                ["cover"] = ResolvePlaylistOverride(dbPlaylist.CoverUrl, playlist.PlaylistCoverUrl),
+                ["logo"] = ResolvePlaylistOverride(dbPlaylist.LogoUrl, playlist.PlaylistLogoUrl)
             };
             var imageSources = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             {
@@ -384,21 +384,11 @@ public class NetworkSyncService : INetworkSyncService
 
             var internalUrls = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             {
-                ["hero"] = dbPlaylist?.HeroUrl,
-                ["cover"] = dbPlaylist?.CoverUrl,
-                ["logo"] = dbPlaylist?.LogoUrl
+                ["hero"] = dbPlaylist.HeroUrl,
+                ["cover"] = dbPlaylist.CoverUrl,
+                ["logo"] = dbPlaylist.LogoUrl
             };
 
-            var info = new
-            {
-                Name = playlist.Name,
-                Description = playlist.Description ?? "",
-                SortOrder = ParseInt(playlist.SortOrder) ?? 0,
-                HeroUrl = playlist.PlaylistHeroUrl ?? "",
-                CoverUrl = playlist.PlaylistCoverUrl ?? "",
-                LogoUrl = playlist.PlaylistLogoUrl ?? "",
-                Games = items.Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 }).ToList()
-            };
             var wroteImage = false;
             foreach (var (imageType, url) in imageSources)
             {
@@ -432,16 +422,14 @@ public class NetworkSyncService : INetworkSyncService
                 wroteImage = true;
             }
 
-            if (dbPlaylist is not null)
-            {
-                if (!string.IsNullOrWhiteSpace(imageOverrides["hero"])) dbPlaylist.HeroUrl = internalUrls["hero"];
-                if (!string.IsNullOrWhiteSpace(imageOverrides["cover"])) dbPlaylist.CoverUrl = internalUrls["cover"];
-                if (!string.IsNullOrWhiteSpace(imageOverrides["logo"])) dbPlaylist.LogoUrl = internalUrls["logo"];
-                dbPlaylist.ModifiedSinceExport = false;
-            }
+            if (!string.IsNullOrWhiteSpace(imageOverrides["hero"])) dbPlaylist.HeroUrl = internalUrls["hero"];
+            if (!string.IsNullOrWhiteSpace(imageOverrides["cover"])) dbPlaylist.CoverUrl = internalUrls["cover"];
+            if (!string.IsNullOrWhiteSpace(imageOverrides["logo"])) dbPlaylist.LogoUrl = internalUrls["logo"];
+            dbPlaylist.ModifiedSinceExport = false;
 
             var finalInfo = new
             {
+                Id = dbPlaylist.Id,
                 Name = playlist.Name,
                 Description = playlist.Description ?? "",
                 SortOrder = ParseInt(playlist.SortOrder) ?? 0,
@@ -456,20 +444,19 @@ public class NetworkSyncService : INetworkSyncService
         }
 
         await _context.SaveChangesAsync();
-        await WritePlaylistSettingsAsync(userId, playlistRows, itemRows, dbPlaylists, games);
+        await WritePlaylistSettingsAsync(userId, playlistRows, itemRows, dbPlaylists);
     }
 
     private async Task WritePlaylistSettingsAsync(
         int userId,
         IReadOnlyCollection<ExportRecord> playlistRows,
         IReadOnlyCollection<ExportRecord> itemRows,
-        IReadOnlyDictionary<string, Playlist> dbPlaylists,
-        IReadOnlyDictionary<string, ExportRecord> games)
+        IReadOnlyDictionary<int, Playlist> dbPlaylists)
     {
         var settingsPath = Path.Combine(_syncOptions.NetworkPath, userId.ToString(), "Settings");
         var playlists = playlistRows.Select(playlist =>
         {
-            dbPlaylists.TryGetValue(playlist.Name, out var dbPlaylist);
+            var dbPlaylist = FindOwnedPlaylist(playlist, dbPlaylists);
             return new
             {
                 Id = dbPlaylist?.Id ?? ParseInt(playlist.PlaylistId),
@@ -480,8 +467,7 @@ public class NetworkSyncService : INetworkSyncService
                 LogoUrl = dbPlaylist?.LogoUrl ?? "",
                 SortOrder = dbPlaylist?.SortOrder ?? ParseInt(playlist.SortOrder) ?? 0,
                 Games = itemRows
-                    .Where(item => string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
-                        || string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal))
+                    .Where(item => BelongsToPlaylist(item, playlist))
                     .OrderBy(item => ParseInt(item.Position) ?? int.MaxValue)
                     .Select(item => new { GameId = ParseInt(item.GameId), Name = item.Name, Position = ParseInt(item.Position) ?? 0 })
                     .ToList()
@@ -490,6 +476,16 @@ public class NetworkSyncService : INetworkSyncService
 
         await WriteJsonToFileIfChangedAsync(Path.Combine(settingsPath, "Playlists.json"), playlists);
     }
+
+    private static bool BelongsToPlaylist(ExportRecord item, ExportRecord playlist) =>
+        !string.IsNullOrWhiteSpace(item.PlaylistId) && !string.IsNullOrWhiteSpace(playlist.PlaylistId)
+            ? string.Equals(item.PlaylistId, playlist.PlaylistId, StringComparison.Ordinal)
+            : string.Equals(item.PlaylistName, playlist.Name, StringComparison.Ordinal);
+
+    private static Playlist? FindOwnedPlaylist(ExportRecord record, IReadOnlyDictionary<int, Playlist> playlists) =>
+        string.IsNullOrWhiteSpace(record.PlaylistId)
+            ? playlists.Values.SingleOrDefault(playlist => string.Equals(playlist.Name, record.Name, StringComparison.Ordinal))
+            : playlists.GetValueOrDefault(ParseInt(record.PlaylistId) ?? 0);
 
     private static string BuildInternalImageUrl(string imageBase, int userId, string folderName, string imageType, string extension)
     {
@@ -515,11 +511,13 @@ public class NetworkSyncService : INetworkSyncService
         _logger.LogInformation("Syncing {Count} games for user {UserId} (fullSync: {FullSync})", games.Count, userId, fullSync);
 
         // Load cache info
-        var gameNames = games.Select(g => g.Name).ToList();
         var dbGames = await _context.Games
-            .Where(g => gameNames.Contains(g.Name) && g.UserId == userId)
+            .Where(g => g.UserId == userId)
             .Select(g => new { g.Id, g.Name, g.ModifiedSinceExport, g.Logo, g.Hero, g.Cover })
             .ToListAsync();
+        var gamesById = dbGames.ToDictionary(game => game.Id);
+        var uniqueGamesByName = dbGames.GroupBy(game => game.Name, StringComparer.Ordinal).Where(group => group.Count() == 1).ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
+        var folderNames = FolderNameHelper.BuildExportFolderNames(dbGames.Select(game => (game.Id, game.Name)), "Unknown_Game");
 
         var exportCaches = await _context.GameExportCaches
             .Where(ec => dbGames.Select(g => g.Id).Contains(ec.GameId))
@@ -538,18 +536,15 @@ public class NetworkSyncService : INetworkSyncService
 
         foreach (var game in games)
         {
-            var dbGame = dbGames.FirstOrDefault(g => g.Name == game.Name);
+            var dbGame = string.IsNullOrWhiteSpace(game.GameId)
+                ? uniqueGamesByName.GetValueOrDefault(game.Name)
+                : gamesById.GetValueOrDefault(ParseInt(game.GameId) ?? 0);
             if (dbGame == null)
             {
-                _logger.LogWarning("Game '{Name}' not found in database, skipping", game.Name);
-                continue;
+                throw new InvalidDataException("The exported game no longer has an unambiguous owner identity.");
             }
 
-            var folderName = FolderNameHelper.MakeSafeFolderName(game.Name);
-            if (string.IsNullOrWhiteSpace(folderName))
-            {
-                folderName = "Unknown_Game";
-            }
+            var folderName = folderNames[dbGame.Id];
 
             var gamePath = Path.Combine(gamesPath, folderName);
             Directory.CreateDirectory(gamePath);
@@ -559,6 +554,7 @@ public class NetworkSyncService : INetworkSyncService
             // dirty/version flags; unchanged JSON is neither rewritten nor counted.
             var gameInfo = new
             {
+                GameId = dbGame.Id,
                 Name = game.Name,
                 Developer = game.Developer,
                 Status = game.Status ?? "",
@@ -635,6 +631,7 @@ public class NetworkSyncService : INetworkSyncService
                     LastExportedAt = DateTime.UtcNow
                 };
                 _context.GameExportCaches.Add(cache);
+                exportCaches[dbGame.Id] = cache;
             }
             else
             {
@@ -658,7 +655,7 @@ public class NetworkSyncService : INetworkSyncService
                     // Self-referencing URL: the image already lives on the NAS.
                     // Verify the file actually exists; if so, mark as downloaded.
                     // NEVER delete or re-download these.
-                    bool fileExists = ImageFileExistsOnDisk(gamePath, "logo");
+                    bool fileExists = await EnsureOwnedSelfImageAsync(game.Logo, userId, gamePath, "logo", result);
                     if (fileExists)
                     {
                         if (cache != null) cache.LogoDownloaded = true;
@@ -719,7 +716,7 @@ public class NetworkSyncService : INetworkSyncService
 
                 if (isSelfReferencing)
                 {
-                    bool fileExists = ImageFileExistsOnDisk(gamePath, "hero");
+                    bool fileExists = await EnsureOwnedSelfImageAsync(game.Hero, userId, gamePath, "hero", result);
                     if (fileExists)
                     {
                         if (cache != null) cache.HeroDownloaded = true;
@@ -779,7 +776,7 @@ public class NetworkSyncService : INetworkSyncService
                     // Self-referencing URL: the image already lives on the NAS.
                     // Verify the file actually exists; if so, mark as downloaded.
                     // NEVER delete or re-download these.
-                    bool fileExists = ImageFileExistsOnDisk(gamePath, "cover");
+                    bool fileExists = await EnsureOwnedSelfImageAsync(game.Cover, userId, gamePath, "cover", result);
                     if (fileExists)
                     {
                         if (cache != null) cache.CoverDownloaded = true;
@@ -1071,37 +1068,49 @@ public class NetworkSyncService : INetworkSyncService
     /// If the URL points to our own /game-images/ proxy endpoint, resolve the image
     /// path from the UNC network path directly so we never HTTP-loop back into ourselves.
     /// </summary>
-    private async Task<byte[]?> TryReadFromNetworkPathAsync(string url, int userId)
+    private async Task<bool> EnsureOwnedSelfImageAsync(string url, int userId, string gamePath, string imageType, NetworkSyncResult result)
     {
-        const string marker = "/game-images/";
-        var idx = url.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0 || string.IsNullOrWhiteSpace(_syncOptions.NetworkPath))
-            return null;
+        if (ImageFileExistsOnDisk(gamePath, imageType)) return true;
+        var image = await TryReadFromNetworkPathAsync(url, userId);
+        if (image is null) return false;
+        await File.WriteAllBytesAsync(Path.Combine(gamePath, imageType + image.Extension), image.Bytes);
+        result.FilesWritten++;
+        return true;
+    }
 
-        // Extract the relative path after /game-images/  (e.g. "1/Games/Foo/logo.png")
-        var relativePath = url[(idx + marker.Length)..];
-        if (string.IsNullOrWhiteSpace(relativePath))
-            return null;
-
-        // Normalise separators and resolve the full path under the network share
-        relativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        var fullPath = Path.GetFullPath(Path.Combine(_syncOptions.NetworkPath, relativePath));
-
-        // Security: ensure the resolved path is still inside the network path root
-        var rootFull = Path.GetFullPath(Path.Combine(_syncOptions.NetworkPath, userId.ToString(CultureInfo.InvariantCulture)));
-        if (!fullPath.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        if (!File.Exists(fullPath))
+    private async Task<VerifiedImageContent?> TryReadFromNetworkPathAsync(string url, int userId)
+    {
+        try
         {
-            _logger.LogDebug("Local file not found for self-referencing URL, will try HTTP download: {Path}", fullPath);
+            const string marker = "/game-images/";
+            var sourcePath = url.Split('?', '#')[0];
+            if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+                sourcePath = uri.AbsolutePath;
+            }
+            else if (!sourcePath.StartsWith('/') && !sourcePath.StartsWith("game-images/", StringComparison.OrdinalIgnoreCase)) return null;
+            if (sourcePath.StartsWith("game-images/", StringComparison.OrdinalIgnoreCase)) sourcePath = "/" + sourcePath;
+            var idx = sourcePath.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0 || string.IsNullOrWhiteSpace(_syncOptions.NetworkPath)) return null;
+
+            // Decode URL path segments only; query/fragment text is never a filename.
+            var relativePath = Uri.UnescapeDataString(sourcePath[(idx + marker.Length)..]);
+            if (string.IsNullOrWhiteSpace(relativePath)) return null;
+            relativePath = relativePath.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar);
+            var fullPath = Path.GetFullPath(Path.Combine(_syncOptions.NetworkPath, relativePath));
+            var rootFull = Path.GetFullPath(Path.Combine(_syncOptions.NetworkPath, userId.ToString(CultureInfo.InvariantCulture)));
+            if (!fullPath.StartsWith(rootFull + Path.DirectorySeparatorChar, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) return null;
+            if (!File.Exists(fullPath) || new FileInfo(fullPath).Length > ExportMediaDownloader.MaximumImageBytes) return null;
+
+            var bytes = await File.ReadAllBytesAsync(fullPath);
+            return VerifiedImageContent.TryReadRaster(bytes, out var image) ? image : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or UriFormatException or NotSupportedException)
+        {
+            _logger.LogWarning(ex, "Could not read an owned backup image for user {UserId}; existing files are preserved", userId);
             return null;
         }
-
-        _logger.LogDebug("Reading image directly from network path instead of HTTP: {Path}", fullPath);
-        if (new FileInfo(fullPath).Length > ExportMediaDownloader.MaximumImageBytes) return null;
-        var bytes = await File.ReadAllBytesAsync(fullPath);
-        return VerifiedImageContent.TryReadRaster(bytes, out var image) ? image!.Bytes : null;
     }
 
     private async Task<byte[]?> SafeDownloadAsync(string url, int userId, int attempt = 1, int maxAttempts = 3)
@@ -1110,7 +1119,8 @@ public class NetworkSyncService : INetworkSyncService
         // network path instead of making an HTTP round-trip that would loop back into us.
         var localBytes = await TryReadFromNetworkPathAsync(url, userId);
         if (localBytes != null)
-            return localBytes;
+            return localBytes.Bytes;
+        if (IsSelfReferencingUrl(url)) return null;
 
         // The same verified, credential-free egress policy used by ZIP exports
         // now protects every account's explicit network backup as well.
@@ -1290,6 +1300,7 @@ public class NetworkSyncService : INetworkSyncService
 
             // Get user's games path
             var userPath = Path.Combine(_syncOptions.NetworkPath!, userId.ToString(), "Games");
+            var gameToFolderMap = FolderNameHelper.BuildExportFolderNames(games.Select(game => (game.Id, game.Name)), "Unknown_Game");
 
             if (!Directory.Exists(userPath))
             {
@@ -1297,7 +1308,7 @@ public class NetworkSyncService : INetworkSyncService
                 result.Difference = -result.TotalGamesInDatabase;
                 result.MissingGameFolders = games.Select(g =>
                 {
-                    var expectedFolderName = FolderNameHelper.MakeSafeFolderName(g.Name);
+                    var expectedFolderName = gameToFolderMap[g.Id];
                     return new MissingGameFolder
                     {
                         GameId = g.Id,
@@ -1318,12 +1329,8 @@ public class NetworkSyncService : INetworkSyncService
             result.TotalFoldersInFilesystem = folders.Count;
             result.Difference = result.TotalFoldersInFilesystem - result.TotalGamesInDatabase;
 
-            var gameToFolderMap = games.ToDictionary(
-                g => g.Id,
-                g => FolderNameHelper.MakeSafeFolderName(g.Name)
-            );
-
-            var expectedFolders = gameToFolderMap.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Legacy shared title folders are retained, never treated as disposable orphans.
+            var expectedFolders = gameToFolderMap.Values.Concat(games.Select(game => FolderNameHelper.MakeSafeFolderName(game.Name))).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             // Find orphan folders (folders without corresponding game)
             foreach (var folder in folders)
@@ -1386,7 +1393,7 @@ public class NetworkSyncService : INetworkSyncService
     {
         var playlists = await _context.Playlists
             .Where(playlist => playlist.UserId == userId)
-            .Select(playlist => playlist.Name)
+            .Select(playlist => new { playlist.Id, playlist.Name })
             .ToListAsync();
         result.TotalPlaylistsInDatabase = playlists.Count;
 
@@ -1405,8 +1412,8 @@ public class NetworkSyncService : INetworkSyncService
         result.TotalPlaylistFoldersInFilesystem = folders.Count;
         result.PlaylistFolderDifference = folders.Count - playlists.Count;
 
-        var expected = playlists
-            .Select(FolderNameHelper.MakeSafeFolderName)
+        var expected = FolderNameHelper.BuildExportFolderNames(playlists.Select(playlist => (playlist.Id, playlist.Name)), "Unknown_Playlist").Values
+            .Concat(playlists.Select(playlist => FolderNameHelper.MakeSafeFolderName(playlist.Name)))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var folder in folders)
         {
@@ -1600,7 +1607,7 @@ public class NetworkSyncService : INetworkSyncService
 
         var duplicateGroups = gamesByRoot.ToList();
         var involvedGames = duplicateGroups.SelectMany(group => group).ToList();
-        var enrichment = await BuildDuplicateEnrichmentAsync(userId, involvedGames);
+        var enrichment = await BuildDuplicateEnrichmentAsync(userId, involvedGames, FolderNameHelper.BuildExportFolderNames(games.Select(game => (game.Id, game.Name)), "Unknown_Game"));
 
         foreach (var group in duplicateGroups)
         {
@@ -1630,7 +1637,7 @@ public class NetworkSyncService : INetworkSyncService
     /// for the games that take part in duplicate groups, using a single export-cache query.
     /// </summary>
     private async Task<Dictionary<int, DuplicateEnrichment>> BuildDuplicateEnrichmentAsync(
-        int userId, IReadOnlyCollection<DuplicateCandidateGame> games)
+        int userId, IReadOnlyCollection<DuplicateCandidateGame> games, IReadOnlyDictionary<int, string> folderNames)
     {
         var map = new Dictionary<int, DuplicateEnrichment>();
         if (games.Count == 0)
@@ -1652,7 +1659,7 @@ public class NetworkSyncService : INetworkSyncService
 
         foreach (var game in games)
         {
-            var folderName = FolderNameHelper.MakeSafeFolderName(game.Name);
+            var folderName = folderNames[game.Id];
             string? folderPath = gamesRoot != null && !string.IsNullOrEmpty(folderName)
                 ? Path.Combine(gamesRoot, folderName)
                 : null;

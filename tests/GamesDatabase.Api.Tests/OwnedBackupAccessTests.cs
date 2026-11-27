@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using GamesDatabase.Api.Application.Interfaces;
+using GamesDatabase.Api.Common;
 using GamesDatabase.Api.Configuration;
 using GamesDatabase.Api.Contracts;
 using GamesDatabase.Api.Domain.Entities;
@@ -30,6 +31,7 @@ public sealed class OwnedBackupAccessTests(GamesDatabaseApiFactory factory) : IC
         public WebApplicationFactory<Program> Host { get; set; } = null!;
         public TaskCompletionSource? CsvEntered { get; set; }
         public TaskCompletionSource? ContinueCsv { get; set; }
+        public int MediaRequests { get; set; }
         public void Dispose() { Host.Dispose(); if (Directory.Exists(Root)) Directory.Delete(Root, true); }
     }
     private Fixture Host(bool mediaFixture = true)
@@ -57,8 +59,9 @@ public sealed class OwnedBackupAccessTests(GamesDatabaseApiFactory factory) : IC
                 }));
                 if (mediaFixture) services.AddHttpClient(ExportMediaHttpClient.Name).ConfigurePrimaryHttpMessageHandler(() => new Transport((request, _) =>
                 {
+                    fixture.MediaRequests++;
                     Assert.Equal("images.backup-fixture.invalid", request.RequestUri!.Host); Assert.Null(request.Headers.Authorization); Assert.False(request.Headers.Contains("Cookie"));
-                    using var bitmap = new SKBitmap(32, 32); bitmap.Erase(SKColors.CadetBlue); using var image = SKImage.FromBitmap(bitmap); using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+                    using var bitmap = new SKBitmap(32, 32); bitmap.Erase(request.RequestUri.AbsolutePath.Contains("other-edition", StringComparison.Ordinal) ? SKColors.Orange : SKColors.CadetBlue); using var image = SKImage.FromBitmap(bitmap); using var data = image.Encode(SKEncodedImageFormat.Png, 100);
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(data.ToArray()) { Headers = { ContentType = new MediaTypeHeaderValue("image/png") } } });
                 }));
             });
@@ -107,6 +110,91 @@ public sealed class OwnedBackupAccessTests(GamesDatabaseApiFactory factory) : IC
         var game = (await Game(owner))!; Assert.Equal($"https://backup.example/game-images/{owner.Id}/Games/{owner.Name}/logo.png", game.Logo);
         Assert.Equal(87, game.Grade); Assert.Equal(125, game.ManualPlaytimeMinutes); Assert.Equal("A_PRIVATE_NOTE", game.Comment); Assert.Equal("OpenCritic", game.CriticProvider);
         var after = (await Game(foreign))!; Assert.Equal(before.UpdatedAt, after.UpdatedAt); Assert.Equal(before.Logo, after.Logo); Assert.Equal(before.Comment, after.Comment);
+    }
+
+    [Fact]
+    public async Task Backup_of_89_games_and_four_lists_preserves_same_title_editions_by_owned_ID()
+    {
+        using var fixture = Host(); var owner = await Seed(fixture, "DuplicateEdition"); var foreign = await Seed(fixture, "ForeignEdition"); var foreignBefore = (await Game(foreign))!;
+        int duplicateId;
+        using (var scope = fixture.Host.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<GamesDbContext>(); var original = await db.Games.SingleAsync(game => game.Id == owner.GameId);
+            var additions = Enumerable.Range(1, 88).Select(index => new Game
+            {
+                UserId = owner.Id, StatusId = original.StatusId, Name = index == 88 ? owner.Name : $"{owner.Name}_{index:D2}",
+                Comment = $"EDITION_{index}", Grade = index == 88 ? 42 : 75, ManualPlaytimeMinutes = index == 88 ? 246 : 60,
+                Cover = index == 88 ? "https://images.backup-fixture.invalid/other-edition.png" : null
+            }).ToArray();
+            db.Games.AddRange(additions);
+            var lists = Enumerable.Range(1, 3).Select(index => new Playlist { UserId = owner.Id, Name = $"{owner.Name}_list_{index}", SortOrder = index }).ToArray();
+            db.Playlists.AddRange(lists); await db.SaveChangesAsync(); duplicateId = additions[^1].Id;
+            db.PlaylistItems.AddRange(new PlaylistItem { PlaylistId = owner.PlaylistId, GameId = duplicateId, Position = 0 }, new PlaylistItem { PlaylistId = lists[0].Id, GameId = original.Id, Position = 0 }, new PlaylistItem { PlaylistId = lists[1].Id, GameId = additions[0].Id, Position = 0 }, new PlaylistItem { PlaylistId = lists[2].Id, GameId = duplicateId, Position = 0 });
+            await db.SaveChangesAsync();
+        }
+
+        Directory.CreateDirectory(GamePath(fixture, owner));
+        var legacySentinel = Path.Combine(GamePath(fixture, owner), "retained-legacy-backup.txt"); await File.WriteAllTextAsync(legacySentinel, "KEEP_OLD_BACKUP");
+
+        foreach (var full in new[] { true, false })
+        {
+            var response = await owner.Client.PostAsJsonAsync("/api/export/sync-to-network", new { fullExport = full });
+            var body = await response.Content.ReadAsStringAsync(); Assert.True(response.IsSuccessStatusCode, body);
+            using var result = JsonDocument.Parse(body); var stats = result.RootElement.GetProperty("stats");
+            Assert.Equal(89, stats.GetProperty("totalGames").GetInt32()); Assert.Equal(4, stats.GetProperty("totalPlaylists").GetInt32());
+        }
+
+        var root = Path.Combine(fixture.Root, owner.Id.ToString());
+        var infoFiles = Directory.GetFiles(Path.Combine(root, "Games"), "info.json", SearchOption.AllDirectories); Assert.Equal(89, infoFiles.Length);
+        var metadata = infoFiles.Select(file => JsonDocument.Parse(File.ReadAllText(file))).ToList();
+        try
+        {
+            Assert.Equal(89, metadata.Select(info => info.RootElement.GetProperty("gameId").GetInt32()).Distinct().Count());
+            var editions = metadata.Where(info => info.RootElement.GetProperty("name").GetString() == owner.Name).ToList(); Assert.Equal(2, editions.Count);
+            Assert.Contains(editions, info => info.RootElement.GetProperty("gameId").GetInt32() == owner.GameId && info.RootElement.GetProperty("grade").GetString() == "87" && info.RootElement.GetProperty("comment").GetString() == "DuplicateEdition_PRIVATE_NOTE");
+            Assert.Contains(editions, info => info.RootElement.GetProperty("gameId").GetInt32() == duplicateId && info.RootElement.GetProperty("grade").GetString() == "42" && info.RootElement.GetProperty("manualPlaytimeMinutes").GetString() == "246");
+        }
+        finally { metadata.ForEach(info => info.Dispose()); }
+        using var settings = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "Settings", "Playlists.json")));
+        Assert.Equal(4, settings.RootElement.GetArrayLength());
+        Assert.Equal(duplicateId, settings.RootElement.EnumerateArray().Single(list => list.GetProperty("id").GetInt32() == owner.PlaylistId).GetProperty("games")[0].GetProperty("gameId").GetInt32());
+        Assert.Equal("KEEP_OLD_BACKUP", await File.ReadAllTextAsync(legacySentinel));
+        using (var originalCover = SKBitmap.Decode(Path.Combine(root, "Games", owner.Name + $"__gdb_{owner.GameId}", "cover.png"))) Assert.Equal(SKColors.CadetBlue, originalCover.GetPixel(0, 0));
+        using (var otherCover = SKBitmap.Decode(Path.Combine(root, "Games", owner.Name + $"__gdb_{duplicateId}", "cover.png"))) Assert.Equal(SKColors.Orange, otherCover.GetPixel(0, 0));
+        using (var listCover = SKBitmap.Decode(Path.Combine(root, "Playlists", FolderNameHelper.MakeSafeFolderName(owner.Name + " list"), "cover.png"))) Assert.Equal(SKColors.Orange, listCover.GetPixel(0, 0));
+        var analysis = await owner.Client.GetFromJsonAsync<JsonElement>("/api/DataExport/analyze-folders");
+        Assert.Empty(analysis.GetProperty("missingGameFolders").EnumerateArray()); Assert.Empty(analysis.GetProperty("orphanFolders").EnumerateArray());
+        (await owner.Client.PostAsync("/api/DataExport/update-image-urls?imageBaseUrl=https%3A%2F%2Fbackup.example", null)).EnsureSuccessStatusCode();
+        Assert.Contains($"__gdb_{owner.GameId}/cover.png", (await Game(owner))!.Cover);
+        var otherAfter = await owner.Client.GetFromJsonAsync<GameDto>($"/api/games/{duplicateId}"); Assert.Contains($"__gdb_{duplicateId}/cover.png", otherAfter!.Cover); Assert.Equal(42, otherAfter.Grade); Assert.Equal(246, otherAfter.ManualPlaytimeMinutes);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Root, foreign.Id.ToString())));
+        var foreignAfter = (await Game(foreign))!; Assert.Equal(foreignBefore.Comment, foreignAfter.Comment); Assert.Equal(foreignBefore.UpdatedAt, foreignAfter.UpdatedAt); Assert.Equal(foreignBefore.Cover, foreignAfter.Cover);
+    }
+
+    [Theory]
+    [InlineData("absolute")]
+    [InlineData("root-relative")]
+    [InlineData("relative")]
+    public async Task Backup_recovers_owned_encoded_old_image_paths_without_HTTP_or_copying_another_account(string urlKind)
+    {
+        using var fixture = Host(); var owner = await Seed(fixture, "OldImage"); var foreign = await Seed(fixture, "ForeignImage");
+        using var bitmap = new SKBitmap(32, 32); bitmap.Erase(SKColors.CadetBlue); using var image = SKImage.FromBitmap(bitmap); using var encoded = image.Encode(SKEncodedImageFormat.Png, 100); var bytes = encoded.ToArray();
+        var oldFolder = Path.Combine(fixture.Root, owner.Id.ToString(), "Games", "Old art (2024)"); Directory.CreateDirectory(oldFolder);
+        var source = Path.Combine(oldFolder, "cover image.png"); await File.WriteAllBytesAsync(source, bytes);
+        var foreignFolder = Path.Combine(fixture.Root, foreign.Id.ToString(), "Games", "Private"); Directory.CreateDirectory(foreignFolder); var foreignFile = Path.Combine(foreignFolder, "hero.png"); await File.WriteAllBytesAsync(foreignFile, bytes);
+        var path = $"game-images/{owner.Id}/Games/Old%20art%20%282024%29/cover%20image.png?v=2#preview";
+        var coverUrl = urlKind == "absolute" ? "https://backup-fixture.invalid/" + path : urlKind == "root-relative" ? "/" + path : path;
+        using (var scope = fixture.Host.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<GamesDbContext>(); var game = await db.Games.SingleAsync(game => game.Id == owner.GameId);
+            game.Logo = null; game.Cover = coverUrl; game.Hero = $"https://backup-fixture.invalid/game-images/{foreign.Id}/Games/Private/hero.png";
+            (await db.Playlists.SingleAsync(list => list.Id == owner.PlaylistId)).HeroUrl = null; await db.SaveChangesAsync();
+        }
+        var response = await owner.Client.PostAsJsonAsync("/api/export/sync-to-network", new { fullExport = true }); response.EnsureSuccessStatusCode();
+        using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync()); Assert.Equal(1, result.RootElement.GetProperty("stats").GetProperty("imagesFailed").GetInt32());
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(GamePath(fixture, owner), "cover.png"))); Assert.False(File.Exists(Path.Combine(GamePath(fixture, owner), "hero.png")));
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(source)); Assert.Equal(bytes, await File.ReadAllBytesAsync(foreignFile)); Assert.Equal(0, fixture.MediaRequests);
+        Assert.Equal(coverUrl, (await Game(owner))!.Cover);
     }
 
     [Fact]

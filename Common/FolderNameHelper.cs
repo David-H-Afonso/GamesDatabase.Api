@@ -10,6 +10,34 @@ namespace GamesDatabase.Api.Common;
 /// </summary>
 public static class FolderNameHelper
 {
+    /// <summary>Keep existing title paths unless two owned entities would share a folder.</summary>
+    public static Dictionary<int, string> BuildExportFolderNames(IEnumerable<(int Id, string Name)> source, string fallbackName)
+    {
+        var entries = source.Select(item =>
+        {
+            var folder = MakeSafeFolderName(item.Name);
+            return (item.Id, Folder: string.IsNullOrWhiteSpace(folder) ? fallbackName : folder);
+        }).OrderBy(item => item.Id).ToArray();
+        var result = entries.ToDictionary(item => item.Id, item => item.Folder);
+        var reserved = entries.Select(item => item.Folder).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in entries.GroupBy(item => item.Folder, StringComparer.OrdinalIgnoreCase).Where(group => group.Count() > 1))
+        {
+            foreach (var item in group)
+            {
+                var attempt = 0;
+                string candidate;
+                do
+                {
+                    var suffix = $"__gdb_{item.Id.ToString(CultureInfo.InvariantCulture)}" + (attempt == 0 ? "" : $"_{attempt}");
+                    candidate = item.Folder[..Math.Min(item.Folder.Length, 200 - suffix.Length)].TrimEnd('_', '.') + suffix;
+                    attempt++;
+                } while (!reserved.Add(candidate));
+                result[item.Id] = candidate;
+            }
+        }
+        return result;
+    }
+
     /// <summary>
     /// Converts a game name to a safe folder name by:
     /// - Removing accents and diacritics (é→e, ó→o, á→a)
