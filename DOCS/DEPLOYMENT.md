@@ -1,5 +1,7 @@
 # API deployment and recovery
 
+[Español](DEPLOYMENT.es.md) · [API README](../README.md)
+
 This is an operator checklist, not an executed deployment. Adopt the compatible
 API before the Front. Electron is a separate distribution and is not covered here.
 
@@ -36,6 +38,10 @@ native assets. The generated collection migration adds nullable explicit develop
 and owned Home/GOTY preferences/revision. Onboarding adds owned state, a default-false
 guide flag for existing users and sample provenance/artwork fields. Runtime/artwork
 reads introduce no other migration. Check all older migrations actually pending too.
+Review/receipt migrations add UTC view usage, additive-time mode, export-cache version
+and retry-safe creation IDs. The post-3.0.0 `AddPinnedQuickViews` adds nullable
+pin slots plus a unique owner/slot index; existing rows remain unpinned and otherwise
+unchanged. It is not in the original 3.0.0 image. Duration/date review adds no migration.
 
 Startup applies pending EF migrations automatically. Container defaults are
 port 8080, database under `/app/data` and exports under `/app/exports`; these are not
@@ -46,6 +52,26 @@ Only a genuinely empty database initializes the current model/migration baseline
 Persist DataProtection keys privately for signed metadata reviews; Testing uses
 ephemeral protection and does not create deployed keys.
 
+Critic review v2 and the scoped auth/media repairs need no additional migration.
+v2 uses a different DataProtection purpose: an old API cannot accept an OpenCritic
+plan as Metacritic on rollback. Review [the contract](METADATA_REVIEW.md) before
+adopting a newer Front; expired/old reviews may simply need another lookup.
+
+Keep `STEAM_FRONTEND_BASE_URL`, `STEAM_CALLBACK_BASE_URL` and exact permitted CORS
+origins intentional. Callback state now binds frontend and `return_to`; unconfigured
+or invalid destinations fail closed instead of trusting callback parameters. Auth
+limits partition on the connection IP, not raw forwarding headers. Trusted proxy
+configuration and real Steam/hosting compatibility still require operator verification.
+
+ZIP media uses a separate credential-free transport with DNS/address/redirect,
+time/byte and decoded-image limits. `ExportMedia:AllowedPrivateBaseUrls` can permit
+an exact non-root administrator-owned private subtree. Configured `ImageSettings:BaseUrl`
+and `NetworkSync:ImageBaseUrl` retain only their `/game-images/` subtrees; no loopback/
+link-local/whole-origin exception or TLS bypass is implied. Verify the actual NAS
+configuration before deployment; rejected image URLs remain in CSV/metadata.
+Platform logos support verified raster and passive SVG, with an inert sandboxed
+response. Unsafe legacy values are not rewritten; serving returns404.
+
 Review bootstrap administrator, TLS, CORS/origins, headers, rate/load limits and
 network exposure before broader access. Start the API, confirm migration/health/
 version and owned reads, then adopt the matching Front. Verify images, draft
@@ -54,12 +80,19 @@ data just to match expected counts. Player sync/date actions remain explicit.
 
 An API restart loses in-memory sync-operation status, not saved games. Starting
 another sync requires an explicit action; no startup/recurring sync is implied.
+Verify exact date-save receipts and a stable saved finish after later sync. Bulk SQLite
+contention returns503 `databaseBusy`/`Retry-After`; retain an import's successful receipt
+and retry only unfinished settings instead of duplicating the import.
 
 ## Rollback
 
 Prefer a rehearsed prior compatible image with additive columns/data retained.
 The collection Down migration drops metadata/preferences; it is not a preserving
 rollback after people have used them. Never run it automatically.
+The isolated review/receipt/pin Up/Down/Up tests preserve old rows/FKs/SQLite sequences;
+they do not preserve values in the newer fields after dropping those fields. Prefer a
+compatible prior binary with additive schema retained, and separately reconcile writes
+before any actual database restoration.
 
 If restoring the database is necessary, stop writes and agree which newer writes
 would be lost or reconciled. Preserve them, restore only the agreed verified

@@ -24,6 +24,16 @@ positive-manual replacement/addition with zero returning to Steam, and optional
 retry-safe creation UUIDs. See the linked contracts; older manual-zero-override
 descriptions are superseded. Nullable GET properties may be omitted by the normal
 `WhenWritingNull` serialization policy; omitted manual time is automatic too.
+View summaries/details now always expose nullable `pinnedSlot` for capability
+detection. The additive authenticated pin route, retained/localized tutorial views,
+and optional CSV preference fields are specified in [Guided library](GUIDED_LIBRARY.md).
+Review-version2 Steam date references, timezone handling, exact save receipts,
+stable personal dates and concurrent import settings are specified in
+[Reviewed Steam dates](STEAM_DATES.md). Opening a detail never silently sets dates.
+Attributed critic review (`includeCritic`, `reviewVersion: 2`), actual provider/scope,
+fresh Replace, no-op receipts, automatic-batch boundaries and v1/rollback protection
+are specified in [Metadata review v2](METADATA_REVIEW.md) /
+[Español](METADATA_REVIEW.es.md). They are separate from the Steam date-review contract.
 
 ### November 2026: Steam achievement sets
 

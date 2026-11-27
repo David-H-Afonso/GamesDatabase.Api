@@ -10,17 +10,20 @@ with owned data are `no-store`; clients must not supply another user's identity.
 | `GET /api/onboarding` | Current guide state; never creates progress or samples |
 | `POST /api/onboarding/start` | `{ revision, restart }`; explicit resume/restart |
 | `PUT /api/onboarding` | `{ revision, step, enabled, complete }` |
-| `POST /api/onboarding/samples` | `{ revision, confirm: true }`; idempotent active batch |
+| `POST /api/onboarding/samples` | `{ revision, confirm: true, locale?: "en" | "es" }`; idempotent active batch plus retained views |
+| `POST /api/onboarding/views` | Same explicit request, but creates only three normal saved views |
 | `POST /api/onboarding/samples/keep` | Reviewed adoption of examples |
 | `DELETE /api/onboarding/samples` | Reviewed exact-batch cleanup |
 
-Steps: `welcome`, `library`, `organize`, `progress`, `home`, `discover`, `finish`.
+Steps: `welcome`, `library`, `views`, `organize`, `progress`, `home`, `discover`, `finish`.
 Complete is valid only on `finish`. Progress revisions reject stale writes with 409.
 New-user `tutorialEnabled` defaults true on create; existing migrated users remain
 false. Admin editing can enable it; self-service start does not seed games.
 
 State includes version/revision/enabled/step, sample games, sample-list summaries,
-and counts. Batch provenance is assigned by the server, never by a game name or
+and counts, plus `exampleViews` summaries. Older clients can ignore that additive
+field; new clients omit the Views chapter when an older API does not expose it.
+Batch provenance is assigned by the server, never by a game name or
 client-supplied flag. Samples have no Steam App ID and use bundled role-specific art.
 
 Keep/remove requires `confirm: true`, current revision, `expectedGames` and
@@ -29,6 +32,15 @@ current batch before changing anything. `removeEditedSamples=false` retains edit
 records by default. Mixed/real playlists are retained; remaining item order is
 normalized. Cleanup/adoption clears batch provenance without touching other accounts.
 CSV transfers preserve ordinary data/URLs but do not recreate a cleanup batch.
+
+Example views use dynamic Favorite, Grade-is-null and Story≤10h filters, not lists
+of tutorial game IDs. Locale defaults to `en`. Explicit creation never replaces
+an existing name/configuration; an existing tutorial set, including one edited or
+partially deleted by its owner, is retained rather than silently recreated.
+The informational `createdBy` marker identifies these normal views for the guide;
+it never authorizes access or deletion. Completing the guide and removing/adopting
+fictional games/playlists do not remove the saved views. No schema change for this
+chapter; its normal views remain editable and transferable.
 
 Migration `20261125153304_AddOnboardingAndSamples` adds the owned state table and
 sample/guide fields; existing metadata starts unmarked. Down removes new fields
@@ -54,6 +66,29 @@ the owned summaries in their manual order. It does not change configuration,
 manual order, `updatedAt` or export-dirty flags. Clients choose the two most recent
 public views, falling back to the first two, and retain manual order within that
 pair so reusing either does not shuffle the buttons. Usage is not a view-filter edit.
+
+`POST /api/gameviews/{id}/pin` accepts `{ pinned: boolean, slot?: 1 | 2 }` and returns
+the owned summaries with an explicit nullable `pinnedSlot`. Authentication is
+required. Pinning a hidden view is400, a missing/foreign view404, and a third pin409
+`pinLimit`. The optional preferred slot retains the displayed shortcut's position;
+if occupied, the other free slot is used. Repeating a pin/unpin is idempotent.
+Hiding/deleting a view releases its slot; ordinary criteria edits retain it.
+
+Pinned positions remain fixed; unoccupied positions use recent public views in
+stable manual order, without duplicates. Pinning changes only preference metadata
+and the export-dirty flag, never criteria, manual order, creation/edit timestamps or
+last use. Client read revisions reject list responses that started before a pin.
+Old APIs that omit `pinnedSlot` remain usable without exposing unsupported controls.
+
+Full CSV and one-shot backup exports include optional `ViewPinnedSlot`,
+`ViewLastUsedAt` and the existing `SortOrder`; ZIP/network `Settings/Views.json`
+retains `pinnedSlot`, `lastUsedAt`, `sortOrder`. Imports preserve existing destination
+pins, fill only a requested free slot, report conflicts/invalid metadata, and never
+regress newer usage. Blank/absent legacy columns preserve destination preferences.
+`AddPinnedQuickViews` adds a nullable column and unique owner/slot index, without
+rebuilding existing rows; its native Down preserves the SQLite ID high-water mark.
+Production startup still requires a consistent backup and a rollback plan that
+retains any newer writes. This is not authorization to migrate a deployed server.
 
 `POST /api/games` optionally accepts a non-empty `creationRequestId` UUID. Its
 owner-scoped unique key and canonical payload hash are stored internally with
@@ -90,7 +125,7 @@ not overwritten to insert a new row.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/games/{id}/metadata/preview` | `{ overwrite, includeArtwork, steamAppId?, wikidataId? }` |
+| `POST /api/games/{id}/metadata/preview` | `{ overwrite, includeArtwork, includeDurations?, includeCritic?, reviewVersion?, steamAppId?, wikidataId?, dekuDealsSlug? }` |
 | `POST /api/games/{id}/metadata/apply` | `{ token, fields }` |
 
 Preview checks ownership first. Linked Steam identity cannot be silently replaced.
@@ -98,11 +133,30 @@ Unlinked names use bounded Steam/Wikidata searches; ambiguous results need expli
 selection. Steam facts are preferred; Wikidata fills missing facts with per-field
 source links. Public source failures keep stored fields unchanged.
 
-Supported fields: `name`, `released`, `developer`, `critic`, `logo`, `hero`, `cover`.
-Critic Apply pairs the score with Metacritic provider. Personal grade, comment,
-status, dates of play, manual time, completion and App ID are not enrichment fields.
-Neither source provides verified story/completionist estimates, so those are not
-derived from Steam lifetime or average playtime.
+Supported fields: `name`, `released`, `developer`, `critic`, `logo`, `hero`, `cover`,
+`story`, `completion` (at most nine selected fields).
+v1 critic Apply pairs the Steam score with Metacritic. v2 also supports validated
+Metacritic/OpenCritic attribution from Deku, retaining the actual provider. Personal grade, comment,
+status, dates of play, manual time, achievement completion flags and App ID are not
+enrichment fields. Story/completionist estimates are never derived from Steam
+lifetime or average playtime.
+
+`includeDurations` defaults to true. A dedicated provider reads attributed HLTB
+figures from public Deku Deals search/item HTML, never HLTB directly. Names are
+literal URL-encoded search terms. An exact unique title may resolve automatically;
+otherwise `matches` exposes `source: "dekudeals"` plus `dekuDealsSlug` for explicit
+edition choice. A slug must be bounded/lowercase and present in the search results;
+arbitrary URLs and redirects are not followed. Canonical item URL, title and HLTB
+attribution are checked before parsing only Main Story/Completionist (not Extras).
+
+Duration fields have `source: "dekudeals"`, the public item `url`, and exact decimal
+`sourceHours`. Stored `value` remains a positive integer in hours: nearest hour,
+halves upward, minimum one hour. The UI discloses original and rounded values before
+Save. Existing values, including zero, remain filled unless overwrite is explicit.
+No schema migration is required. Requests are on demand, serialized per provider,
+bounded to 1MB/10 seconds, with a product User-Agent, parsed 24-hour caching and
+403/429 Retry-After cooldowns. Blocked requests are never bypassed. Tests replace
+this provider with deterministic fixtures rather than contacting public websites.
 
 Plans are encrypted/signed by DataProtection, owner/game/field bound, expire after
 10 minutes and include the reviewed game timestamp. Apply accepts only selected
@@ -110,6 +164,12 @@ reviewed fields, rejects changed games with 409 and writes a sparse update in a 
 Invalid/expired/tampered plans return 400; cross-account plans 403; foreign games 404.
 Preview is limited to 12 requests/minute per account. No player sync or persistent
 Steam app-cache update is performed.
+
+Review v2 adds critic provider/link/platform evidence, fresh populated-group
+replacement, same-value/no-op receipts and a separate DataProtection purpose for
+old-server rollback safety. Explicit browser batches reuse these routes; there is
+no metadata queue/scheduler on the server. Full contract, automatic-batch boundaries,
+source policy and recovery: [English](METADATA_REVIEW.md) / [Español](METADATA_REVIEW.es.md).
 
 Steam Store is a public availability-dependent endpoint, not a guaranteed stable
 Steamworks metadata API. Wikidata structured facts are CC0; precise ambiguous
@@ -119,4 +179,5 @@ persisted privately for a deployed instance; `Testing` uses ephemeral protection
 
 Sources: [Steamworks](https://partner.steamgames.com/doc/webapi/ISteamApps),
 [Wikidata access](https://www.wikidata.org/wiki/Wikidata:Data_access),
-[Steam application ID](https://www.wikidata.org/wiki/Property:P1733).
+[Steam application ID](https://www.wikidata.org/wiki/Property:P1733),
+[Deku Deals example](https://www.dekudeals.com/items/hades).

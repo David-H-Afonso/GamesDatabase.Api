@@ -1,5 +1,7 @@
 # Steam achievement sets / Conjuntos de logros de Steam
 
+[Reviewed Steam dates](STEAM_DATES.md) · [Fechas revisadas](STEAM_DATES.es.md)
+
 ## Completion policy
 
 | Surface | Meaning |
