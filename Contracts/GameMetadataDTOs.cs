@@ -13,6 +13,7 @@ public sealed class GameMetadataLookupRequest
     public int? SteamAppId { get; set; }
     public string? WikidataId { get; set; }
     public string? DekuDealsSlug { get; set; }
+    public int? LaunchBoxId { get; set; }
     public bool BestMatch { get; set; }
 }
 public sealed class GameMetadataIdentityDto
@@ -23,6 +24,9 @@ public sealed class GameMetadataIdentityDto
     public int? SteamAppId { get; set; }
     public string? WikidataId { get; set; }
     public string? DekuDealsSlug { get; set; }
+    public int? LaunchBoxId { get; set; }
+    public int? ReleaseYear { get; set; }
+    public List<string> Platforms { get; set; } = [];
 }
 public sealed class GameMetadataFieldDto
 {

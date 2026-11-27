@@ -68,6 +68,7 @@ upgrading.** [Deployment and recovery](DOCS/DEPLOYMENT.md) covers backups and ro
 | `ASPNETCORE_URLS` | Listening addresses and ports |
 | `ExportSettings__DefaultExportPath` | Export directory |
 | `STEAM_API_KEY` | Server-side key for Steam player features |
+| `STEAMGRIDDB_API_KEY` | Optional server-side artwork key; keyless console artwork sources also work |
 | `HOUSEHOLD_REDIRECT_URIS` | Comma-separated list of exact Household callback URLs |
 | `HOUSEHOLD_CLIENT_ID` | Household client identifier, if overriding the default |
 

@@ -38,7 +38,11 @@ public sealed class GamesDatabaseApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
-        builder.ConfigureTestServices(services => services.AddSingleton<IGameDurationProvider>(new NoExternalDurations()));
+        builder.ConfigureTestServices(services =>
+        {
+            services.AddSingleton<IGameDurationProvider>(new NoExternalDurations());
+            services.AddSingleton<IGameArtworkProvider>(new NoExternalArtwork());
+        });
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -63,6 +67,15 @@ public sealed class GamesDatabaseApiFactory : WebApplicationFactory<Program>
         {
             token.ThrowIfCancellationRequested();
             return Task.FromResult(new GameDurationLookup());
+        }
+    }
+
+    private sealed class NoExternalArtwork : IGameArtworkProvider
+    {
+        public Task<GameArtworkLookup> LookupAsync(IReadOnlyList<PublicGameMetadata> evidence, IReadOnlyCollection<string> fields, CancellationToken token, bool forceRefresh = false, int? selectedLaunchBoxId = null)
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(new GameArtworkLookup());
         }
     }
 

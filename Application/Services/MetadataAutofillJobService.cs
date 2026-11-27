@@ -14,7 +14,7 @@ public sealed class MetadataAutofillJobService(GamesDbContext db, IGameMetadataS
     MetadataAutofillSignal signal, ILogger<MetadataAutofillJobService> logger) : IMetadataAutofillJobService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly HashSet<string> SourceFailures = ["steamUnavailable", "wikidataUnavailable", "durationSourceUnavailable", "criticSourceUnavailable"];
+    private static readonly HashSet<string> SourceFailures = ["steamUnavailable", "wikidataUnavailable", "durationSourceUnavailable", "criticSourceUnavailable", "catalogSourceUnavailable", "artworkSourceUnavailable"];
     private static readonly HashSet<string> AllowedFields = ["name", "released", "developer", "critic", "logo", "hero", "cover", "story", "completion"];
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
     private sealed class Entry : MetadataAutofillItemDto
@@ -163,7 +163,7 @@ public sealed class MetadataAutofillJobService(GamesDbContext db, IGameMetadataS
         if (job is null) return Missing<MetadataAutofillJobDto>();
         if (job.State == "cancelling" || await db.MetadataAutofillJobs.AnyAsync(other => other.Id != jobId && other.ActiveUserId == userId, token)) return Conflict<MetadataAutofillJobDto>("metadataJobAlreadyActive");
         var items = Entries(job);
-        var pending = items.Where(item => item.Status == "review" && item.Notices.Contains("criticPlatformScope") && !item.Notices.Any(notice => notice is "chooseIdentity" or "chooseDurationIdentity" or "gameChanged")).ToList();
+        var pending = items.Where(item => item.Status == "review" && item.Notices.Contains("criticPlatformScope") && !item.Notices.Any(notice => notice is "chooseIdentity" or "chooseDurationIdentity" or "chooseArtworkIdentity" or "editionMismatch" or "gameChanged")).ToList();
         if (pending.Count == 0) return CatalogServiceResult<MetadataAutofillJobDto>.Ok(Snapshot(job));
         foreach (var item in pending) { item.Status = "pending"; item.Attempts = 0; item.Notices = []; }
         job.AcceptListedPlatformCritic = true; job.ActiveUserId = userId; job.Dismissed = false; job.CancelRequested = false; job.FinishedAt = null;
@@ -287,7 +287,7 @@ public sealed class MetadataAutofillJobService(GamesDbContext db, IGameMetadataS
             // all listed-platform notes while a different item is looking up.
             var blocked = preview.Fields.Where(field => !field.Unchanged && field.Field == "critic" && field.CriticProvider == "Metacritic" && field.CriticScope == "listed-platform" && !job.AcceptListedPlatformCritic).ToList();
             var selected = preview.Fields.Where(field => !field.Unchanged && !item.CompletedFields.Contains(field.Field) && !blocked.Contains(field)).ToList();
-            var review = blocked.Count > 0 || preview.Notices.Any(notice => notice is "chooseIdentity" or "chooseDurationIdentity");
+            var review = blocked.Count > 0 || preview.Notices.Any(notice => notice is "chooseIdentity" or "chooseDurationIdentity" or "chooseArtworkIdentity" or "editionMismatch");
             var game = await db.Games.AsNoTracking().SingleOrDefaultAsync(game => game.Id == gameId && game.UserId == job.UserId, token);
             if (game is null || game.UpdatedAt != item.ExpectedUpdatedAt) failure = game is null ? "gameUnavailable" : "gameChanged";
             else
@@ -309,7 +309,7 @@ public sealed class MetadataAutofillJobService(GamesDbContext db, IGameMetadataS
                     item.UnchangedFields = item.UnchangedFields.Concat(preview.Fields.Where(field => field.Unchanged).Select(field => field.Field)).Distinct().ToList();
                     item.CompletedFields = item.CompletedFields.Concat(preview.Fields.Where(field => field.Unchanged).Select(field => field.Field)).Distinct().ToList();
                     item.Notices = preview.Notices.Distinct().Take(16).ToList();
-                    if (review && !item.Notices.Any(notice => notice is "chooseIdentity" or "chooseDurationIdentity")) item.Notices.Add("criticPlatformScope");
+                    if (review && !item.Notices.Any(notice => notice is "chooseIdentity" or "chooseDurationIdentity" or "chooseArtworkIdentity" or "editionMismatch")) item.Notices.Add("criticPlatformScope");
                     if (job.AcceptListedPlatformCritic && selected.Any(field => field.CriticScope == "listed-platform")) item.Notices.Add("criticListedPlatformAccepted");
                     item.Matches = review ? preview.Matches.Take(12).ToList() : [];
                     item.Status = review ? "review" : sourceFailed ? item.AppliedFields.Count > 0 ? "partial" : "failed" : item.AppliedFields.Count > 0 ? "updated" : "unchanged";

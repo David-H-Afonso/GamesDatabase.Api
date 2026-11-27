@@ -107,6 +107,23 @@ public sealed partial class DekuDealsDurationProvider(IHttpClientFactory clients
         var link = document.DocumentNode.SelectNodes("//main//a[@href]")?.FirstOrDefault(anchor => HltbLink().IsMatch(anchor.GetAttributeValue("href", "")) && Text(anchor) == "How Long To Beat");
         var rows = link?.SelectSingleNode("ancestor::li[1]")?.SelectNodes("./ul/li");
         var result = new PublicGameMetadata { Identity = identity };
+        var details = document.DocumentNode.SelectNodes("//main//li[strong]");
+        var releaseRows = details?.Where(row => Text(row.SelectSingleNode("./strong")!) == "Release date:").ToList();
+        if (releaseRows?.Count == 1 && GameDateNormalizer.NormalizeSteamReleaseDate(Text(releaseRows[0])["Release date:".Length..].Trim()) is { } released)
+        {
+            result.Fields["released"] = released;
+            identity.ReleaseYear = MetadataEditionMatching.Year(released);
+        }
+        var platformRows = details?.Where(row => Text(row.SelectSingleNode("./strong")!) == "Platforms:").ToList();
+        if (platformRows?.Count == 1)
+            identity.Platforms = Text(platformRows[0])["Platforms:".Length..].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(value => value.Length <= 80).Take(12).ToList();
+        result.OfficialUrls = document.DocumentNode.SelectNodes("//main//a[@href]")?.Select(anchor => HtmlEntity.DeEntitize(anchor.GetAttributeValue("href", "")))
+            .Where(url => url.StartsWith("https://www.nintendo.com/", StringComparison.Ordinal) && url.Length <= 600).Distinct().Take(5).ToList() ?? [];
+        var screenshot = document.DocumentNode.SelectNodes("//main//*[@id='screenshotsCarousel']//img[@alt='Screenshot']")?
+            .Select(node => HtmlEntity.DeEntitize(node.GetAttributeValue("data-src", node.GetAttributeValue("src", "")))).FirstOrDefault(PublicArtworkUrl.Valid);
+        if (screenshot is not null) result.ArtworkCandidates["hero"] = screenshot;
+        var cover = document.DocumentNode.SelectSingleNode("//main//img[contains(concat(' ',normalize-space(@class),' '),' shadow-img-large ')]")?.GetAttributeValue("src", "");
+        if (PublicArtworkUrl.Valid(cover)) result.ArtworkCandidates["cover"] = HtmlEntity.DeEntitize(cover!);
         foreach (var (label, field) in new[] { ("Main Story:", "story"), ("Completionist:", "completion") })
         {
             var matching = rows?.Where(row => Text(row.SelectSingleNode("./strong") ?? row) == label).ToList();
@@ -133,7 +150,7 @@ public sealed partial class DekuDealsDurationProvider(IHttpClientFactory clients
             result.Fields["critic"] = score; result.CriticProvider = provider; result.CriticUrl = url; result.CriticScope = "listed-platform";
             break;
         }
-        return result.Fields.Count == 0 ? null : result;
+        return result.Fields.Count == 0 && result.ArtworkCandidates.Count == 0 ? null : result;
     }
 
     public async Task<GameDurationLookup> LookupAsync(string name, string? selectedSlug, CancellationToken cancellationToken, bool forceRefresh = false)
@@ -146,20 +163,20 @@ public sealed partial class DekuDealsDurationProvider(IHttpClientFactory clients
         {
             // Separate this corrected catalog scope from older Nintendo-only
             // results (including cached misses). The public review stays v2.
-            var searchKey = "deku-metadata-v3-all-platforms-search:" + name;
+            var searchKey = "deku-metadata-v4-editions-search:" + name;
             List<GameMetadataIdentityDto>? matches = null;
             if (forceRefresh || !cache.TryGetValue(searchKey, out matches) || matches is null)
             {
                 var read = await ReadAsync("/search?q=" + Uri.EscapeDataString(name) + "&platforms=" + Uri.EscapeDataString(Platforms), token);
                 if (read.Html is null) return new() { Unavailable = read.Failed, RetryAfterSeconds = CooldownSeconds() };
                 matches = SearchResults(read.Html);
-                cache.Set(searchKey, matches, TimeSpan.FromHours(matches.Count == 0 ? 1 : 24));
+                cache.Set(searchKey, matches, matches.Count == 0 ? TimeSpan.FromMinutes(5) : TimeSpan.FromHours(6));
             }
             var result = new GameDurationLookup { Matches = matches };
             var selected = selectedSlug is null ? MetadataNameMatching.Best(matches, name, match => match.Name) : matches.SingleOrDefault(match => match.DekuDealsSlug == selectedSlug);
             if (selected is null) return result;
             result.IdentityConfirmed = true;
-            var gameKey = "deku-metadata-v3-all-platforms-game:" + selected.DekuDealsSlug;
+            var gameKey = "deku-metadata-v4-editions-game:" + selected.DekuDealsSlug;
             if (!forceRefresh && cache.TryGetValue<PublicGameMetadata>(gameKey, out var cached) && cached is not null) { result.Metadata = cached; return result; }
             var game = await ReadAsync("/items/" + selected.DekuDealsSlug, token);
             result.Unavailable = game.Failed;

@@ -70,6 +70,7 @@ de seguridad y la vuelta a una versión anterior.
 | `ASPNETCORE_URLS` | Direcciones y puertos de escucha |
 | `ExportSettings__DefaultExportPath` | Directorio de exportación |
 | `STEAM_API_KEY` | Clave del servidor para las funciones de jugador de Steam |
+| `STEAMGRIDDB_API_KEY` | Clave opcional de imágenes en el servidor; también hay fuentes para consolas sin clave |
 | `HOUSEHOLD_REDIRECT_URIS` | Callbacks exactos de Household, separados por comas |
 | `HOUSEHOLD_CLIENT_ID` | Identificador de Household, si se cambia el predeterminado |
 

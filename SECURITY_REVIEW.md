@@ -1,5 +1,31 @@
 # Security Review
 
+## Non-Steam metadata artwork — local source verification, 27 November 2026
+
+Unpublished metadata changes add optional backend-only SteamGridDB credentials,
+keyless public LaunchBox discovery and verified official/Wikimedia resources.
+Provider URLs/IDs are bounded and allowlisted, title input is encoded, cookies and
+automatic redirects are disabled, and cooldowns are respected. Raster artwork
+must fully decode within8MB/20MP and fit the independent logo/hero/cover role.
+No token or key is sent to artwork CDNs or browser contracts. Source errors remain
+visible instead of becoming authoritative empty searches. Known year/platform
+conflicts cannot merge original/remake facts; explicit published aliases identify
+one entity without treating spelling variants as different games.
+
+Verification:593 native API tests,2411 Front tests before the separate Steam hotfix,
+195 native/i18n/contrast checks, controlled envDir:false build and scoped browser
+contracts. Concrete public preview/signed Apply with in-memory SQLite verified15
+real images for five console editions and retained synthetic personal data. Native
+API tests cover real ownership and persistence; public smoke is not a production
+account or platform-review certificate. Optional providers are fixture-tested where
+a live owner key is unavailable. No dependencies or schema migration were added.
+
+Local activation used fresh consistent private backups, candidate/prior-binary
+rehearsal on a copy, and a binary-only rollback method; all business data, schema,
+IDs/sequences and preferences compared unchanged. No production data was edited.
+The requested first-full-sync504 follow-up remains OPEN inTODO.md; no background
+backup implementation or proxy-configuration repair is claimed by this metadata work.
+
 ## Account-owned backup hotfix — 27 November 2026
 
 Scope: restore the visible backup tools to authenticated Standard accounts, without

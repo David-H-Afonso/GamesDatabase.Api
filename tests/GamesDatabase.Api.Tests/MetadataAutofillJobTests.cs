@@ -43,7 +43,7 @@ public sealed class MetadataAutofillJobTests(GamesDatabaseApiFactory factory) : 
             Identity = new() { Source = "steam", Name = "Verified fixture", SteamAppId = id, Url = $"https://store.steampowered.com/app/{id}/" },
             Fields = new() { ["name"] = "Verified fixture", ["developer"] = "Verified studio", ["released"] = "2025-01-01" }
         });
-        public Task<List<PublicGameMetadata>> WikidataAsync(string name, int? id, CancellationToken token) => Task.FromResult(new List<PublicGameMetadata>());
+        public Task<List<PublicGameMetadata>> WikidataAsync(string name, int? id, CancellationToken token, string? selectedId = null, bool forceRefresh = false) => Task.FromResult(new List<PublicGameMetadata>());
     }
     private sealed class Durations : IGameDurationProvider
     {

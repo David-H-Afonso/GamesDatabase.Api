@@ -1,4 +1,5 @@
 using GamesDatabase.Api.Common;
+using GamesDatabase.Api.Contracts;
 using Xunit;
 
 namespace GamesDatabase.Api.Tests;
@@ -32,5 +33,14 @@ public sealed class MetadataNameMatchingTests
     {
         Assert.Null(MetadataNameMatching.Best(new[] { "Game™", "Game®" }, "Game", value => value));
         Assert.Equal("Game", MetadataNameMatching.Best(new[] { "Game", "Game™" }, "Game", value => value));
+    }
+
+    [Fact]
+    public void A_verified_shared_Steam_ID_is_stronger_than_a_ports_different_release_year_but_different_IDs_conflict()
+    {
+        var console = new GameMetadataIdentityDto { SteamAppId = 100, ReleaseYear = 2022, Platforms = ["PS5", "PC"] };
+        Assert.False(MetadataEditionMatching.Conflicts(console, new() { SteamAppId = 100, ReleaseYear = 2023, Platforms = ["PC"] }));
+        Assert.True(MetadataEditionMatching.Conflicts(console, new() { SteamAppId = 200, ReleaseYear = 2022, Platforms = ["PC"] }));
+        Assert.True(MetadataEditionMatching.Conflicts(new() { ReleaseYear = 1998 }, new() { ReleaseYear = 2026 }));
     }
 }

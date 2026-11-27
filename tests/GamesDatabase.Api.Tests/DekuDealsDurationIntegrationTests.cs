@@ -105,6 +105,6 @@ public sealed class DekuDealsDurationIntegrationTests(GamesDatabaseApiFactory fa
     {
         public Task<List<GameMetadataIdentityDto>> SearchSteamAsync(string name, CancellationToken token) => Task.FromResult(new List<GameMetadataIdentityDto>());
         public Task<PublicGameMetadata?> SteamAsync(int appId, bool artwork, CancellationToken token) => throw new InvalidOperationException("This fixture has no Steam identity.");
-        public Task<List<PublicGameMetadata>> WikidataAsync(string name, int? appId, CancellationToken token) => Task.FromResult(new List<PublicGameMetadata>());
+        public Task<List<PublicGameMetadata>> WikidataAsync(string name, int? appId, CancellationToken token, string? selectedId = null, bool forceRefresh = false) => Task.FromResult(new List<PublicGameMetadata>());
     }
 }

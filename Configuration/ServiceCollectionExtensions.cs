@@ -68,6 +68,7 @@ public static class ServiceCollectionExtensions
         OverrideFromEnv(builder, "SteamSettings:ApiKey", "STEAM_API_KEY");
         OverrideFromEnv(builder, "SteamSettings:CallbackBaseUrl", "STEAM_CALLBACK_BASE_URL");
         OverrideFromEnv(builder, "SteamSettings:FrontendBaseUrl", "STEAM_FRONTEND_BASE_URL");
+        OverrideFromEnv(builder, "ArtworkSources:SteamGridDbApiKey", "STEAMGRIDDB_API_KEY");
 
         // Registered Household client configuration. These values are backend-only,
         // but unlike the removed static service token they contain no credential.
@@ -89,6 +90,7 @@ public static class ServiceCollectionExtensions
         services.Configure<DataExportOptions>(configuration.GetSection(DataExportOptions.SectionName));
         services.Configure<NetworkSyncOptions>(configuration.GetSection(NetworkSyncOptions.SectionName));
         services.Configure<SteamSettings>(configuration.GetSection(SteamSettings.SectionName));
+        services.Configure<GameArtworkSettings>(configuration.GetSection(GameArtworkSettings.SectionName));
         services.AddOptions<HouseholdIntegrationOptions>()
             .Bind(configuration.GetSection(HouseholdIntegrationOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.ClientId), "Household client ID is required.")
@@ -304,6 +306,12 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GamesDatabase/3.0 (+https://github.com/David-H-Afonso/GamesDatabase.Api)");
         }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = System.Net.DecompressionMethods.All });
         services.AddSingleton<IGameDurationProvider, DekuDealsDurationProvider>();
+        services.AddScoped<IGameArtworkProvider, GameArtworkProvider>();
+        services.AddHttpClient("game-artwork", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(6);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GamesDatabase/3.0 (+https://github.com/David-H-Afonso/GamesDatabase.Api)");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, AutomaticDecompression = System.Net.DecompressionMethods.All });
         services.AddHttpClient("game-durations", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(8);

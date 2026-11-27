@@ -23,13 +23,17 @@ Content-Type: application/json
 }
 ```
 
-Optional identities are `steamAppId`, `wikidataId` and `dekuDealsSlug`; validate and
+Optional identities are `steamAppId`, `wikidataId`, `dekuDealsSlug` and `launchBoxId`; validate and
 retain deliberate choices across subsequent edition selection. A stored Steam App
 ID cannot be changed through this endpoint. `reviewVersion` defaults to 1; group
 flags default true. Preview is bounded to 12 requests/minute per account.
 Optional `bestMatch: true` also accepts one unique cosmetic Steam/Wikidata title
 match; exact matches stay preferred. Deku accepts unique cosmetic matches too.
 Numbers and edition words remain significant; no first/fuzziest result is guessed.
+Matches include nullable `releaseYear` and a `platforms` list. Known year/platform
+conflicts cannot be merged. Explicit Wikidata IDs are resolved directly rather
+than depending on search ranking; full published aliases are valid identity evidence.
+Changing a root edition clears stale secondary choices in the web client.
 
 The result includes `overwrite`, `reviewVersion`, `matches`, `notices`, `fields`
 and an optional opaque `token`. Supported fields are `name`, `released`,
@@ -47,7 +51,7 @@ The game stores the score plus actual provider; public links/scope are review ev
 not a new persisted HTML/source document.
 
 With `overwrite: true`, checked groups are searched even when populated; review v2
-bypasses Deku's parsed 24-hour search/item cache, never its cooldowns or blocks.
+bypasses Deku's parsed search/item cache, never its cooldowns or blocks.
 Equal values can be returned with `unchanged: true`, including provider comparison.
 Missing data never authorizes clearing a field.
 
@@ -99,6 +103,28 @@ uncertain transport result is not permission to blindly repeat a mutation.
   enrichment plan. Artwork refresh uses one verified role, not clear-then-player-sync.
 
 ## Persistent, explicitly requested jobs
+
+### Non-Steam artwork and provider failures
+
+Missing logo/hero/cover roles use optional SteamGridDB, then keyless public
+LaunchBox pages, official Nintendo resources and verified Wikidata/Wikimedia or
+Deku-linked official screenshots. Artwork sources never supply critic/catalog
+fields. `STEAMGRIDDB_API_KEY` / `ArtworkSources:SteamGridDbApiKey` is an optional
+backend secret, sent only to the documented SteamGridDB API, not CDNs or clients.
+Without it, the other sources remain available.
+
+Discovery is bounded and cached; URLs use an HTTPS host/path allowlist, requests
+have no cookies/automatic redirects, and 403/429 Retry-After windows are respected.
+Raster bytes must fully decode within 8MB/20MP and fit the requested role. Public
+LaunchBox HTML is cached for six hours and image verification for 24 hours; explicit
+replacement refreshes these caches without bypassing cooldowns. Deku empty searches
+expire after five minutes, not an hour. Its page also supplies verified release dates
+and artwork when critic/duration fields need no changes.
+
+`chooseArtworkIdentity` asks for a platform-specific LaunchBox choice;
+`editionMismatch` reports conflicting editions without merging them. Source errors
+use `wikidataUnavailable`, `catalogSourceUnavailable` or `artworkSourceUnavailable`
+and preserve Retry-After, rather than reporting an authoritative empty search.
 
 ```http
 POST /api/metadata-autofill/jobs

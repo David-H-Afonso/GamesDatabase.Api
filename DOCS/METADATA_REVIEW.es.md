@@ -23,13 +23,17 @@ Content-Type: application/json
 }
 ```
 
-Las identidades opcionales son `steamAppId`, `wikidataId` y `dekuDealsSlug`.
+Las identidades opcionales son `steamAppId`, `wikidataId`, `dekuDealsSlug` y `launchBoxId`.
 Valídalas y conserva las elecciones deliberadas al seleccionar otra fuente/edición.
 Esta ruta no cambia el App ID Steam guardado. `reviewVersion` vale 1 por defecto;
 los grupos valen true. La consulta tiene un límite de 12/minuto por cuenta.
 `bestMatch: true` opcional acepta también una única coincidencia cosmética en Steam/
 Wikidata, priorizando la exacta. Deku admite coincidencias cosméticas únicas.
 Los números y palabras de edición siguen contando; no se elige el primer resultado.
+Las coincidencias incluyen `releaseYear` nullable y la lista `platforms`. No se
+mezclan conflictos conocidos de año/plataforma. Los IDs Wikidata explícitos se leen
+directamente, sin depender del orden de búsqueda; un alias completo publicado es
+evidencia válida. Cambiar la edición principal descarta elecciones secundarias antiguas.
 
 El resultado incluye `overwrite`, `reviewVersion`, `matches`, `notices`, `fields`
 y `token` opaco opcional. Admite `name`, `released`, `developer`, `critic`, `logo`,
@@ -46,7 +50,7 @@ El juego guarda nota y proveedor real; enlaces/ámbito son evidencia de la revis
 no un nuevo documento HTML persistido.
 
 `overwrite: true` busca los grupos marcados aunque estén rellenados. La v2 evita
-la caché analizada de búsqueda/página de Deku de 24 horas, nunca sus bloqueos o
+la caché analizada de búsqueda/página de Deku, nunca sus bloqueos o
 pausas. Puede devolver coincidencias con `unchanged: true`, comparando también el
 proveedor. Un dato ausente nunca autoriza vaciar un campo.
 
@@ -98,6 +102,29 @@ autoriza repetir una mutación a ciegas.
   del plan. Refrescar imágenes verifica un solo rol, sin vaciar y sincronizar al jugador.
 
 ## Trabajos persistentes solicitados expresamente
+
+### Imágenes fuera de Steam y errores de proveedor
+
+Los roles logo/hero/cover ausentes usan SteamGridDB opcional y después páginas
+públicas de LaunchBox sin clave, recursos oficiales de Nintendo y recursos
+Wikidata/Wikimedia o capturas oficiales enlazadas por Deku. Las fuentes de imágenes
+no aportan crítica ni datos de catálogo. `STEAMGRIDDB_API_KEY` /
+`ArtworkSources:SteamGridDbApiKey` es un secreto opcional del backend: solo se envía
+a la API documentada de SteamGridDB, nunca al CDN o al navegador. Sin él siguen
+disponibles las demás fuentes.
+
+Las consultas están acotadas y usan caché, HTTPS y una lista de hosts/rutas; no
+envían cookies ni siguen redirecciones automáticas y respetan Retry-After/403/429.
+La imagen debe decodificarse entera dentro de 8MB/20MP y tener dimensiones adecuadas
+para su rol. El HTML público de LaunchBox se conserva seis horas y su verificación
+de imagen, 24 horas. Reemplazar refresca esas cachés sin saltarse las pausas. Las
+búsquedas vacías de Deku caducan en cinco minutos; su página aporta fecha e imágenes
+aunque crítica/duraciones no necesiten cambios.
+
+`chooseArtworkIdentity` pide elegir plataforma en LaunchBox; `editionMismatch`
+avisa de ediciones diferentes sin mezclarlas. Los fallos devuelven
+`wikidataUnavailable`, `catalogSourceUnavailable` o `artworkSourceUnavailable` y
+conservan Retry-After; no se presentan como una búsqueda vacía confirmada.
 
 ```http
 POST /api/metadata-autofill/jobs

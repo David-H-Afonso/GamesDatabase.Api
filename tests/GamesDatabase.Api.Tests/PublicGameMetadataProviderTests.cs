@@ -5,6 +5,8 @@ using System.Text.Json;
 using GamesDatabase.Api.Application.Interfaces;
 using GamesDatabase.Api.Application.Services;
 using GamesDatabase.Api.Contracts.Steam;
+using GamesDatabase.Api.Common;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
@@ -47,6 +49,9 @@ public sealed class PublicGameMetadataProviderTests
     private static HttpResponseMessage Json(object body) => new(HttpStatusCode.OK) { Content = JsonContent.Create(body) };
     private static PublicGameMetadataProvider Provider(HttpClient http, MemoryCache cache, Store? store = null, Artwork? artwork = null, Clock? clock = null) => new(new Clients(http), store ?? new(), artwork ?? new(), cache, clock ?? new());
     private static HttpClient NoPublicReads() => new(new Handler((_, _) => throw new InvalidOperationException("This test must not perform a public HTTP lookup.")));
+    private static object Claim(object value) => new { rank = "normal", mainsnak = new { datavalue = new { value } } };
+    private static object Entity(string name, Dictionary<string, object[]> claims) => new { labels = new { en = new { value = name } }, claims };
+    private static object Item(string id) => new { id };
 
     [Fact]
     public async Task Steam_returns_verified_facts_and_manual_zero_critic_but_never_estimates_or_persistent_cache()
@@ -105,15 +110,20 @@ public sealed class PublicGameMetadataProviderTests
     public async Task Wikidata_uses_only_validated_entity_ids_and_keeps_ambiguous_or_low_precision_dates_absent()
     {
         var calls = 0;
-        object Binding(string id, string title, string developer, string date, string precision) => new { item = new { value = "http://www.wikidata.org/entity/" + id }, itemLabel = new { value = title }, developerLabel = new { value = developer }, date = new { value = date }, precision = new { value = precision } };
         using var http = new HttpClient(new Handler((request, _) => {
             calls++;
-            if (request.RequestUri!.Host == "www.wikidata.org") return Task.FromResult(Json(new { search = new[] { new { id = "Q1" }, new { id = "Q2" }, new { id = "Q3" }, new { id = "Q1 } SERVICE <https://invalid.test> {" } } }));
-            Assert.Equal("query.wikidata.org", request.RequestUri.Host); var query = Uri.UnescapeDataString(request.RequestUri.Query); Assert.Contains("VALUES ?item { wd:Q1 wd:Q2 wd:Q3 }", query); Assert.DoesNotContain("invalid.test", query); Assert.DoesNotContain("O'Brien", query);
-            return Task.FromResult(Json(new { results = new { bindings = new[] { Binding("Q1", "Verified title", "Studio B", "2024-02-29T00:00:00Z", "11"), Binding("Q1", "Verified title", "Studio A", "2024-03-01T00:00:00Z", "11"), Binding("Q2", "Q2", "Q44", "2024-01-01T00:00:00Z", "9"), Binding("Q3", "Another title", "Q44", "2024-02-29T00:00:00Z", "11"), Binding("Q3", "Another title", "Q44", "2024-01-01T00:00:00Z", "9") } } }));
+            Assert.Equal("www.wikidata.org", request.RequestUri!.Host);
+            var query = QueryHelpers.ParseQuery(request.RequestUri.Query);
+            if (query["action"] == "wbsearchentities") return Task.FromResult(Json(new { search = new[] { new { id = "Q1", label = "Verified title" }, new { id = "Q2", label = "Q2" }, new { id = "Q3", label = "Another title" }, new { id = "Q1 } SERVICE <https://invalid.test> {", label = "Unsafe" } } }));
+            if (query["props"] == "labels") return Task.FromResult(Json(new { entities = new Dictionary<string, object> { ["Q10"] = Entity("Studio A", []), ["Q11"] = Entity("Studio B", []) } }));
+            Assert.Equal("Q1|Q2|Q3", query["ids"].ToString()); Assert.DoesNotContain("invalid.test", query["ids"].ToString());
+            return Task.FromResult(Json(new { entities = new Dictionary<string, object> {
+                ["Q1"] = Entity("Verified title", new() { ["P31"] = [Claim(Item("Q7889"))], ["P178"] = [Claim(Item("Q11")), Claim(Item("Q10"))], ["P577"] = [Claim(new { time = "+2024-02-29T00:00:00Z", precision = 11 }), Claim(new { time = "+2024-03-01T00:00:00Z", precision = 11 })] }),
+                ["Q2"] = Entity("Q2", new() { ["P31"] = [Claim(Item("Q7889"))], ["P577"] = [Claim(new { time = "+2024-01-01T00:00:00Z", precision = 9 })] }),
+                ["Q3"] = Entity("Another title", new() { ["P31"] = [Claim(Item("Q7889"))], ["P577"] = [Claim(new { time = "+2024-02-29T00:00:00Z", precision = 11 }), Claim(new { time = "+2024-01-01T00:00:00Z", precision = 9 })] }) } }));
         })); using var cache = new MemoryCache(new MemoryCacheOptions());
-        var results = await Provider(http, cache).WikidataAsync("O'Brien { not SPARQL }", null, default);
-        Assert.Equal(2, calls); Assert.Equal(2, results.Count); Assert.Equal("Studio A, Studio B", results[0].Fields["developer"]); Assert.DoesNotContain("released", results[0].Fields.Keys);
+        var results = await Provider(http, cache).WikidataAsync("Verified title", null, default);
+        Assert.Equal(3, calls); Assert.Equal(2, results.Count); Assert.Equal("Studio A, Studio B", results[0].Fields["developer"]); Assert.DoesNotContain("released", results[0].Fields.Keys);
         Assert.Equal("2024-02-29", results[1].Fields["released"]); Assert.DoesNotContain("developer", results[1].Fields.Keys); Assert.All(results, result => Assert.Equal("wikidata", result.Identity.Source));
     }
 
@@ -125,9 +135,10 @@ public sealed class PublicGameMetadataProviderTests
             if (request.RequestUri!.Host == "store.steampowered.com") { steamReads++; return Task.FromResult(new HttpResponseMessage((HttpStatusCode)429) { Headers = { RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromMinutes(2)) } }); }
             wikiReads++; return Task.FromResult(Json(new { search = Array.Empty<object>() }));
         })); using var cache = new MemoryCache(new MemoryCacheOptions()); var provider = Provider(http, cache, clock: clock);
-        Assert.Empty(await provider.SearchSteamAsync("First", default)); Assert.Empty(await provider.SearchSteamAsync("Second", default)); Assert.Equal(1, steamReads);
+        Assert.Equal(120, (await Assert.ThrowsAsync<MetadataSourceUnavailableException>(() => provider.SearchSteamAsync("First", default))).RetryAfterSeconds);
+        await Assert.ThrowsAsync<MetadataSourceUnavailableException>(() => provider.SearchSteamAsync("Second", default)); Assert.Equal(1, steamReads);
         Assert.Empty(await provider.WikidataAsync("Another host", null, default)); Assert.Equal(1, wikiReads);
-        clock.Now += TimeSpan.FromMinutes(2); Assert.Empty(await provider.SearchSteamAsync("After cooldown", default)); Assert.Equal(2, steamReads);
+        clock.Now += TimeSpan.FromMinutes(2); await Assert.ThrowsAsync<MetadataSourceUnavailableException>(() => provider.SearchSteamAsync("After cooldown", default)); Assert.Equal(2, steamReads);
     }
 
     [Theory]
@@ -139,7 +150,75 @@ public sealed class PublicGameMetadataProviderTests
             var content = new StringContent(new string('x', 1_000_001)); if (!declared) content.Headers.ContentLength = null;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         })); using var cache = new MemoryCache(new MemoryCacheOptions());
-        Assert.Empty(await Provider(http, cache).SearchSteamAsync("Oversized fixture", default));
+        await Assert.ThrowsAsync<MetadataSourceUnavailableException>(() => Provider(http, cache).SearchSteamAsync("Oversized fixture", default));
+    }
+
+    [Fact]
+    public async Task Punctuation_sensitive_search_uses_bounded_keyword_discovery_but_returns_the_full_canonical_identity()
+    {
+        var searches = new List<string>();
+        using var http = new HttpClient(new Handler((request, _) => {
+            var query = QueryHelpers.ParseQuery(request.RequestUri!.Query);
+            if (query["action"] == "wbsearchentities")
+            {
+                searches.Add(query["search"].ToString());
+                return Task.FromResult(Json(new { search = searches.Count == 1 ? Array.Empty<object>() : [new { id = "Q133567959", label = "Tomodachi Life: Living the Dream" }] }));
+            }
+            return Task.FromResult(Json(new { entities = new Dictionary<string, object> { ["Q133567959"] = Entity("Tomodachi Life: Living the Dream", new() { ["P31"] = [Claim(Item("Q7889"))], ["P577"] = [Claim(new { time = "+2026-04-16T00:00:00Z", precision = 11 })] }) } }));
+        })); using var cache = new MemoryCache(new MemoryCacheOptions());
+        var result = Assert.Single(await Provider(http, cache).WikidataAsync("tomodachi life living the dream", null, default));
+        Assert.Equal(new[] { "tomodachi life living the dream", "tomodachi life" }, searches);
+        Assert.Equal("Tomodachi Life: Living the Dream", result.Identity.Name); Assert.Equal(2026, result.Identity.ReleaseYear); Assert.Equal("2026-04-16", result.Fields["released"]);
+    }
+
+    [Fact]
+    public async Task Explicit_Wikidata_id_does_not_depend_on_search_ranking_or_the_failing_SPARQL_endpoint()
+    {
+        using var http = new HttpClient(new Handler((request, _) => {
+            Assert.Equal("www.wikidata.org", request.RequestUri!.Host);
+            var query = QueryHelpers.ParseQuery(request.RequestUri.Query); Assert.Equal("wbgetentities", query["action"].ToString()); Assert.Equal("Q140140365", query["ids"].ToString());
+            return Task.FromResult(Json(new { entities = new Dictionary<string, object> { ["Q140140365"] = new { labels = new { mul = new { value = "The Legend of Zelda: Ocarina of Time" } }, claims = new Dictionary<string, object[]> { ["P31"] = [Claim(Item("Q7889"))], ["P577"] = [Claim(new { time = "+2026-11-05T00:00:00Z", precision = 11 })] } } } }));
+        })); using var cache = new MemoryCache(new MemoryCacheOptions());
+        var result = Assert.Single(await Provider(http, cache).WikidataAsync("A custom library title", null, default, "Q140140365"));
+        Assert.Equal(2026, result.Identity.ReleaseYear); Assert.Equal("2026-11-05", result.Fields["released"]);
+    }
+
+    [Theory]
+    [InlineData(403)]
+    [InlineData(404)]
+    [InlineData(429)]
+    [InlineData(502)]
+    public async Task Provider_failure_is_never_an_empty_search_or_permission_for_a_keyword_retry(int status)
+    {
+        var calls = 0;
+        using var http = new HttpClient(new Handler((_, _) => { calls++; return Task.FromResult(new HttpResponseMessage((HttpStatusCode)status)); })); using var cache = new MemoryCache(new MemoryCacheOptions());
+        await Assert.ThrowsAsync<MetadataSourceUnavailableException>(() => Provider(http, cache).WikidataAsync("A full game name", null, default)); Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task A_published_full_brand_alias_resolves_Wolverine_without_matching_the_unrelated_podcast()
+    {
+        using var http = new HttpClient(new Handler((request, _) => {
+            var query = QueryHelpers.ParseQuery(request.RequestUri!.Query);
+            if (query["action"] == "wbsearchentities") return Task.FromResult(Json(new { search = new[] { new { id = "Q108479474", label = "Wolverine" }, new { id = "Q48742103", label = "Wolverine: The Long Night" } } }));
+            return Task.FromResult(Json(new { entities = new Dictionary<string, object> {
+                ["Q108479474"] = new { labels = new { en = new { value = "Wolverine" } }, aliases = new { mul = new[] { new { value = "Marvel's Wolverine" }, new { value = "Marvels Wolverine" } } }, claims = new Dictionary<string, object[]> { ["P31"] = [Claim(Item("Q7889"))], ["P577"] = [Claim(new { time = "+2026-09-15T00:00:00Z", precision = 11 })] } },
+                ["Q48742103"] = Entity("Wolverine: The Long Night", new() { ["P31"] = [Claim(Item("Q24634210"))] }) } }));
+        })); using var cache = new MemoryCache(new MemoryCacheOptions());
+        var result = Assert.Single(await Provider(http, cache).WikidataAsync("Marvel’s Wolverine", null, default));
+        Assert.Equal("Marvel's Wolverine", result.Identity.Name); Assert.Equal("Q108479474", result.Identity.WikidataId); Assert.Equal(2026, result.Identity.ReleaseYear);
+    }
+
+    [Fact]
+    public async Task Direct_entity_JSON_keeps_bounded_video_game_subclass_support_without_SPARQL()
+    {
+        using var http = new HttpClient(new Handler((request, _) => {
+            var query = QueryHelpers.ParseQuery(request.RequestUri!.Query); Assert.Equal("www.wikidata.org", request.RequestUri.Host);
+            if (query["action"] == "wbsearchentities") return Task.FromResult(Json(new { search = new[] { new { id = "Q12345", label = "Verified subtype game" } } }));
+            if (query["props"] == "claims") { Assert.Equal("Q90000", query["ids"].ToString()); return Task.FromResult(Json(new { entities = new Dictionary<string, object> { ["Q90000"] = Entity("Fixture video game subtype", new() { ["P279"] = [Claim(Item("Q7889"))] }) } })); }
+            return Task.FromResult(Json(new { entities = new Dictionary<string, object> { ["Q12345"] = Entity("Verified subtype game", new() { ["P31"] = [Claim(Item("Q90000"))] }) } }));
+        })); using var cache = new MemoryCache(new MemoryCacheOptions());
+        Assert.Equal("Q12345", Assert.Single(await Provider(http, cache).WikidataAsync("Verified subtype game", null, default)).Identity.WikidataId);
     }
 
     [Fact]
