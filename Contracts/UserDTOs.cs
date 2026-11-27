@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using GamesDatabase.Api.Domain.Entities;
 
 namespace GamesDatabase.Api.Contracts;
@@ -30,6 +31,8 @@ public class LoginResponse
     public string Role { get; set; } = string.Empty;
     public string Token { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? PreferredLanguage { get; set; }
     public string? SteamId { get; set; }
     public string? SteamNickname { get; set; }
     public string? SteamAvatarUrl { get; set; }
@@ -64,6 +67,8 @@ public class CreateUserRequest
     [Required]
     public string Role { get; set; } = "Standard";
     public bool TutorialEnabled { get; set; } = true;
+    [RegularExpression("^(en|es)$", ErrorMessage = "invalidPreferredLanguage")]
+    public string? PreferredLanguage { get; set; }
 }
 
 public class UpdateUserRequest
@@ -79,6 +84,8 @@ public class UpdateUserRequest
 
     public bool? ShowPriceComparisonIcon { get; set; }
     public bool? TutorialEnabled { get; set; }
+    [RegularExpression("^(en|es)$", ErrorMessage = "invalidPreferredLanguage")]
+    public string? PreferredLanguage { get; set; }
 }
 
 public class ChangePasswordRequest
@@ -98,6 +105,8 @@ public class UserDto
     public string ScoreProvider { get; set; } = "Metacritic";
     public bool ShowPriceComparisonIcon { get; set; }
     public bool TutorialEnabled { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? PreferredLanguage { get; set; }
     public string? SteamId { get; set; }
     public string? SteamNickname { get; set; }
     public string? SteamAvatarUrl { get; set; }

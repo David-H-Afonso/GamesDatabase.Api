@@ -1831,6 +1831,11 @@ namespace GamesDatabase.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("password_hash");
 
+                    b.Property<string>("PreferredLanguage")
+                        .HasMaxLength(2)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("preferred_language");
+
                     b.Property<int>("Role")
                         .HasColumnType("INTEGER")
                         .HasColumnName("role");

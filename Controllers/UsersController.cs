@@ -40,6 +40,7 @@ public class UsersController : ControllerBase
 
     [HttpGet]
     [Authorize]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [Produces("application/json")]
     public async Task<ActionResult<List<UserDto>>> GetUsers()
     {
@@ -55,6 +56,7 @@ public class UsersController : ControllerBase
 
     [HttpGet("{id}")]
     [Authorize]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [Produces("application/json")]
     public async Task<ActionResult<UserDto>> GetUser(int id)
     {

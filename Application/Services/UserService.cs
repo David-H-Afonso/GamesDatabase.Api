@@ -34,6 +34,7 @@ public class UserService : IUserService
                 ScoreProvider = u.ScoreProvider,
                 ShowPriceComparisonIcon = u.ShowPriceComparisonIcon,
                 TutorialEnabled = u.TutorialEnabled,
+                PreferredLanguage = u.PreferredLanguage,
                 SteamId = u.SteamId,
                 SteamNickname = u.SteamNickname,
                 SteamAvatarUrl = u.SteamAvatarUrl,
@@ -70,6 +71,7 @@ public class UserService : IUserService
             ScoreProvider = user.ScoreProvider,
             ShowPriceComparisonIcon = user.ShowPriceComparisonIcon,
             TutorialEnabled = user.TutorialEnabled,
+            PreferredLanguage = user.PreferredLanguage,
             SteamId = user.SteamId,
             SteamNickname = user.SteamNickname,
             SteamAvatarUrl = user.SteamAvatarUrl,
@@ -85,6 +87,9 @@ public class UserService : IUserService
         if (currentUser == null || currentUser.Role != UserRole.Admin)
             return new CatalogServiceResult<UserDto> { StatusCode = 403, Error = "Admin access required" };
 
+        if (request.PreferredLanguage is not (null or "en" or "es"))
+            return CatalogServiceResult<UserDto>.BadRequest("invalidPreferredLanguage");
+
         if (await _context.Users.AnyAsync(u => u.Username.ToLower() == request.Username.ToLower()))
             return CatalogServiceResult<UserDto>.BadRequest("Username already exists");
 
@@ -96,6 +101,7 @@ public class UserService : IUserService
             Username = request.Username,
             Role = role,
             TutorialEnabled = request.TutorialEnabled,
+            PreferredLanguage = request.PreferredLanguage,
             PasswordHash = !string.IsNullOrEmpty(request.Password)
                 ? _authService.HashPassword(request.Password)
                 : null
@@ -104,7 +110,7 @@ public class UserService : IUserService
         _context.Users.Add(newUser);
         await _context.SaveChangesAsync();
 
-        await SeedUserDefaultDataAsync(newUser.Id);
+        await SeedUserDefaultDataAsync(newUser.Id, newUser.PreferredLanguage);
 
         return CatalogServiceResult<UserDto>.Ok(new UserDto
         {
@@ -117,6 +123,7 @@ public class UserService : IUserService
             ScoreProvider = newUser.ScoreProvider,
             ShowPriceComparisonIcon = newUser.ShowPriceComparisonIcon,
             TutorialEnabled = newUser.TutorialEnabled,
+            PreferredLanguage = newUser.PreferredLanguage,
             CreatedAt = newUser.CreatedAt,
             UpdatedAt = newUser.UpdatedAt
         });
@@ -134,6 +141,9 @@ public class UserService : IUserService
         var user = await _context.Users.FindAsync(id);
         if (user == null)
             return CatalogServiceResult.NotFoundResult($"User with ID {id} not found");
+
+        if (request.PreferredLanguage is not (null or "en" or "es"))
+            return CatalogServiceResult.BadRequest("invalidPreferredLanguage");
 
         if (currentUser.Role == UserRole.Admin)
         {
@@ -175,6 +185,11 @@ public class UserService : IUserService
         {
             user.ShowPriceComparisonIcon = request.ShowPriceComparisonIcon.Value;
         }
+
+        // An admin and the account owner can both make a new choice. Omitting the
+        // language preserves it; reading a browser preference never writes it back.
+        if (request.PreferredLanguage is not null)
+            user.PreferredLanguage = request.PreferredLanguage;
 
         if (request.TutorialEnabled.HasValue)
         {
@@ -264,8 +279,11 @@ public class UserService : IUserService
         };
     }
 
-    private async Task SeedUserDefaultDataAsync(int userId)
+    private async Task SeedUserDefaultDataAsync(int userId, string? language)
     {
+        string Label(string english, string spanish) => language == "es" ? spanish : english;
+        // Changing the interface language later must not rename saved catalog entries.
+        string ReplayLabel(string english, string spanish) => language == "en" ? english : spanish;
         var platforms = new List<GamePlatform>
         {
             new() { Name = "Steam", Color = "#2a475e", SortOrder = 1, UserId = userId },
@@ -275,34 +293,34 @@ public class UserService : IUserService
             new() { Name = "EA", Color = "#EA2020", SortOrder = 5, UserId = userId },
             new() { Name = "Ubisoft", Color = "#1472F1", SortOrder = 6, UserId = userId },
             new() { Name = "Battle.net", Color = "#009AE4", SortOrder = 7, UserId = userId },
-            new() { Name = "Emulator", Color = "#d12e2e", SortOrder = 8, UserId = userId },
+            new() { Name = Label("Emulator", "Emulador"), Color = "#d12e2e", SortOrder = 8, UserId = userId },
             new() { Name = "Nintendo Switch", Color = "#fe0016", SortOrder = 9, UserId = userId }
         };
 
         var statuses = new List<GameStatus>
         {
-            new() { Name = "Pending", Color = "#be9c23", SortOrder = 1, UserId = userId },
-            new() { Name = "Next up", Color = "#793e77", SortOrder = 2, UserId = userId },
-            new() { Name = "Playing", Color = "#61afef", SortOrder = 3, IsDefault = true, StatusType = SpecialStatusType.Playing, UserId = userId },
-            new() { Name = "Done", Color = "#3fc20f", SortOrder = 4, UserId = userId },
-            new() { Name = "Abandoned", Color = "#b91d1d", SortOrder = 5, UserId = userId },
-            new() { Name = "Not fulfilled", Color = "#919191", SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled, UserId = userId }
+            new() { Name = Label("Pending", "Pendiente"), Color = "#be9c23", SortOrder = 1, UserId = userId },
+            new() { Name = Label("Next up", "Lo próximo"), Color = "#793e77", SortOrder = 2, UserId = userId },
+            new() { Name = Label("Playing", "Jugando"), Color = "#61afef", SortOrder = 3, IsDefault = true, StatusType = SpecialStatusType.Playing, UserId = userId },
+            new() { Name = Label("Done", "Terminado"), Color = "#3fc20f", SortOrder = 4, UserId = userId },
+            new() { Name = Label("Abandoned", "Abandonado"), Color = "#b91d1d", SortOrder = 5, UserId = userId },
+            new() { Name = Label("Not fulfilled", "Sin completar"), Color = "#919191", SortOrder = 6, IsDefault = true, StatusType = SpecialStatusType.NotFulfilled, UserId = userId }
         };
 
         var playWiths = new List<GamePlayWith>
         {
             new() { Name = "Solo", Color = "#24c2b7", SortOrder = 1, UserId = userId },
-            new() { Name = "Friends", Color = "#ab32ec", SortOrder = 2, UserId = userId },
-            new() { Name = "Family", Color = "#099012", SortOrder = 3, UserId = userId }
+            new() { Name = Label("Friends", "Amigos"), Color = "#ab32ec", SortOrder = 2, UserId = userId },
+            new() { Name = Label("Family", "Familia"), Color = "#099012", SortOrder = 3, UserId = userId }
         };
 
         var playedStatuses = new List<GamePlayedStatus>
         {
-            new() { Name = "None", Color = "#b5b5b5", SortOrder = 1, UserId = userId },
-            new() { Name = "Some", Color = "#873ed0", SortOrder = 2, UserId = userId },
-            new() { Name = "Almost", Color = "#cc1eb5", SortOrder = 3, UserId = userId },
-            new() { Name = "Completed", Color = "#2ed42b", SortOrder = 4, UserId = userId },
-            new() { Name = "Abandoned", Color = "#a60808", SortOrder = 5, UserId = userId }
+            new() { Name = Label("None", "Nada"), Color = "#b5b5b5", SortOrder = 1, UserId = userId },
+            new() { Name = Label("Some", "Un poco"), Color = "#873ed0", SortOrder = 2, UserId = userId },
+            new() { Name = Label("Almost", "Casi"), Color = "#cc1eb5", SortOrder = 3, UserId = userId },
+            new() { Name = Label("Completed", "Completado"), Color = "#2ed42b", SortOrder = 4, UserId = userId },
+            new() { Name = Label("Abandoned", "Abandonado"), Color = "#a60808", SortOrder = 5, UserId = userId }
         };
 
         if (!await _context.GamePlatforms.AnyAsync(p => p.UserId == userId))
@@ -328,12 +346,12 @@ public class UserService : IUserService
         if (!await _context.GameReplayTypes.AnyAsync(rt => rt.UserId == userId))
         {
             _context.GameReplayTypes.AddRange(
-                new GameReplayType { Name = "Rejugado", Color = "#61afef", SortOrder = 1, IsDefault = true, ReplayType = SpecialReplayType.Replay, UserId = userId },
+                new GameReplayType { Name = ReplayLabel("Replay", "Rejugado"), Color = "#61afef", SortOrder = 1, IsDefault = true, ReplayType = SpecialReplayType.Replay, UserId = userId },
                 new GameReplayType { Name = "DLC", Color = "#c678dd", SortOrder = 2, UserId = userId },
-                new GameReplayType { Name = "Expansión", Color = "#98c379", SortOrder = 3, UserId = userId },
+                new GameReplayType { Name = ReplayLabel("Expansion", "Expansión"), Color = "#98c379", SortOrder = 3, UserId = userId },
                 new GameReplayType { Name = "NG+", Color = "#e5c07b", SortOrder = 4, UserId = userId },
                 new GameReplayType { Name = "100%", Color = "#e06c75", SortOrder = 5, UserId = userId },
-                new GameReplayType { Name = "Logros", Color = "#56b6c2", SortOrder = 6, UserId = userId }
+                new GameReplayType { Name = ReplayLabel("Achievements", "Logros"), Color = "#56b6c2", SortOrder = 6, UserId = userId }
             );
         }
 

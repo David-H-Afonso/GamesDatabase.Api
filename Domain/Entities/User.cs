@@ -31,6 +31,7 @@ public class User
     public bool ShowPriceComparisonIcon { get; set; } = false;
     // Existing accounts stay uninterrupted; new users explicitly choose the guide.
     public bool TutorialEnabled { get; set; }
+    public string? PreferredLanguage { get; set; }
 
     // Steam integration
     public string? SteamId { get; set; }

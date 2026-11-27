@@ -52,6 +52,7 @@ public class AuthService : IAuthService
             Role = user.Role.ToString(),
             Token = accessToken,
             RefreshToken = refreshToken,
+            PreferredLanguage = user.PreferredLanguage,
             SteamId = user.SteamId,
             SteamNickname = user.SteamNickname,
             SteamAvatarUrl = user.SteamAvatarUrl
