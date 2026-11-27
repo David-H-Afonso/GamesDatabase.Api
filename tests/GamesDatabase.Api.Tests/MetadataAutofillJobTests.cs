@@ -270,12 +270,26 @@ public sealed class MetadataAutofillJobTests(GamesDatabaseApiFactory factory) : 
     public async Task Results_remain_available_until_explicitly_dismissed_and_summary_can_omit_items()
     {
         using var host = Host(new()); var owner = await Seed(host.Services, host.CreateClient(), 1); var job = await Start(owner);
-        Assert.Equal(HttpStatusCode.Conflict, (await owner.Client.PostAsync($"{Route}/{job.Id}/dismiss", null)).StatusCode);
         await Step(host.Services);
         var summary = (await owner.Client.GetFromJsonAsync<MetadataAutofillJobDto>(Route + "/current?includeItems=false"))!; Assert.Empty(summary.Items); Assert.Equal(1, summary.TotalGames);
         (await owner.Client.PostAsync($"{Route}/{job.Id}/dismiss", null)).EnsureSuccessStatusCode();
         Assert.Null(await owner.Client.GetFromJsonAsync<MetadataAutofillJobDto>(Route + "/current"));
         Assert.Single((await Read(owner, job.Id)).Items);
+    }
+
+    [Fact]
+    public async Task Hiding_active_work_does_not_cancel_it_and_review_results_stay_recoverable_without_resurrecting_old_banners()
+    {
+        using var host = Host(new() { Ambiguous = true }); var owner = await Seed(host.Services, host.CreateClient(), 1);
+        var old = await Start(owner); await Step(host.Services); Assert.Equal(1, (await Read(owner, old.Id)).ReviewGames);
+        var job = await Start(owner);
+        (await owner.Client.PostAsync($"{Route}/{job.Id}/dismiss", null)).EnsureSuccessStatusCode();
+        var hidden = await Read(owner, job.Id); Assert.True(hidden.Active); Assert.True(hidden.Dismissed); Assert.NotEqual("cancelled", hidden.State);
+        await Step(host.Services); var complete = await Read(owner, job.Id);
+        Assert.False(complete.Active); Assert.True(complete.Dismissed); Assert.Equal(1, complete.ReviewGames); Assert.Single(complete.Items);
+        Assert.Null(await owner.Client.GetFromJsonAsync<MetadataAutofillJobDto>(Route + "/current"));
+        var history = (await owner.Client.GetFromJsonAsync<List<MetadataAutofillJobDto>>(Route))!;
+        Assert.Contains(history, value => value.Id == old.Id); Assert.Contains(history, value => value.Id == job.Id && value.Dismissed);
     }
 
     [Fact]

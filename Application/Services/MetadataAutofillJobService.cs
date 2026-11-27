@@ -103,8 +103,8 @@ public sealed class MetadataAutofillJobService(GamesDbContext db, IGameMetadataS
 
     public async Task<MetadataAutofillJobDto?> CurrentAsync(int userId, bool includeItems = true, CancellationToken token = default)
     {
-        var job = await db.MetadataAutofillJobs.AsNoTracking().Where(job => job.UserId == userId && (!job.Dismissed || job.ActiveUserId != null)).OrderByDescending(job => job.ActiveUserId != null).ThenByDescending(job => job.CreatedAt).FirstOrDefaultAsync(token);
-        return job is null ? null : Snapshot(job, includeItems);
+        var job = await db.MetadataAutofillJobs.AsNoTracking().Where(job => job.UserId == userId).OrderByDescending(job => job.ActiveUserId != null).ThenByDescending(job => job.CreatedAt).FirstOrDefaultAsync(token);
+        return job is null || job.Dismissed && job.ActiveUserId is null ? null : Snapshot(job, includeItems);
     }
     public async Task<MetadataAutofillJobDto?> GetAsync(int userId, Guid jobId, bool includeItems = true, CancellationToken token = default)
     {
@@ -151,7 +151,6 @@ public sealed class MetadataAutofillJobService(GamesDbContext db, IGameMetadataS
     {
         var job = await Owned(userId, jobId, token);
         if (job is null) return Missing<MetadataAutofillJobDto>();
-        if (job.ActiveUserId.HasValue) return Conflict<MetadataAutofillJobDto>("metadataJobStillActive");
         job.Dismissed = true; job.Revision++; job.UpdatedAt = Now;
         await db.SaveChangesAsync(token);
         return CatalogServiceResult<MetadataAutofillJobDto>.Ok(Snapshot(job));
