@@ -300,11 +300,19 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GamesDatabase/3.0 (+https://github.com/David-H-Afonso/GamesDatabase.Api)");
         }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = System.Net.DecompressionMethods.All });
+        services.AddSingleton<IGameDurationProvider, DekuDealsDurationProvider>();
+        services.AddHttpClient("game-durations", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(8);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GamesDatabase/3.0 (+https://github.com/David-H-Afonso/GamesDatabase.Api)");
+            client.DefaultRequestHeaders.Accept.ParseAdd("text/html");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, AutomaticDecompression = System.Net.DecompressionMethods.All });
         services.AddScoped<IGameImportExportService, GameImportExportService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IHouseholdIntegrationService, HouseholdIntegrationService>();
         services.AddHttpClient();
         services.AddScoped<IZipExportService, ZipExportService>();
+        services.AddExportMediaDownloads(configuration);
         services.AddScoped<INetworkSyncService, NetworkSyncService>();
         services.AddScoped<IGameHistoryService, GameHistoryService>();
         services.AddScoped<IGameReplayService, GameReplayService>();
@@ -422,12 +430,13 @@ public static class ServiceCollectionExtensions
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-            options.AddFixedWindowLimiter("auth", limiterOptions =>
-            {
-                limiterOptions.PermitLimit = 10;
-                limiterOptions.Window = TimeSpan.FromMinutes(1);
-                limiterOptions.QueueLimit = 0;
-            });
+            // Use only the server's connection identity, never caller-supplied
+            // X-Forwarded-For/Forwarded headers. Normalize mapped IPv4 addresses.
+            options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress is { } address
+                    ? (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString()
+                    : "unknown-connection",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 
             options.AddFixedWindowLimiter("integration", limiterOptions =>
             {

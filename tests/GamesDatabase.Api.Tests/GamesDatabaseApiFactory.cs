@@ -3,6 +3,7 @@ using GamesDatabase.Api.Domain.Entities;
 using GamesDatabase.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +38,7 @@ public sealed class GamesDatabaseApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.ConfigureTestServices(services => services.AddSingleton<IGameDurationProvider>(new NoExternalDurations()));
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -53,6 +55,15 @@ public sealed class GamesDatabaseApiFactory : WebApplicationFactory<Program>
                 ["HouseholdIntegration:AuthorizationCodeMinutes"] = "5"
             });
         });
+    }
+
+    private sealed class NoExternalDurations : IGameDurationProvider
+    {
+        public Task<GameDurationLookup> LookupAsync(string name, string? selectedSlug, CancellationToken token, bool forceRefresh = false)
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(new GameDurationLookup());
+        }
     }
 
     public async Task EnsureSeededAsync()

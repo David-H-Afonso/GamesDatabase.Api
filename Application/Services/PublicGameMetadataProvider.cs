@@ -59,7 +59,7 @@ public sealed class PublicGameMetadataProvider(IHttpClientFactory clients, IStea
         if (details.Name.Length <= 250) result.Fields["name"] = details.Name.Trim();
         if (details.Developer?.Trim() is { Length: > 0 and <= 150 } developer) result.Fields["developer"] = developer;
         if (GameDateNormalizer.NormalizeSteamReleaseDate(details.ReleaseDate) is { } date) result.Fields["released"] = date;
-        if (details.MetacriticScore is >= 0 and <= 100) result.Fields["critic"] = details.MetacriticScore.Value;
+        if (details.MetacriticScore is >= 0 and <= 100) { result.Fields["critic"] = details.MetacriticScore.Value; result.CriticProvider = "Metacritic"; result.CriticScope = "steam-edition"; }
         if (includeArtwork)
         {
             try

@@ -6,6 +6,10 @@ public sealed class PublicGameMetadata
 {
     public GameMetadataIdentityDto Identity { get; set; } = new();
     public Dictionary<string, object> Fields { get; set; } = [];
+    public Dictionary<string, decimal> SourceHours { get; set; } = [];
+    public string? CriticProvider { get; set; }
+    public string? CriticUrl { get; set; }
+    public string? CriticScope { get; set; }
 }
 public interface IPublicGameMetadataProvider
 {
